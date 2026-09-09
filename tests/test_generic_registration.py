@@ -223,11 +223,13 @@ class TestVDPRegistration:
         from tilewright.register import _register_one_entity
 
         ent_df, art_df, base_dir = vdp_manifests
+        art_df = art_df.assign(file_mtime="2026-09-01T00:00:00+00:00")   # what manifest saw
         rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
         parent = MagicMock()
         parent.__contains__.return_value = True
         nodes = on_server(rows)
         nodes[0][1].metadata["file_mtime"] = "2020-01-01T00:00:00+00:00"   # older on the server
+        parent.__getitem__.return_value.items.return_value = nodes
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
