@@ -1,6 +1,6 @@
 [project]
 name = "tilewright"
-version = "0.1.0"
+version = "0.2.0"
 description = "Register multi-entity scientific HDF5 datasets into a Tiled catalog from one YAML contract."
 readme = "README.md"
 license = "Apache-2.0"
