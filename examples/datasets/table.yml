@@ -1,0 +1,29 @@
+# table: the rows of a sidecar table are the entities. For data Tiled cannot read
+# (compressed event files, remote objects): the catalog holds the metadata and a locator,
+# never an array.
+#
+#   /abs/path/to/cncs/
+#   ├── runs.parquet          one row per run: run_number, Ei, temperature, filename, ...
+#   ├── run_331525.mcpl.gz
+#   └── ...
+#
+# Every column becomes entity metadata; `locator` adds rendered columns. Identity is the
+# `id` column. Expected: entities = rows, artifacts = 0.
+
+label: Example Table
+key: EXAMPLE_TABLE
+
+metadata:
+  method: [INS]
+  data_type: experimental
+  material: NiPS3
+  facility: SNS
+  instrument: CNCS
+
+source:
+  table:
+    directory: /abs/path/to/cncs
+    path: runs.parquet
+    id: run_number
+    locator:
+      globus_url: "https://app.globus.org/file-manager?origin_path=/cncs/{filename}"

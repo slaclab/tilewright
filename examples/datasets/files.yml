@@ -1,0 +1,38 @@
+# files: one HDF5 file per entity.
+#
+#   /abs/path/to/runs/
+#   ├── run_0001.h5
+#   │   ├── /tenDq        ()            → parameter (0-dim dataset at the root)
+#   │   ├── /sigma        ()            → parameter
+#   │   ├── /spectrum     (151, 40)     → artifact
+#   │   └── /energy       (151,)        → shared axis (identical in every file)
+#   ├── run_0002.h5
+#   └── ...
+#
+# Expected from `tilewright manifest`: entities = files matched, artifacts = entities × 1.
+
+label: Example Files
+key: EXAMPLE_FILES                 # written by `tilewright manifest`; shown so the example is complete
+
+metadata:
+  method: [RIXS]
+  data_type: simulation
+  material: NiPS3
+  producer: edrixs
+  project: MAIQMag
+  contact: "Ada Lovelace <ada@example.org>"
+  description: "Ten thousand EDRIXS spectra of NiPS3 over a tenDq and sigma grid."
+
+source:
+  files:
+    directory: /abs/path/to/runs
+    pattern: "*.h5"
+    # params defaults to {group: /, from: datasets}: every 0-dim dataset at the root.
+    # params: {group: /, from: attrs}      # root attributes instead
+    # params: null                         # no per-entity parameters (identity: provenance)
+
+artifacts:
+  - {type: spectrum, dataset: /spectrum}
+
+shared:
+  - {type: energy, dataset: /energy}

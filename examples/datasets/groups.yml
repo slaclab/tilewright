@@ -1,0 +1,32 @@
+# groups: one HDF5 group per entity inside a file.
+#
+#   /abs/path/to/grouped/samples.h5
+#   └── /samples/
+#       ├── sample_000/
+#       │   ├── spectrum      (151, 40)   → artifact; `dataset` is relative to the entity group
+#       │   └── params/
+#       │       ├── tenDq     ()          → parameter
+#       │       └── F2_dd     ()
+#       ├── sample_001/ ...
+#
+# Expected: entities = subgroups of /samples over all files, artifacts = entities × 1.
+
+label: Example Groups
+key: EXAMPLE_GROUPS
+
+metadata:
+  method: [RIXS]
+  data_type: simulation
+  material: NiPS3
+  producer: edrixs
+  project: MAIQMag
+
+source:
+  groups:
+    directory: /abs/path/to/grouped
+    pattern: "*.h5"
+    entity_group: /samples           # omit to treat each file's top-level groups as entities
+    params: {group: params}          # relative to each entity group
+
+artifacts:
+  - {type: spectrum, dataset: spectrum}

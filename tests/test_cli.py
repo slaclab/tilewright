@@ -1,77 +1,62 @@
-"""Unit tests for CLI helpers — _require_key and stamp_key_main.
+"""CLI helpers that do not need a server: dataset-container metadata, manifest lookup,
+and the dispatcher."""
 
-Run with: uv run --with pytest pytest tests/test_cli.py -v
-"""
-
+import subprocess
 import sys
-from unittest.mock import patch
 
 import pytest
+from ruamel.yaml import YAML
 
-from tilewright.cli import _require_key, stamp_key_main
+from tilewright.cli import _build_dataset_metadata, _find_manifests
+from tilewright.contract import load_dataset
 
-
-class TestRequireKey:
-    """Read-only validator: errors and exits if key is missing or drifted."""
-
-    def test_valid_key(self):
-        config = {"label": "Broad Sigma", "key": "BROAD_SIGMA"}
-        assert _require_key(config, "test.yml") == "BROAD_SIGMA"
-
-    def test_missing_key_exits_with_hint(self, capsys):
-        config = {"label": "Broad Sigma"}
-        with pytest.raises(SystemExit) as exc:
-            _require_key(config, "test.yml")
-        assert exc.value.code == 1
-        err = capsys.readouterr().err
-        assert "missing 'key'" in err
-        assert "tilewright stamp-key" in err
-
-    def test_drifted_key_exits(self, capsys):
-        config = {"label": "Broad Sigma", "key": "OLD_NAME"}
-        with pytest.raises(SystemExit) as exc:
-            _require_key(config, "test.yml")
-        assert exc.value.code == 1
-        assert "does not match" in capsys.readouterr().err
-
-    def test_missing_label_exits(self):
-        with pytest.raises(SystemExit) as exc:
-            _require_key({}, "test.yml")
-        assert exc.value.code == 1
+META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
 
 
-class TestStampKeyMain:
-    """End-to-end tests for `tilewright stamp-key`."""
+def test_build_dataset_metadata_keeps_extras_and_adds_shared_locators():
+    cfg, _ = load_dataset({
+        "label": "X", "metadata": {**META, "prior_distribution": "uniform", "contact": "A <a@b>"},
+        "source": {"files": {"directory": "/d"}},
+        "artifacts": [{"type": "s", "dataset": "/s"}],
+        "shared": [{"type": "energy", "dataset": "/energy"}]})
+    md = _build_dataset_metadata(cfg)
+    assert md["prior_distribution"] == "uniform" and md["contact"] == "A <a@b>"
+    assert md["shared_dataset_energy"] == "/energy"
+    assert "producer" not in md  # None fields are not written
 
-    def _run(self, *args):
-        with patch.object(sys, "argv", ["tilewright stamp-key", *args]):
-            stamp_key_main()
 
-    def test_stamps_fresh_yaml(self, tmp_path):
-        yaml_path = tmp_path / "fresh.yml"
-        yaml_path.write_text('label: "Broad Sigma"\n')
-        self._run(str(yaml_path))
-        content = yaml_path.read_text()
-        assert "key: BROAD_SIGMA" in content
-        assert "Broad Sigma" in content  # label preserved
+def test_find_manifests_uses_the_key_layout(tmp_path):
+    ds = tmp_path / ".tilewright" / "datasets"
+    ds.mkdir(parents=True)
+    yaml_path = ds / "K.yml"
+    yaml_path.write_text("label: K\n")
+    assert _find_manifests(yaml_path, "K") == (None, None)
+    m = tmp_path / ".tilewright" / "manifests" / "K"
+    m.mkdir(parents=True)
+    (m / "entities.parquet").touch()
+    (m / "artifacts.parquet").touch()
+    assert _find_manifests(yaml_path, "K") == (m / "entities.parquet", m / "artifacts.parquet")
 
-    def test_idempotent_on_correct_key(self, tmp_path, capsys):
-        yaml_path = tmp_path / "stamped.yml"
-        yaml_path.write_text('key: BROAD_SIGMA\nlabel: "Broad Sigma"\n')
-        before = yaml_path.read_text()
-        self._run(str(yaml_path))
-        assert "already correct" in capsys.readouterr().out
-        assert yaml_path.read_text() == before
 
-    def test_drifted_key_exits(self, tmp_path, capsys):
-        yaml_path = tmp_path / "drift.yml"
-        yaml_path.write_text('key: OLD_NAME\nlabel: "Broad Sigma"\n')
-        with pytest.raises(SystemExit) as exc:
-            self._run(str(yaml_path))
-        assert exc.value.code == 1
-        assert "does not match" in capsys.readouterr().err
+def test_dispatcher_lists_three_commands():
+    out = subprocess.run([sys.executable, "-m", "tilewright.cli", "--help"],
+                         capture_output=True, text=True).stdout
+    assert [c for c in ("manifest", "register", "delete") if c in out] == ["manifest", "register", "delete"]
+    assert "stamp-key" not in out and "generate" not in out
 
-    def test_missing_file_exits(self, tmp_path):
-        with pytest.raises(SystemExit) as exc:
-            self._run(str(tmp_path / "nope.yml"))
-        assert exc.value.code == 1
+
+def test_register_refuses_a_yaml_without_key_before_touching_the_network(tmp_path, capsys, monkeypatch):
+    from tilewright.cli import register_main
+
+    yaml_path = tmp_path / "ds.yml"
+    with open(yaml_path, "w") as f:
+        YAML().dump({"label": "No Key", "metadata": META,
+                     "source": {"files": {"directory": "/d"}},
+                     "artifacts": [{"type": "s", "dataset": "/s"}]}, f)
+    monkeypatch.setattr(sys, "argv", ["tilewright register", str(yaml_path),
+                                      "--url", "http://127.0.0.1:1", "--api-key", "x"])
+    with pytest.raises(SystemExit) as exc:
+        register_main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "tilewright manifest" in err and "Cannot reach" not in err

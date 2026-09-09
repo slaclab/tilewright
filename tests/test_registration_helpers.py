@@ -1,7 +1,6 @@
 """Unit tests for registration helper functions.
 
 Covers:
-- cli._build_dataset_metadata: tolerates an empty/None provenance block.
 - http_register.verify_registration_http: walks the full three-level
   hierarchy (root -> dataset -> entity -> artifact) without crashing.
 
@@ -10,38 +9,7 @@ Run with: uv run --with pytest pytest tests/test_registration_helpers.py -v
 
 from unittest.mock import MagicMock
 
-from tilewright.cli import _build_dataset_metadata
 from tilewright.register import verify_registration_http
-
-
-# ---------- _build_dataset_metadata: provenance None guard ----------
-
-def test_build_dataset_metadata_provenance_none():
-    """An all-commented `provenance:` block parses as None — must not crash."""
-    config = {"metadata": {"label": "X"}, "provenance": None}
-    result = _build_dataset_metadata(config, "X")
-    assert result == {"label": "X"}
-
-
-def test_build_dataset_metadata_provenance_missing():
-    """Missing `provenance:` key is also fine."""
-    config = {"metadata": {"label": "X"}}
-    result = _build_dataset_metadata(config, "X")
-    assert result == {"label": "X"}
-
-
-def test_build_dataset_metadata_provenance_populated():
-    """Populated provenance is merged into the metadata dict."""
-    config = {
-        "metadata": {"label": "X"},
-        "provenance": {"created_at": "2026-04-28", "code_version": "1.2.3"},
-    }
-    result = _build_dataset_metadata(config, "X")
-    assert result == {
-        "label": "X",
-        "created_at": "2026-04-28",
-        "code_version": "1.2.3",
-    }
 
 
 # ---------- verify_registration_http: walks the full hierarchy ----------

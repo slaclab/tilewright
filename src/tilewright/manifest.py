@@ -1,250 +1,232 @@
-"""
-Generic manifest generator.
+"""``tilewright manifest``: a dataset YAML -> its two Parquet manifests.
 
-Reads a finalized YAML contract and produces Parquet manifests
-(entities.parquet and artifacts.parquet) for Tiled registration.
+Reads the contract (``contract.py``), walks the data once, and writes
+``entities.parquet`` (uid + one column per parameter) and ``artifacts.parquet`` (uid,
+type, file, dataset, index, shape, dtype, ...; a ``shared:`` axis is a row with no uid).
+Shape and dtype are captured here so registration never opens a file.
 
-The output manifests follow the broker standard:
-  Entity manifest:  uid, key, <param_1>, <param_2>, ...
-  Artifact manifest: uid (= entity uid), type, file, dataset, [index], shape, dtype
-                     — a `shared:` axis is a row with uid None: an artifact of the
-                     dataset container rather than of an entity.
+Also the step that derives the catalog key: if the YAML has no ``key:``, slug(label) is
+written into it. Identity follows ADR-0007: parameter-value hash by default, provenance
+hash on request or when there are no parameters; duplicate uids are a hard error here,
+never a silent merge at registration.
 
-`shape` and `dtype` are read from the HDF5 here, at generate time, so that
-registration never has to open the files (ADR-0002 keeps one registration route;
-this keeps that route free of HDF5 I/O). For batched layouts `shape` is the
-per-entity shape — the leading axis is already dropped.
-
-Handles three layout patterns:
-  - per_entity: one HDF5 file per entity, scalars are parameters
-  - batched: entities stacked along axis-0 of datasets in each file
-  - grouped: one HDF5 group per entity inside a single file
-
-Supports four parameter locations:
-  - root_scalars: scalar HDF5 datasets at file root
-  - root_attributes: HDF5 root-level file attributes (f.attrs)
-  - group: datasets inside one named HDF5 group (`group: /params`, flat metadata) or
-    several (`groups: {instrument: /entry/instrument, ...}`, nested under each name)
-  - group_scalars: scalars inside entity groups (grouped layout)
-
-A captured field's scalar HDF5 attributes (units, long_name, ...) ride along as
-`<field>_<attr>` labels; an artifact's attributes become its array node's metadata.
-Labels are stored, not hashed: the entity UID is content-addressed from the parameter
-*values* only. Nested metadata is carried as dotted manifest columns
-(`instrument.Ei`) that registration unflattens.
-
-Usage:
-    tilewright generate datasets/edrixs_sbi.yml
-    tilewright generate datasets/edrixs_sbi.yml --append
+    tilewright manifest .tilewright/datasets/<KEY>.yml            # -> .tilewright/manifests/<KEY>/
+    tilewright manifest <yaml> --check                             # validate only
 """
 
-import os
-import sys
-import json
-import hashlib
 import argparse
 import datetime
-from pathlib import Path
+import hashlib
+import json
+import os
+import sys
 from collections import OrderedDict
+from pathlib import Path
 
 import h5py
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from .utils import ARTIFACT_STANDARD_COLS
 from .contract import (
-    ArtifactSpec, DatasetConfig, Layout, ParametersSection, ParamLocation, SharedAxisSpec,
+    ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec, SharedAxisSpec,
+    load_dataset, slugify_key, source_fingerprint,
 )
-from .vocabulary import validate
+from .utils import ARTIFACT_STANDARD_COLS
+
+# Column order of artifacts.parquet; any further column is metadata on the array node.
+ARTIFACT_COLUMNS = ["uid", "type", "file", "dataset", "index", "file_size", "file_mtime",
+                    "shape", "dtype"]
 
 
-def load_yaml(yaml_path):
-    """Load and validate a dataset YAML config."""
-    yaml = YAML()
+# ---------------------------------------------------------------------------
+# YAML in, key out
+# ---------------------------------------------------------------------------
+
+def _yaml():
+    y = YAML()
+    y.preserve_quotes = True
+    return y
+
+
+def read_yaml(yaml_path):
+    """Load a dataset YAML (comments preserved). Returns ``(cfg, raw, warnings)``.
+
+    Prints nothing; raises ``ContractError`` on any contract problem.
+    """
     with open(yaml_path) as f:
-        cfg = yaml.load(f)
-    warnings = validate(cfg)
-    for w in warnings:
-        print(f"  Warning: {w}")
-    return cfg
+        raw = _yaml().load(f)
+    cfg, warnings = load_dataset(raw)
+    return cfg, raw, warnings
 
 
-def compute_config_hash(yaml_path):
-    """Compute SHA256 hash of a YAML config file's content."""
-    with open(yaml_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+def stamp_key(yaml_path, raw, key):
+    """Write ``key:`` into the YAML right after ``label:`` (comments kept)."""
+    if raw.get("key") == key:
+        return False
+    pos = list(raw.keys()).index("label") + 1 if "label" in raw else 0
+    raw.insert(pos, "key", key)
+    with open(yaml_path, "w") as f:
+        _yaml().dump(raw, f)
+    return True
 
 
-def _file_fingerprint(path):
-    """Return (size_bytes, mtime_iso) for a file path."""
-    stat = os.stat(path)
-    mtime = datetime.datetime.fromtimestamp(
-        stat.st_mtime, tz=datetime.timezone.utc
-    ).isoformat()
-    return stat.st_size, mtime
+def manifest_dir(yaml_path, key):
+    """Where a YAML's manifests go: ``<root>/manifests/<KEY>/`` where ``<root>`` is the
+    YAML's directory, or its parent when the YAML sits in a ``datasets/`` directory (the
+    ``.tilewright/datasets/<KEY>.yml`` -> ``.tilewright/manifests/<KEY>/`` layout)."""
+    here = Path(yaml_path).resolve().parent
+    root = here.parent if here.name == "datasets" else here
+    return root / "manifests" / key
 
+
+# ---------------------------------------------------------------------------
+# generation
+# ---------------------------------------------------------------------------
 
 def generate_manifests(yaml_path, output_dir=None, append=False):
-    """Generate entity and artifact manifests from a YAML config.
+    """Generate the two manifests for one YAML. Returns ``(entities_path, artifacts_path)``.
 
-    Args:
-        yaml_path: Path to the finalized YAML config.
-        output_dir: Directory for output Parquet files (default: manifests/<label>/).
-        append: If True, skip entities already in existing manifests and
-            merge new entities with the existing ones.
-
-    Returns:
-        (str, str): Paths to entities.parquet and artifacts.parquet.
+    Writes ``key:`` into the YAML when absent. Raises ``ContractError`` for contract
+    problems and ``ValueError``/``KeyError`` with the file and path named for data
+    problems.
     """
-    cfg = load_yaml(yaml_path)
-    config = DatasetConfig.model_validate(cfg)
-    config_hash = compute_config_hash(yaml_path)
+    cfg, raw, warnings = read_yaml(yaml_path)
+    for w in warnings:
+        print(f"  note: {w}")
+    key = cfg.catalog_key
+    if stamp_key(yaml_path, raw, key):
+        print(f"  key: '{key}' written into {yaml_path} (slug of label '{cfg.label}')")
 
-    key_prefix = config.key
-    layout = config.data.layout
+    output_dir = Path(output_dir) if output_dir else manifest_dir(yaml_path, key)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    if output_dir is None:
-        output_dir = os.path.join(
-            os.path.dirname(yaml_path) or ".", "manifests", config.label
-        )
-    os.makedirs(output_dir, exist_ok=True)
-
-    if cfg.get("extra_metadata"):
-        print("WARNING: `extra_metadata` is no longer supported and is ignored. Capture "
-              "per-entity scalars with `parameters.groups` (docs/ONBOARDING.md §2).")
-
-    # Load existing UIDs for append mode
     existing_uids = set()
-    if append:
-        existing_ent_path = os.path.join(output_dir, "entities.parquet")
-        if os.path.exists(existing_ent_path):
-            existing_df = pd.read_parquet(existing_ent_path, columns=["uid"])
-            existing_uids = set(existing_df["uid"])
-            print(f"  Append mode: {len(existing_uids)} existing entities will be skipped")
+    ent_path, art_path = output_dir / "entities.parquet", output_dir / "artifacts.parquet"
+    if append and ent_path.exists():
+        existing_uids = set(pd.read_parquet(ent_path, columns=["uid"])["uid"])
+        print(f"  append: {len(existing_uids)} existing entities will be skipped")
 
-    # Find HDF5 files
-    root = Path(config.data.directory)
-    h5_files = sorted(root.glob(config.data.file_pattern))
-    if not h5_files:
-        h5_files = sorted(root.rglob(config.data.file_pattern))
-    if not h5_files:
-        print(
-            f"Error: No HDF5 files matching '{config.data.file_pattern}' "
-            f"in {config.data.directory}"
-        )
-        sys.exit(1)
-    print(f"Found {len(h5_files)} HDF5 files")
+    tag, body = cfg.source.tag, cfg.source.body
+    identity = cfg.source.identity
+    walker = _Walker(cfg, existing_uids)
+    if tag == "table":
+        ent_rows, art_rows, shared_rows = walker.table(), [], []
+    else:
+        files = _find_files(body.directory, body.pattern)
+        print(f"  {len(files)} files match {body.pattern!r} under {body.directory}")
+        ent_rows, art_rows = {"files": walker.files, "batch": walker.batch,
+                              "groups": walker.groups}[tag](files)
+        shared_rows = _shared_axis_rows(files, Path(body.directory), cfg.shared)
 
-    generators = {
-        Layout.per_entity: _generate_per_entity,
-        Layout.batched: _generate_batched,
-        Layout.grouped: _generate_grouped,
-    }
-    ent_rows, art_rows = generators[layout](
-        h5_files, root, key_prefix, config.artifacts,
-        config.parameters, existing_uids,
-    )
+    _check_collisions(ent_rows, key, identity)
+    for row in ent_rows:
+        row.pop("_provenance", None)
 
-    # Shared axes are artifacts of the *dataset*, not of an entity: one row each in
-    # the artifact manifest with no uid. Resolved once against the files.
-    shared_rows = _shared_axis_rows(h5_files, root, config.shared)
+    ent_df = pd.DataFrame(ent_rows, columns=["uid"] if not ent_rows else None)
+    art_df = pd.DataFrame(art_rows + shared_rows,
+                          columns=ARTIFACT_COLUMNS if not (art_rows + shared_rows) else None)
+    if append and existing_uids and art_path.exists():
+        old_ent, old_art = pd.read_parquet(ent_path), pd.read_parquet(art_path)
+        old_art = old_art[old_art["uid"].notna()]  # shared axes are re-resolved each run
+        ent_df = pd.concat([old_ent, ent_df], ignore_index=True)
+        art_df = pd.concat([old_art, art_df], ignore_index=True)
+        print(f"  merged: {len(old_ent)} existing + {len(ent_rows)} new entities")
 
-    # Build DataFrames
-    ent_df = pd.DataFrame(ent_rows)
-    art_df = pd.DataFrame(art_rows + shared_rows)
-
-    # In append mode, merge with existing manifests. Shared axes are re-resolved
-    # every run, so the old manifest's copies are dropped rather than duplicated.
-    if append and existing_uids:
-        old_ent_path = os.path.join(output_dir, "entities.parquet")
-        old_art_path = os.path.join(output_dir, "artifacts.parquet")
-        if os.path.exists(old_ent_path) and os.path.exists(old_art_path):
-            old_ent = pd.read_parquet(old_ent_path)
-            old_art = pd.read_parquet(old_art_path)
-            old_art = old_art[old_art["uid"].notna()]
-            ent_df = pd.concat([old_ent, ent_df], ignore_index=True)
-            art_df = pd.concat([old_art, art_df], ignore_index=True)
-            print(f"  Merged: {len(old_ent)} existing + {len(ent_rows)} new entities")
-
-    # Write Parquet with provenance metadata
-    ent_path = os.path.join(output_dir, "entities.parquet")
-    art_path = os.path.join(output_dir, "artifacts.parquet")
-
-    generation_meta = {
+    meta = {
         b"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().encode(),
-        b"generator": b"broker-generate-yaml",
-        b"source_yaml": os.path.basename(str(yaml_path)).encode(),
-        b"config_hash": config_hash.encode(),
-        b"layout": layout.encode(),
+        b"generator": b"tilewright",
+        b"key": key.encode(),
+        b"source": tag.encode(),
+        b"identity": str(identity).encode(),
+        b"fingerprint": source_fingerprint(cfg).encode(),
+        b"config_hash": _sha256_file(yaml_path).encode(),
         b"entity_count": str(len(ent_df)).encode(),
         b"artifact_count": str(len(art_rows)).encode(),
         b"shared_count": str(len(shared_rows)).encode(),
     }
+    for df, path in ((ent_df, ent_path), (art_df, art_path)):
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        table = table.replace_schema_metadata({**(table.schema.metadata or {}), **meta})
+        pq.write_table(table, path)
 
-    ent_table = pa.Table.from_pandas(ent_df)
-    ent_table = ent_table.replace_schema_metadata(
-        {**(ent_table.schema.metadata or {}), **generation_meta}
-    )
-    pq.write_table(ent_table, ent_path)
+    print(f"dataset={key} entities={len(ent_df)} artifacts={len(art_rows)} "
+          f"shared={len(shared_rows)} -> {output_dir}")
+    return str(ent_path), str(art_path)
 
-    art_table = pa.Table.from_pandas(art_df)
-    art_table = art_table.replace_schema_metadata(
-        {**(art_table.schema.metadata or {}), **generation_meta}
-    )
-    pq.write_table(art_table, art_path)
 
-    print(f"Entities: {len(ent_df)} rows -> {ent_path}")
-    print(f"Artifacts: {len(art_df)} rows ({len(shared_rows)} shared axes) -> {art_path}")
+def _find_files(directory, pattern):
+    root = Path(directory)
+    files = sorted(root.glob(pattern)) or sorted(root.rglob(pattern))
+    files = [p for p in files if p.is_file()]
+    if not files:
+        raise FileNotFoundError(f"no files match {pattern!r} under {directory}")
+    return files
 
-    return ent_path, art_path
+
+def _sha256_file(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _check_collisions(ent_rows, key, identity):
+    """Two entities with the same uid is a contract error, named, never a silent merge."""
+    by_uid = {}
+    for row in ent_rows:
+        by_uid.setdefault(row["uid"], []).append(row)
+    dupes = {u: rows for u, rows in by_uid.items() if len(rows) > 1}
+    if not dupes:
+        return
+    lines = [f"{key}: {sum(len(r) for r in dupes.values())} entities share "
+             f"{len(dupes)} uids; every entity must be distinct."]
+    for u, rows in list(dupes.items())[:3]:
+        where = ", ".join(str(r.get("_provenance", "?")) for r in rows[:4])
+        shared = {k: v for k, v in rows[0].items()
+                  if not k.startswith("_") and k not in ("uid", "source_group")}
+        lines.append(f"  uid {u}: {where}" + (f" ... ({len(rows)} entities)" if len(rows) > 4 else "")
+                     + f"  params {json.dumps(shared, default=str)[:160]}")
+    if identity == Identity.params:
+        lines.append("Fix: add a field that distinguishes them (a run number, a seed) to the "
+                     "parameters, or set 'identity: provenance' under the source.")
+    else:
+        lines.append("Fix: these entities have the same provenance; the pattern or "
+                     "entity_group is matching the same thing twice.")
+    raise ValueError("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
-# Per-entity layout
+# reading parameters and attributes
 # ---------------------------------------------------------------------------
 
-def _warn_mixed_uid_paths(content_count, fallback_count, key_prefix):
-    """Warn if a dataset mixes content-addressed UIDs with positional fallbacks."""
-    if content_count and fallback_count:
-        print(
-            f"  WARNING: {key_prefix}: mixed UID paths "
-            f"({content_count} content-addressed, {fallback_count} positional fallback)"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Shared row builders — the per_entity / batched / grouped generators below all
-# resolve a UID, then emit one entity row and N artifact rows the same way.
-# ---------------------------------------------------------------------------
-
-# HDF5's own bookkeeping attributes (the dimension-scale machinery h5py/netCDF writers
-# attach to datasets). They describe the file, not the data, and are never carried along.
+# HDF5's own bookkeeping attributes (dimension-scale machinery). Never carried along.
 _HDF5_INTERNAL_ATTRS = frozenset(
     {"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST", "DIMENSION_LABELS"}
 )
-# Artifact-manifest columns the broker itself writes. A dataset attribute named like one
-# (`type`, `shape`, ...) would overwrite that column if carried as a bare label, so it is
-# dropped with a warning — once per (HDF5 path, attribute), not once per file.
+# Artifact-manifest columns the broker writes; a dataset attribute of the same name would
+# overwrite the column, so it is dropped with one warning per (path, attribute).
 _ARTIFACT_RESERVED = ARTIFACT_STANDARD_COLS | {"file_size", "file_mtime"}
 _reserved_warned = set()
 
 
-def _attrs(obj, label_of=None):
-    """HDF5 attributes of ``obj`` as native-typed values (sorted by name).
+def _to_python(val):
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    if isinstance(val, np.generic):
+        return val.item()
+    if isinstance(val, np.ndarray):
+        return val.item() if val.size == 1 else val.tolist()
+    return val
 
-    Plain (``label_of`` None): every attribute of a file/group — the
-    ``root_attributes`` parameters. With ``label_of``: the attributes of the dataset
-    holding field ``label_of``, as *labels* of that field — whatever the producer
-    attached (units, long_name, description, ...) keyed ``<label_of>_<attr>``
-    (``Ei_units``); scalar string/number values only, HDF5-internal attributes
-    skipped. ``label_of=""`` gives the bare attribute names — an array node's own
-    metadata — minus any that names a manifest column (``type``, ``shape``, ...),
-    which is dropped with a warning. Labels are stored beside the value but never
-    enter the UID hash.
+
+def _attrs(obj, label_of=None):
+    """HDF5 attributes of ``obj`` as native values, sorted by name.
+
+    ``label_of`` None: every attribute (the ``from: attrs`` parameters). ``label_of`` a
+    field name: scalar attributes as ``<field>_<attr>`` labels of that field. ``label_of``
+    ``""``: bare names, for an artifact's own node metadata (manifest column names are
+    dropped with a warning). Labels are stored beside a value, never hashed into the uid.
     """
     out = OrderedDict()
     for name in sorted(obj.attrs.keys()):
@@ -256,36 +238,30 @@ def _attrs(obj, label_of=None):
         elif label_of == "" and name in _ARTIFACT_RESERVED:
             if (obj.name, name) not in _reserved_warned:
                 _reserved_warned.add((obj.name, name))
-                print(f"  WARNING: {obj.name}@{name} is not carried as array metadata — "
-                      f"'{name}' is a manifest column. Rename the attribute in the file "
-                      f"if you need it (then regenerate, delete the dataset, re-register).")
+                print(f"  WARNING: {obj.name}@{name} is not carried as array metadata: "
+                      f"'{name}' is a manifest column. Rename the attribute if you need it.")
         elif isinstance(val, (str, int, float)) and not isinstance(val, bool):
             out[f"{label_of}_{name}" if label_of else name] = val
     return out
 
 
-def _scalar_params(container, params: ParametersSection, default=None, batch_size=None):
-    """Read one entity's (or one batched file's) parameters from its parameter group(s).
+def _read_params(container, spec: ParamsSpec, batch_size=None):
+    """One entity's (or one batch file's) parameters from its container.
 
-    ``container`` is the File (per_entity/batched) or the entity Group (grouped).
-    The group(s) come from ``parameters.group`` (one unnamed group → flat keys) or
-    ``parameters.groups`` (named → ``<name>.<field>`` keys, one level deeper per
-    subgroup when ``recursive``); ``default`` is the path used when the YAML names
-    none (``"/"`` reads the container itself — the ``root_scalars`` case). Dotted keys
-    are flat manifest columns that registration unflattens into nested metadata.
-    ``parameters.exclude`` paths (same frame as the group paths) are skipped, datasets
-    and subgroups alike.
-
-    Scalar mode (``batch_size`` None): every 0-dim dataset is a parameter; arrays are
-    artifacts, not parameters, and are skipped. Batched mode: a 1-D dataset of length
-    ``batch_size`` is a per-entity column (entity *i* is row *i*), a 0-dim dataset is
-    broadcast to every entity in the file, anything else is skipped.
-
-    Returns ``(params, labels)``: ``labels`` are the fields' attribute labels
-    (``<key>_units``, ...) — stored beside the value, excluded from the UID.
+    Returns ``(params, labels)``. ``params`` maps dotted keys (``instrument.Ei``) to values,
+    or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
     """
-    groups = params.groups or {"": params.group or default or "/"}
-    exclude = {p.strip("/") for p in params.exclude}
+    groups = spec.groups or {"": spec.group or "/"}
+    if spec.from_ == "attrs":
+        out = OrderedDict()
+        for gname, gpath in groups.items():
+            gpath = gpath.strip("/")
+            target = container[gpath] if gpath else container
+            for name, val in _attrs(target).items():
+                key = f"{gname}.{name}" if gname else name
+                out[key] = np.full(batch_size, val) if batch_size else val
+        return out, OrderedDict()
+    exclude = {p.strip("/") for p in spec.exclude}
     out, labels = OrderedDict(), OrderedDict()
     for gname, gpath in groups.items():
         gpath = gpath.strip("/")
@@ -300,11 +276,11 @@ def _scalar_params(container, params: ParametersSection, default=None, batch_siz
                     continue
                 try:
                     obj = g[name]
-                except KeyError as e:  # dangling soft/external link
-                    print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipping")
+                except KeyError as e:  # dangling link
+                    print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
                     continue
                 if isinstance(obj, h5py.Group):
-                    if params.recursive:
+                    if spec.recursive:
                         pending.append((obj, rel))
                     continue
                 if not isinstance(obj, h5py.Dataset):
@@ -321,383 +297,278 @@ def _scalar_params(container, params: ParametersSection, default=None, batch_siz
     return out, labels
 
 
-def _resolve_uid(entity_params, key_prefix, fallback):
-    """Return (uid, is_content_addressed) for one entity.
+# ---------------------------------------------------------------------------
+# rows
+# ---------------------------------------------------------------------------
 
-    Content-addressed when physical parameters were discovered; otherwise the
-    deterministic positional `fallback` string (see _make_uid).
-    """
-    if entity_params:
-        return _make_uid(entity_params, namespace=key_prefix), True
-    return _make_uid(fallback), False
+def _uid(payload):
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def _entity_row(uid, entity_params, extra=None, source_group=None):
-    """Entity manifest row in canonical column order:
-    uid, [source_group], <params...>, [extra...]."""
-    row = OrderedDict()
-    row["uid"] = uid
-    if source_group is not None:
-        row["source_group"] = source_group
-    row.update(entity_params)
-    if extra:
-        row.update(extra)
-    return row
+def _params_uid(key, params):
+    canonical = {k: round(v, 12) if isinstance(v, float) else v
+                 for k, v in sorted(params.items())}
+    return _uid(json.dumps({"ns": key, "params": canonical}, sort_keys=True, default=str))
 
 
-def _artifact_row(uid, art_type, rel_path, dataset, index, fsize, fmtime,
-                  shape, dtype, labels=None):
-    """Artifact manifest row (uid matches the parent entity uid).
+def _file_fingerprint(path):
+    st = os.stat(path)
+    mtime = datetime.datetime.fromtimestamp(st.st_mtime, tz=datetime.timezone.utc).isoformat()
+    return st.st_size, mtime
 
-    `shape` is the shape of the artifact *as registered* — for batched layouts the
-    leading (entity) axis is already dropped, so it is what Tiled stores, not what
-    the HDF5 dataset reports. It is JSON-encoded so it round-trips through Parquet
-    exactly; `dtype` is the numpy dtype string (e.g. "float32"). `labels` are the
-    dataset's own scalar HDF5 attributes (``_attrs(ds, label_of="")``); any extra
-    column here becomes metadata on the artifact's array node at registration.
-    """
-    row = OrderedDict()
-    row["uid"] = uid
-    row["type"] = art_type
-    row["file"] = rel_path
-    row["dataset"] = dataset
-    row["index"] = index
-    row["file_size"] = fsize
-    row["file_mtime"] = fmtime
-    row["shape"] = json.dumps(list(shape))
-    row["dtype"] = dtype
+
+def _artifact_row(uid, art_type, rel_path, dataset, index, fsize, fmtime, shape, dtype,
+                  labels=None):
+    """``shape`` is the shape *as registered* (batch rows have the leading axis dropped),
+    JSON-encoded for an exact Parquet round trip."""
+    row = OrderedDict(uid=uid, type=art_type, file=rel_path, dataset=dataset, index=index,
+                      file_size=fsize, file_mtime=fmtime, shape=json.dumps(list(shape)),
+                      dtype=dtype)
     row.update(labels or {})
     return row
 
 
-def _shared_axis_rows(h5_files, root, shared: list[SharedAxisSpec]):
-    """One artifact-manifest row per `shared:` axis, with no uid.
+def _get_artifact(f, path, art: ArtifactSpec, where):
+    """The HDF5 dataset for an artifact, or None if optional and absent."""
+    p = path.lstrip("/")
+    if p in f and isinstance(f[p], h5py.Dataset):
+        return f[p]
+    if art.optional:
+        return None
+    raise KeyError(f"{where}: artifact type={art.type!r} dataset {path!r} not found "
+                   f"(mark it 'optional: true' if some entities lack it)")
 
-    A shared axis is an array that is the same for every entity (an energy grid,
-    a field axis), so it is registered once as an array child of the *dataset*
-    container rather than under each entity — an artifact whose parent is the
-    dataset, hence a row in the artifact manifest with ``uid`` None. Its `dataset`
-    is an absolute HDF5 path in *every* layout (not group-relative, even for
-    `grouped`). It is recorded from the first file that holds it, and every other
-    file that holds it is checked to agree — a differing axis is a contract
-    violation (it varies per entity, so it is an artifact of the entity, not a
-    shared axis). Shape, dtype and the dataset's own attributes are captured here
-    so registration never opens HDF5.
+
+class _Walker:
+    """The four source walkers share one way of naming an entity and resolving its uid."""
+
+    def __init__(self, cfg: DatasetConfig, existing_uids):
+        self.cfg = cfg
+        self.key = cfg.catalog_key
+        self.body = cfg.source.body
+        self.identity = cfg.source.identity
+        self.artifacts = cfg.artifacts
+        self.existing = existing_uids
+        self.root = Path(self.body.directory)
+
+    def uid(self, params, provenance, where):
+        if self.identity == Identity.params:
+            if not params:
+                raise ValueError(f"{where}: no parameters found, so no identity. Either "
+                                 f"point 'params' at the right group, declare 'params: "
+                                 f"null', or set 'identity: provenance'.")
+            return _params_uid(self.key, params)
+        return _uid(f"{self.key}:{provenance}")
+
+    def entity(self, uid, params, labels, provenance, source_group=None):
+        row = OrderedDict(uid=uid)
+        if source_group is not None:
+            row["source_group"] = source_group
+        row.update(params)
+        row.update(labels)
+        row["_provenance"] = provenance  # dropped before writing; used by collision report
+        return row
+
+    # -- files ---------------------------------------------------------------
+
+    def files(self, paths):
+        ent_rows, art_rows = [], []
+        spec = self.body.params
+        for i, h5_path in enumerate(paths):
+            rel = h5_path.relative_to(self.root).as_posix()
+            with h5py.File(h5_path, "r") as f:
+                params, labels = _read_params(f, spec) if spec is not None else ({}, {})
+                uid = self.uid(params, rel, str(h5_path))
+                if uid in self.existing:
+                    continue
+                fsize, fmtime = _file_fingerprint(h5_path)
+                ent_rows.append(self.entity(uid, params, labels, rel))
+                for art in self.artifacts:
+                    ds = _get_artifact(f, art.dataset, art, str(h5_path))
+                    if ds is None:
+                        continue
+                    art_rows.append(_artifact_row(uid, art.type, rel, art.dataset, None,
+                                                  fsize, fmtime, ds.shape, str(ds.dtype),
+                                                  labels=_attrs(ds, label_of="")))
+            if (i + 1) % 1000 == 0:
+                print(f"  {i + 1}/{len(paths)} files")
+        return ent_rows, art_rows
+
+    # -- batch ---------------------------------------------------------------
+
+    def batch(self, paths):
+        ent_rows, art_rows = [], []
+        spec = self.body.params
+        for h5_path in paths:
+            rel = h5_path.relative_to(self.root).as_posix()
+            fsize, fmtime = _file_fingerprint(h5_path)
+            with h5py.File(h5_path, "r") as f:
+                first = _get_artifact(f, self.artifacts[0].dataset, self.artifacts[0], str(h5_path))
+                if first is None:
+                    raise KeyError(f"{h5_path}: the first artifact ({self.artifacts[0].type}) "
+                                   f"sets the batch size and cannot be optional")
+                n = first.shape[0]
+                art_info = {}
+                for art in self.artifacts:
+                    ds = _get_artifact(f, art.dataset, art, str(h5_path))
+                    if ds is None:
+                        continue
+                    if ds.shape[0] != n:
+                        raise ValueError(f"{h5_path}: artifact {art.type!r} has {ds.shape[0]} "
+                                         f"rows but {self.artifacts[0].type!r} has {n}; every "
+                                         f"artifact's leading axis is the entity axis")
+                    art_info[art.type] = (ds.shape[1:], str(ds.dtype), _attrs(ds, label_of=""))
+                columns, labels = _read_params(f, spec, batch_size=n)
+                for i in range(n):
+                    params = {k: _to_python(v[i]) for k, v in columns.items()}
+                    prov = f"{rel}:{i}"
+                    uid = self.uid(params, prov, f"{h5_path} row {i}")
+                    if uid in self.existing:
+                        continue
+                    ent_rows.append(self.entity(uid, params, labels, prov))
+                    for art in self.artifacts:
+                        if art.type not in art_info:
+                            continue
+                        shape, dtype, alabels = art_info[art.type]
+                        art_rows.append(_artifact_row(uid, art.type, rel, art.dataset, i,
+                                                      fsize, fmtime, shape, dtype, labels=alabels))
+            print(f"  {h5_path.name}: {n} entities")
+        return ent_rows, art_rows
+
+    # -- groups --------------------------------------------------------------
+
+    def groups(self, paths):
+        ent_rows, art_rows = [], []
+        spec = self.body.params
+        base = (self.body.entity_group or "").strip("/")
+        for h5_path in paths:
+            rel = h5_path.relative_to(self.root).as_posix()
+            fsize, fmtime = _file_fingerprint(h5_path)
+            with h5py.File(h5_path, "r") as f:
+                if base and not (base in f and isinstance(f[base], h5py.Group)):
+                    raise KeyError(f"{h5_path}: entity_group '/{base}' not found")
+                parent = f[base] if base else f
+                names = sorted(k for k in parent.keys() if isinstance(parent[k], h5py.Group))
+                if not names:
+                    raise ValueError(f"{h5_path}: no groups under '/{base}' to treat as entities")
+                for name in names:
+                    gpath = f"{base}/{name}" if base else name
+                    g = f[gpath]
+                    params, labels = _read_params(g, spec) if spec is not None else ({}, {})
+                    prov = f"{rel}:/{gpath}"
+                    uid = self.uid(params, prov, f"{h5_path}:/{gpath}")
+                    if uid in self.existing:
+                        continue
+                    ent_rows.append(self.entity(uid, params, labels, prov, source_group=gpath))
+                    for art in self.artifacts:
+                        full = f"/{gpath}/{art.dataset.lstrip('/')}"
+                        ds = _get_artifact(f, full, art, f"{h5_path}:/{gpath}")
+                        if ds is None:
+                            continue
+                        art_rows.append(_artifact_row(uid, art.type, rel, full, None, fsize,
+                                                      fmtime, ds.shape, str(ds.dtype),
+                                                      labels=_attrs(ds, label_of="")))
+            print(f"  {h5_path.name}: {len(names)} entity groups")
+        return ent_rows, art_rows
+
+    # -- table ---------------------------------------------------------------
+
+    def table(self):
+        path = self.root / self.body.path
+        if not path.exists():
+            raise FileNotFoundError(f"{path}: table not found")
+        df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
+        if self.body.id not in df.columns:
+            raise KeyError(f"{path}: id column {self.body.id!r} not among {list(df.columns)}")
+        if "uid" in df.columns:
+            raise ValueError(f"{path}: 'uid' is a reserved column name")
+        ent_rows = []
+        for record in df.to_dict(orient="records"):
+            params = {k: _to_python(v) for k, v in record.items()}
+            for name, template in self.body.locator.items():
+                params[name] = template.format(**record)
+            prov = str(record[self.body.id])
+            uid = _uid(f"{self.key}:{prov}")
+            if uid in self.existing:
+                continue
+            ent_rows.append(self.entity(uid, params, {}, prov))
+        print(f"  {path.name}: {len(ent_rows)} rows")
+        return ent_rows
+
+
+def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec]):
+    """One artifact row per ``shared:`` axis, uid None: an artifact of the dataset.
+
+    Recorded from the first file that holds it; every other file that holds it must agree
+    (a differing axis varies per entity, so it belongs under ``artifacts:``).
     """
-    rows, seen = [], {}  # type -> (file, reference array)
+    rows, seen = [], {}
     if not shared:
         return rows
-    for h5_path in h5_files:
-        rel_path = str(h5_path.relative_to(root))
+    for h5_path in paths:
+        rel = h5_path.relative_to(root).as_posix()
         with h5py.File(h5_path, "r") as f:
             for ax in shared:
-                ds_path = ax.dataset.lstrip("/")
-                if ds_path not in f or not isinstance(f[ds_path], h5py.Dataset):
+                p = ax.dataset.lstrip("/")
+                if p not in f or not isinstance(f[p], h5py.Dataset):
                     continue
-                ds = f[ds_path]
+                ds = f[p]
                 if ax.type in seen:
                     ref_file, ref = seen[ax.type]
                     equal_nan = bool(np.issubdtype(ref.dtype, np.floating))
                     if ds.shape != ref.shape or not np.array_equal(ds[()], ref, equal_nan=equal_nan):
-                        raise ValueError(
-                            f"shared axis type={ax.type!r} ({ax.dataset}) differs between "
-                            f"{ref_file} and {rel_path}. A shared axis must be identical in "
-                            f"every file; if it varies per entity, list it under "
-                            f"`artifacts:` instead."
-                        )
+                        raise ValueError(f"shared axis {ax.type!r} ({ax.dataset}) differs between "
+                                         f"{ref_file} and {rel}; a shared axis must be identical "
+                                         f"in every file. If it varies per entity, list it under "
+                                         f"'artifacts:'.")
                     continue
-                seen[ax.type] = (rel_path, ds[()])
+                seen[ax.type] = (rel, ds[()])
                 fsize, fmtime = _file_fingerprint(h5_path)
-                rows.append(_artifact_row(
-                    None, ax.type, rel_path, ax.dataset, None, fsize, fmtime,
-                    ds.shape, str(ds.dtype), labels=_attrs(ds, label_of="")))
+                rows.append(_artifact_row(None, ax.type, rel, ax.dataset, None, fsize, fmtime,
+                                          ds.shape, str(ds.dtype), labels=_attrs(ds, label_of="")))
     missing = [ax for ax in shared if ax.type not in seen]
     if missing:
-        ax = missing[0]
-        raise KeyError(
-            f"shared axis type={ax.type!r}: dataset {ax.dataset!r} not found in "
-            f"any of the {len(h5_files)} HDF5 files under {root}. A shared "
-            f"axis is an absolute HDF5 path present in (at least) one file."
-        )
+        raise KeyError(f"shared axis {missing[0].type!r}: dataset {missing[0].dataset!r} not "
+                       f"found in any of the {len(paths)} files under {root}")
     return rows
-
-
-def _generate_per_entity(h5_files, root, key_prefix, artifacts: list[ArtifactSpec],
-                         params: ParametersSection, existing_uids):
-    """One HDF5 file = one entity. Scalars at root (or in the parameter groups) are
-    parameters."""
-    ent_rows = []
-    art_rows = []
-    content_count = fallback_count = 0
-
-    for i, h5_path in enumerate(h5_files):
-        rel_path = str(h5_path.relative_to(root))
-        file_stem = h5_path.stem
-        labels = {}
-
-        with h5py.File(h5_path, "r") as f:
-            # Read the entity's physical parameters first — the UID is a
-            # content-addressed hash of these, not of file position.
-            if params.location == ParamLocation.root_attributes:
-                entity_params = _attrs(f)
-            else:  # root_scalars (the file root) or group/groups
-                entity_params, labels = _scalar_params(f, params, default="/")
-
-            uid, is_content = _resolve_uid(
-                entity_params, key_prefix, f"{key_prefix}_{file_stem}")
-            if is_content:
-                content_count += 1
-            else:
-                fallback_count += 1
-
-            if uid in existing_uids:
-                continue
-
-            fsize, fmtime = _file_fingerprint(h5_path)
-            ent_rows.append(_entity_row(uid, entity_params, extra=labels))
-
-            # Artifact rows — only those whose datasets exist in this file.
-            # Shape and dtype are captured here so registration never opens HDF5.
-            for art in artifacts:
-                if art.dataset.lstrip("/") not in f:
-                    continue
-                ds = f[art.dataset.lstrip("/")]
-                art_rows.append(_artifact_row(
-                    uid, art.type, rel_path, art.dataset,
-                    None, fsize, fmtime, ds.shape, str(ds.dtype),
-                    labels=_attrs(ds, label_of="")))
-
-        if (i + 1) % 1000 == 0:
-            print(f"  Processed {i + 1}/{len(h5_files)} entities...")
-
-    _warn_mixed_uid_paths(content_count, fallback_count, key_prefix)
-    return ent_rows, art_rows
-
-
-# ---------------------------------------------------------------------------
-# Batched layout
-# ---------------------------------------------------------------------------
-
-def _generate_batched(h5_files, root, key_prefix, artifacts: list[ArtifactSpec],
-                      params: ParametersSection, existing_uids):
-    """Multiple entities stacked along axis-0 in each file."""
-    ent_rows = []
-    art_rows = []
-    content_count = fallback_count = 0
-    global_idx = 0
-
-    for h5_path in h5_files:
-        rel_path = str(h5_path.relative_to(root))
-        fsize, fmtime = _file_fingerprint(h5_path)
-
-        with h5py.File(h5_path, "r") as f:
-            # Determine batch size from first artifact
-            first_art_ds = artifacts[0].dataset.lstrip("/")
-            batch_size = f[first_art_ds].shape[0]
-
-            # Per-entity shape/dtype (and the dataset's own attrs), read once per
-            # file rather than per entity. Entity i is row i, so the registered
-            # shape drops the leading axis.
-            art_info = {}
-            for art in artifacts:
-                ds = f[art.dataset.lstrip("/")]
-                art_info[art.type] = (ds.shape[1:], str(ds.dtype), _attrs(ds, label_of=""))
-
-            # Read all parameters at once: one (N,) column per parameter. Root
-            # attributes are scalars — the same value for every entity in the batch.
-            param_arrays, labels = {}, {}
-            root_attr_params = {}
-            if params.location == ParamLocation.root_attributes:
-                root_attr_params = _attrs(f)
-            else:  # root_scalars (the file root) or group/groups
-                param_arrays, labels = _scalar_params(
-                    f, params, default="/", batch_size=batch_size)
-
-            for i in range(batch_size):
-                # Collect the entity's physical parameters FIRST; the UID is
-                # a content-addressed hash of these, not of the global index.
-                if params.location == ParamLocation.root_attributes:
-                    entity_params = dict(root_attr_params)
-                else:
-                    entity_params = {pname: _to_python(arr[i])
-                                     for pname, arr in param_arrays.items()}
-
-                uid, is_content = _resolve_uid(
-                    entity_params, key_prefix, f"{key_prefix}_{global_idx:06d}")
-                if is_content:
-                    content_count += 1
-                else:
-                    fallback_count += 1
-
-                if uid in existing_uids:
-                    global_idx += 1
-                    continue
-
-                ent_rows.append(_entity_row(uid, entity_params, extra=labels))
-
-                # Artifact rows — uid matches entity uid
-                for art in artifacts:
-                    shape, dtype, art_labels = art_info[art.type]
-                    art_rows.append(_artifact_row(
-                        uid, art.type, rel_path, art.dataset,
-                        i, fsize, fmtime, shape, dtype, labels=art_labels))
-
-                global_idx += 1
-
-        print(f"  Processed {h5_path.name}: {batch_size} entities (total: {global_idx})")
-
-    _warn_mixed_uid_paths(content_count, fallback_count, key_prefix)
-    return ent_rows, art_rows
-
-
-# ---------------------------------------------------------------------------
-# Grouped layout
-# ---------------------------------------------------------------------------
-
-def _generate_grouped(h5_files, root, key_prefix, artifacts: list[ArtifactSpec],
-                      params: ParametersSection, existing_uids):
-    """One HDF5 group per entity inside a file."""
-    ent_rows = []
-    art_rows = []
-    content_count = fallback_count = 0
-    global_idx = 0
-    entity_group = params.entity_group or "samples"
-
-    for h5_path in h5_files:
-        rel_path = str(h5_path.relative_to(root))
-        fsize, fmtime = _file_fingerprint(h5_path)
-
-        with h5py.File(h5_path, "r") as f:
-            if entity_group in f and isinstance(f[entity_group], h5py.Group):
-                # Only subgroups are entities; a dataset beside them (a NeXus
-                # root-level `file_time`, say) is not one. "/" is the root itself.
-                base_group = entity_group.rstrip("/")
-                group_keys = sorted(k for k in f[entity_group].keys()
-                                    if isinstance(f[entity_group][k], h5py.Group))
-            else:
-                group_keys = [k for k in sorted(f.keys()) if isinstance(f[k], h5py.Group)]
-                base_group = ""
-
-            for gkey in group_keys:
-                full_group = f"{base_group}/{gkey}" if base_group else gkey
-                g = f[full_group]
-
-                # Read parameters first — UID is a content-addressed hash
-                # of the params, not of the group's position in the file.
-                entity_params, labels = {}, {}
-                if params.location == ParamLocation.root_attributes:
-                    entity_params = _attrs(f)
-                else:  # group_scalars: group/groups relative to the entity group
-                    entity_params, labels = _scalar_params(g, params, default="params")
-                    if not entity_params and not (params.group or params.groups):
-                        # No `params/` subgroup: the entity group's own scalars.
-                        entity_params, labels = _scalar_params(g, params, default="/")
-
-                uid, is_content = _resolve_uid(
-                    entity_params, key_prefix, f"{key_prefix}_{global_idx:06d}")
-                if is_content:
-                    content_count += 1
-                else:
-                    fallback_count += 1
-
-                if uid in existing_uids:
-                    global_idx += 1
-                    continue
-
-                ent_rows.append(_entity_row(
-                    uid, entity_params, extra=labels, source_group=full_group))
-
-                # Artifact rows — dataset path is resolved within the entity group
-                for art in artifacts:
-                    ds_path = art.dataset.lstrip("/")
-                    full_ds_path = f"/{full_group}/{ds_path}"
-                    if full_ds_path not in f:
-                        raise KeyError(
-                            f"{h5_path}: artifact type={art.type!r} dataset "
-                            f"{full_ds_path!r} not found. In a grouped layout, "
-                            f"'dataset' is resolved within each entity group — write "
-                            f"it relative to the group (e.g. 'spectrum', not "
-                            f"'/samples/sample_000/spectrum')."
-                        )
-                    ds = f[full_ds_path]
-                    art_rows.append(_artifact_row(
-                        uid, art.type, rel_path, full_ds_path,
-                        None, fsize, fmtime, ds.shape, str(ds.dtype),
-                        labels=_attrs(ds, label_of="")))
-
-                global_idx += 1
-
-        print(f"  Processed {h5_path.name}: {len(group_keys)} entity groups (total: {global_idx})")
-
-    _warn_mixed_uid_paths(content_count, fallback_count, key_prefix)
-    return ent_rows, art_rows
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_uid(params_or_str, namespace=""):
-    """Generate a deterministic UID.
-
-    Content-addressed form (preferred): pass a params dict. The UID is a
-    hash of the canonical JSON of the (namespace, params) pair, so the
-    same parameter set produces the same UID regardless of position in
-    the file, file order, or regeneration. Floats are rounded to 12
-    decimal places before hashing to tolerate minor float-format drift.
-
-    Positional fallback: pass a string. Used when no per-entity
-    parameters are discoverable in the data (e.g. per-entity layout
-    with parameters only in filenames).
-    """
-    if isinstance(params_or_str, dict):
-        canonical = {
-            k: round(v, 12) if isinstance(v, float) else v
-            for k, v in sorted(params_or_str.items())
-        }
-        payload = json.dumps(
-            {"ns": namespace, "params": canonical}, sort_keys=True
-        )
-    else:
-        payload = params_or_str
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
-
-
-def _to_python(val):
-    """Convert numpy/HDF5 value to Python native type."""
-    if isinstance(val, bytes):
-        return val.decode("utf-8", errors="replace")
-    if isinstance(val, np.generic):
-        return val.item()
-    if isinstance(val, np.ndarray):
-        if val.size == 1:
-            return val.item()
-        return val.tolist()
-    return val
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Generate Parquet manifests from a dataset YAML contract."
-    )
-    parser.add_argument("yaml_path", help="Path to the finalized dataset YAML config")
-    parser.add_argument("--output-dir", "-o", help="Output directory for manifests")
-    parser.add_argument(
-        "--append", action="store_true",
-        help="Append new entities to existing manifests (skip already-generated UIDs)",
-    )
-    args = parser.parse_args()
+        prog="tilewright manifest",
+        description="Validate a dataset YAML and generate its Parquet manifests.")
+    parser.add_argument("yaml_path", help="the dataset YAML")
+    parser.add_argument("-o", "--output-dir", help="where to write the manifests "
+                        "(default: <root>/manifests/<KEY>/ next to the YAML)")
+    parser.add_argument("--append", action="store_true",
+                        help="keep existing manifests and add only new entities")
+    parser.add_argument("--check", action="store_true",
+                        help="validate the contract and stop; writes nothing")
+    args = parser.parse_args(argv)
 
     try:
+        if args.check:
+            cfg, raw, warnings = read_yaml(args.yaml_path)
+            for w in warnings:
+                print(f"  note: {w}")
+            key = cfg.catalog_key
+            print(f"contract OK: key={key} source={cfg.source.tag} identity={cfg.source.identity} "
+                  f"artifacts={len(cfg.artifacts)} shared={len(cfg.shared)}"
+                  + ("" if raw.get("key") else f"  (key will be written by 'tilewright manifest')"))
+            return 0
         generate_manifests(args.yaml_path, args.output_dir, append=args.append)
-    except ValidationError as e:
-        print(f"Validation failed:\n{e}", file=sys.stderr)
-        sys.exit(1)
+        return 0
+    except ContractError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    except (FileNotFoundError, KeyError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

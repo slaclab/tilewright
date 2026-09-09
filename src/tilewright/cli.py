@@ -1,11 +1,9 @@
 """
-CLI entry points for tiled-catalog-broker.
+CLI entry points for TileWright.
 
-Provides four commands:
-  - tilewright generate:       Generate Parquet manifests from finalized YAML
-  - tilewright stamp-key:      Write the derived catalog key into a YAML
-  - tilewright register:       HTTP registration against a running Tiled server
-  - tilewright delete:         Delete registered data from a Tiled server
+    tilewright manifest   validate a dataset YAML, derive its key, write its Parquet manifests
+    tilewright register   register manifests into a running Tiled server over HTTP
+    tilewright delete     delete registered data from a running Tiled server
 """
 
 import os
@@ -14,165 +12,44 @@ import argparse
 from pathlib import Path
 
 
-def _load_config(config_path):
-    """Load a dataset config YAML file."""
-    from ruamel.yaml import YAML
+def _load_dataset(config_path):
+    """Read + validate a dataset YAML for register/delete. Exits with every contract
+    error printed; requires the key that `tilewright manifest` writes."""
+    from .contract import ContractError
+    from .manifest import read_yaml
 
-    yaml = YAML()
-    with open(config_path) as f:
-        return yaml.load(f)
-
-
-def _require_key(config, config_path):
-    """Read the catalog key from a config; print + exit if missing or drifted.
-
-    `tilewright register` is read-only with respect to the YAML; if the key is
-    missing, the user runs `tilewright stamp-key` to fill it in.
-    """
-    from .utils import slugify_key
-
-    label = config.get("label")
-    if not label:
-        print(f"\nERROR: {config_path}: 'label' is required.", file=sys.stderr)
+    try:
+        cfg, raw, warnings = read_yaml(config_path)
+    except ContractError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
-    expected = slugify_key(label)
-
-    current = config.get("key")
-    if not current or not str(current).strip():
-        print(
-            f"\nERROR: {config_path}: missing 'key' field. Run\n"
-            f"    tilewright stamp-key {config_path}\n"
-            f"to derive '{expected}' from the label.",
-            file=sys.stderr,
-        )
+    for w in warnings:
+        print(f"  note: {w}")
+    if not raw.get("key"):
+        print(f"\nERROR: {config_path} has no 'key:' yet. Run\n"
+              f"    tilewright manifest {config_path}\n"
+              f"to derive '{cfg.catalog_key}' from the label and build the manifests.",
+              file=sys.stderr)
         sys.exit(1)
-    if current != expected:
-        print(
-            f"\nERROR: {config_path}: stored key '{current}' does not match "
-            f"slug(label) '{expected}'. Either restore the label that "
-            f"produced '{current}', or remove the 'key:' line and run "
-            f"`tilewright stamp-key`.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return current
+    return cfg
 
 
-def _build_dataset_metadata(config, label):
-    """Build the full dataset container metadata dict from a config."""
-    dataset_metadata = config.get("metadata", {"label": label})
-
-    # Merge provenance into dataset container metadata. The block can be
-    # present but empty (all fields commented out), which ruamel parses as
-    # None rather than {} — guard so dict.update(None) doesn't crash.
-    provenance = config.get("provenance")
-    if provenance:
-        dataset_metadata.update(provenance)
-
-    # Attach shared axis locators to dataset container metadata
-    for ax in config.get("shared", []):
-        dataset_metadata[f"shared_dataset_{ax['type']}"] = ax["dataset"]
-
-    return dataset_metadata
+def _build_dataset_metadata(cfg):
+    """The dataset container's metadata: every metadata key as written, plus one
+    `shared_dataset_<type>` locator per shared axis (how readers find the axes)."""
+    md = cfg.metadata.model_dump(by_alias=True, exclude_none=True)
+    for ax in cfg.shared:
+        md[f"shared_dataset_{ax.type}"] = ax.dataset
+    return md
 
 
-def _manifest_dirs(config_path, label):
-    """Directories that may hold a dataset's manifests, in search order.
+def _find_manifests(config_path, key):
+    """The manifest pair for a YAML, or (None, None)."""
+    from .manifest import manifest_dir
 
-    `tilewright generate` writes to `<yaml_dir>/manifests/<label>/`; the same path under
-    the working directory is also accepted. Labels containing spaces are matched
-    both verbatim and underscore-normalized.
-    """
-    labels = [label]
-    if (normalized := label.replace(" ", "_")) != label:
-        labels.append(normalized)
-    return [root / "manifests" / lbl
-            for lbl in labels
-            for root in (Path(config_path).parent, Path.cwd())]
-
-
-def _find_manifests(config_path, label):
-    """Locate a dataset's entity and artifact Parquet manifests.
-
-    Returns:
-        (Path, Path) or (None, None)
-    """
-    for d in _manifest_dirs(config_path, label):
-        ep, ap = d / "entities.parquet", d / "artifacts.parquet"
-        if ep.exists() and ap.exists():
-            return ep, ap
-    return None, None
-
-
-# ── tilewright generate ─────────────────────────────────────────────
-
-def generate_yaml_main():
-    """Generate Parquet manifests from a finalized YAML contract.
-
-    Reads a dataset YAML config (authored against the contract surface —
-    see docs/ONBOARDING.md), scans the HDF5 files, and produces
-    entities.parquet + artifacts.parquet for `tilewright register`.
-    """
-    from tilewright.manifest import main as _generate_main
-    _generate_main()
-
-
-# ── tilewright stamp-key ─────────────────────────────────────────────
-
-def stamp_key_main():
-    """Write the derived catalog key into a YAML's `key:` field.
-
-    Run this once after authoring a YAML so subsequent `tilewright register` calls
-    have a key to use. The key is `slugify_key(label)`;
-    re-running on an already-correct YAML is a no-op. Mismatch between an
-    existing key and slug(label) is an error.
-    """
-    from ruamel.yaml import YAML
-
-    from .utils import slugify_key
-
-    parser = argparse.ArgumentParser(
-        description="Write the derived catalog key into one or more dataset YAMLs."
-    )
-    parser.add_argument("configs", nargs="+", help="Dataset YAML files")
-    args = parser.parse_args()
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-
-    for config_path in args.configs:
-        path = Path(config_path)
-        if not path.exists():
-            print(f"ERROR: {config_path} not found", file=sys.stderr)
-            sys.exit(1)
-
-        with path.open() as f:
-            cfg = yaml.load(f)
-
-        label = cfg.get("label")
-        if not label:
-            print(f"ERROR: {config_path}: 'label' is required", file=sys.stderr)
-            sys.exit(1)
-
-        expected = slugify_key(label)
-        current = cfg.get("key")
-
-        if current and str(current).strip():
-            if current == expected:
-                print(f"{config_path}: key '{current}' already correct (no change).")
-                continue
-            print(
-                f"ERROR: {config_path}: stored key '{current}' does not match "
-                f"slug(label) '{expected}'. Either restore the label that "
-                f"produced '{current}', or remove the 'key:' line and re-run.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        cfg["key"] = expected
-        with path.open("w") as f:
-            yaml.dump(cfg, f)
-        print(f"{config_path}: stamped key '{expected}' (slug of label '{label}')")
+    d = manifest_dir(config_path, key)
+    ep, ap = d / "entities.parquet", d / "artifacts.parquet"
+    return (ep, ap) if ep.exists() and ap.exists() else (None, None)
 
 
 # ── tilewright register ──────────────────────────────────────────────
@@ -236,6 +113,14 @@ def register_main():
     print("=" * 50)
     print(f"Configs: {args.configs}")
 
+    # Every YAML must be a valid, keyed contract before the network is touched.
+    datasets = []
+    for config_path in args.configs:
+        if not Path(config_path).exists():
+            print(f"\nERROR: Config not found: {config_path}", file=sys.stderr)
+            sys.exit(1)
+        datasets.append((config_path, _load_dataset(config_path)))
+
     tiled_url, api_key = server_settings(args.url, args.api_key)
 
     print(f"\nChecking Tiled server at {tiled_url} ...")
@@ -252,35 +137,27 @@ def register_main():
     client = from_uri(tiled_url, api_key=api_key)
     print(f"Connected to {tiled_url} ({len(client)} existing containers)")
 
-    # Load and register each dataset
-    for config_path in args.configs:
-        if not Path(config_path).exists():
-            print(f"\nERROR: Config not found: {config_path}")
-            sys.exit(1)
-
-        config = _load_config(config_path)
-        label = config.get("label", Path(config_path).stem)
-        dataset_key = _require_key(config, config_path)
-        # `data.directory` is the contract (_models.py).
-        base_dir = config.get("data", {}).get("directory")
-        server_base_dir = config.get("data", {}).get("server_base_dir") or None
+    for config_path, cfg in datasets:
+        label, dataset_key = cfg.label, cfg.catalog_key
+        body = cfg.source.body
+        base_dir, server_base_dir = body.directory, body.server_base_dir
 
         if args.upload:
-            if not base_dir or not os.path.isdir(base_dir):
-                print(f"\nERROR: {config_path}: data.directory '{base_dir}' "
-                      "not found locally. Upload mode reads artifact arrays "
-                      "from your local HDF5 files.", file=sys.stderr)
+            if not os.path.isdir(base_dir):
+                print(f"\nERROR: {config_path}: directory '{base_dir}' not found locally. "
+                      "Upload mode reads artifact arrays from your local files.",
+                      file=sys.stderr)
                 sys.exit(1)
             if server_base_dir:
-                print("NOTE: data.server_base_dir is ignored with --upload "
+                print("NOTE: server_base_dir is ignored with --upload "
                       "(the server never reads your files).")
 
-        ent_path, art_path = _find_manifests(config_path, label)
-        if ent_path is None or art_path is None:
-            print(f"\nERROR: manifests not found for '{label}'. Looked in:")
-            for d in _manifest_dirs(config_path, label):
-                print(f"    {d}")
-            print(f"  Run `tilewright generate {config_path}` to create them.")
+        ent_path, art_path = _find_manifests(config_path, dataset_key)
+        if ent_path is None:
+            from .manifest import manifest_dir
+            print(f"\nERROR: no manifests for '{dataset_key}' in "
+                  f"{manifest_dir(config_path, dataset_key)}.\n"
+                  f"  Run `tilewright manifest {config_path}` to create them.", file=sys.stderr)
             sys.exit(1)
 
         ent_df = pd.read_parquet(ent_path)
@@ -290,10 +167,10 @@ def register_main():
         # `shared:` but whose manifest has none was generated before shared
         # axes were captured — regenerate rather than silently register the
         # dataset without them.
-        if config.get("shared") and art_df["uid"].notna().all():
+        if cfg.shared and art_df["uid"].notna().all():
             print(f"\nERROR: {config_path} declares shared axes but the manifests "
-                  f"for '{label}' carry none. Run\n"
-                  f"    tilewright generate {config_path}\n"
+                  f"for '{dataset_key}' carry none. Run\n"
+                  f"    tilewright manifest {config_path}\n"
                   f"to rebuild them, then register again.", file=sys.stderr)
             sys.exit(1)
 
@@ -301,7 +178,7 @@ def register_main():
         if args.max_entities is not None:
             ent_df = ent_df.head(args.max_entities)
 
-        dataset_metadata = _build_dataset_metadata(config, label)
+        dataset_metadata = _build_dataset_metadata(cfg)
 
         kwargs = {}
         if max_workers is not None:
@@ -524,11 +401,15 @@ def delete_main():
 
 # ── tilewright (main dispatcher) ────────────────────────────────────
 
+def _manifest_main():
+    from .manifest import main
+    sys.exit(main(sys.argv[1:]))
+
+
 def main():
     """Main entry point: tilewright <command> [args]."""
     commands = {
-        "generate": generate_yaml_main,
-        "stamp-key": stamp_key_main,
+        "manifest": _manifest_main,
         "register": register_main,
         "delete": delete_main,
     }
@@ -536,9 +417,8 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print("usage: tilewright <command> [args]\n")
         print("commands:")
-        print("  generate    Generate Parquet manifests from a finalized YAML contract")
-        print("  stamp-key   Write the derived catalog key into a YAML")
-        print("  register    HTTP registration against a running Tiled server")
+        print("  manifest    Validate a dataset YAML, derive its key, write its Parquet manifests")
+        print("  register    Register manifests into a running Tiled server over HTTP")
         print("  delete      Delete registered data from a running Tiled server")
         sys.exit(0)
 
@@ -551,3 +431,7 @@ def main():
     # Remove the subcommand from argv so argparse in each handler sees the right args
     sys.argv = [f"tilewright {cmd}"] + sys.argv[2:]
     commands[cmd]()
+
+
+if __name__ == "__main__":
+    main()

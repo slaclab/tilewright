@@ -1,166 +1,95 @@
-"""YAML contract schema validation for dataset configs.
+"""The soft vocabulary: canonical ids and aliases for the dataset-level facets.
 
-Validates dataset YAML configs against both structural requirements
-and the semantic model (vocabulary.yml).
+``vocabulary.yml`` lists, per facet, the ids we key discovery on and the aliases people
+actually type. ``resolve_aliases`` rewrites an alias to its id (and applies what the alias
+implies, e.g. ``EDRIXS`` -> ``RIXS`` + ``data_type: simulation``); ``check`` warns about a
+value on no list. A warning never blocks onboarding (ADR-0003): the dataset registers with
+the value as written, and ``scripts/vocab_report.py`` shows what is off-list on a server so
+a person can promote it by pull request.
+
+Works on plain dicts so it can run before the contract models see the metadata.
 """
 
 from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from .contract import DatasetConfig
+# metadata key -> facet list in vocabulary.yml
+FACETS = {
+    "method": "methods",
+    "data_type": "data_types",
+    "material": "materials",
+    "producer": "producers",
+    "facility": "facilities",
+    "project": "projects",
+    "proposal": "proposals",
+}
 
 
-def load_catalog_model():
-    """Load and parse the bundled semantic model (vocabulary.yml)."""
-    path = Path(__file__).parent / "vocabulary.yml"
-    yaml = YAML()
-    with open(path) as f:
-        return yaml.load(f)
+def load_vocabulary():
+    """The bundled vocabulary as a dict of facet -> list of entries."""
+    with open(Path(__file__).parent / "vocabulary.yml") as f:
+        return YAML(typ="safe").load(f) or {}
 
 
-def get_alias_map(model, field_name):
-    """Build a mapping from alias IDs to (canonical_id, implies_dict).
-
-    Scans the vocabulary entries for 'aliases' fields and returns a dict
-    that maps each alias to the canonical ID and any implied field values.
-
-    Args:
-        model: Parsed catalog model dict.
-        field_name: Key in the model (e.g., "methods", "materials").
-
-    Returns:
-        dict: {alias_id: {"canonical": canonical_id, "implies": {...}}}
-    """
-    if field_name not in model:
-        return {}
-    alias_map = {}
-    for entry in model[field_name]:
-        for alias in entry.get("aliases", []):
+def alias_map(vocab, facet):
+    """``{alias: {"canonical": id, "implies": {...}}}`` for one facet list."""
+    out = {}
+    for entry in vocab.get(facet) or []:
+        for alias in entry.get("aliases") or []:
             if isinstance(alias, dict):
-                alias_map[alias["id"]] = {
-                    "canonical": entry["id"],
-                    "implies": alias.get("implies", {}),
-                }
+                out[alias["id"]] = {"canonical": entry["id"], "implies": alias.get("implies") or {}}
             else:
-                # Simple string alias (e.g., materials aliases: [NIPS, nips3])
-                alias_map[alias] = {
-                    "canonical": entry["id"],
-                    "implies": {},
-                }
-    return alias_map
+                out[alias] = {"canonical": entry["id"], "implies": {}}
+    return out
 
 
-def resolve_aliases(cfg, model):
-    """Resolve any alias values in metadata to their canonical IDs.
+def resolve_aliases(metadata, vocab):
+    """Rewrite aliases in ``metadata`` (a dict, mutated in place) to canonical ids.
 
-    Modifies cfg["metadata"] in place. Returns a list of resolution
-    messages (informational, not warnings).
-
-    Args:
-        cfg: Parsed dataset config dict.
-        model: Parsed catalog model dict.
-
-    Returns:
-        list[str]: Messages about resolved aliases.
+    Returns informational messages, one per rewrite. A facet that holds a list
+    (``method``) is rewritten element-wise; an alias's ``implies`` fills fields the
+    author left empty.
     """
     messages = []
-    metadata = cfg.get("metadata", {})
-
-    # Resolve method aliases
-    method_aliases = get_alias_map(model, "methods")
-    methods = metadata.get("method", [])
-    if isinstance(methods, list):
+    if not isinstance(metadata, dict):
+        return messages
+    for field, facet in FACETS.items():
+        aliases = alias_map(vocab, facet)
+        value = metadata.get(field)
+        if value is None or not aliases:
+            continue
+        values = value if isinstance(value, list) else [value]
         resolved = []
-        for m in methods:
-            if m in method_aliases:
-                info = method_aliases[m]
-                resolved.append(info["canonical"])
-                messages.append(
-                    f"Resolved alias '{m}' → '{info['canonical']}'"
-                )
-                # Apply implied fields (e.g., data_type: simulation)
-                for k, v in info.get("implies", {}).items():
-                    if not metadata.get(k):
-                        metadata[k] = v
-                        messages.append(
-                            f"  implied {k}={v} from alias '{m}'"
-                        )
-            else:
-                resolved.append(m)
-        metadata["method"] = resolved
-
-    # Resolve material aliases
-    mat_aliases = get_alias_map(model, "materials")
-    mat = metadata.get("material")
-    if mat and mat in mat_aliases:
-        info = mat_aliases[mat]
-        metadata["material"] = info["canonical"]
-        messages.append(f"Resolved material alias '{mat}' → '{info['canonical']}'")
-
+        for v in values:
+            hit = aliases.get(v)
+            if hit is None:
+                resolved.append(v)
+                continue
+            resolved.append(hit["canonical"])
+            messages.append(f"metadata.{field}: alias '{v}' -> '{hit['canonical']}'")
+            for k, implied in hit["implies"].items():
+                if not metadata.get(k):
+                    metadata[k] = implied
+                    messages.append(f"metadata.{k}: '{implied}' implied by '{v}'")
+        metadata[field] = resolved if isinstance(value, list) else resolved[0]
     return messages
 
 
-def validate(cfg):
-    """Validate a parsed dataset YAML config.
-
-    Returns a list of non-fatal warning strings. Raises pydantic ``ValidationError``
-    if the config violates the structural contract.
-    """
+def check(metadata, vocab):
+    """Warnings for facet values on no list. Never raises."""
     warnings = []
-    model = load_catalog_model()
-
-    # Resolve aliases before validation (mutates cfg in place).
-    warnings.extend(resolve_aliases(cfg, model))
-
-    # Structural validation — pydantic raises ValidationError on any violation.
-    config = DatasetConfig.model_validate(cfg)
-
-    metadata = config.metadata
-    _validate_vocab(metadata, "method", "methods", model, warnings, is_list=True)
-    _validate_vocab(metadata, "data_type", "data_types", model, warnings)
-    _validate_vocab(metadata, "material", "materials", model, warnings)
-    _validate_vocab(metadata, "producer", "producers", model, warnings)
-    _validate_vocab(metadata, "facility", "facilities", model, warnings)
-    _validate_vocab(metadata, "project", "projects", model, warnings)
-
-    # Cross-field advisory checks (producer↔simulation, facility↔experimental).
-    dt = metadata.data_type
-    if dt == "experimental" and not metadata.facility:
-        warnings.append("data_type is 'experimental' but no 'facility' specified")
-    if dt == "simulation" and not metadata.producer:
-        warnings.append("data_type is 'simulation' but no 'producer' specified")
-    if dt == "experimental" and metadata.producer:
-        warnings.append(
-            "data_type is 'experimental' but 'producer' is set"
-            " — producer is typically for simulations"
-        )
-    if dt == "simulation" and metadata.facility:
-        warnings.append(
-            "data_type is 'simulation' but 'facility' is set"
-            " — facility is typically for experiments"
-        )
-
+    for field, facet in FACETS.items():
+        entries = vocab.get(facet) or []
+        if not entries:
+            continue
+        accepted = {e["id"] for e in entries} | set(alias_map(vocab, facet))
+        value = metadata.get(field)
+        if value is None:
+            continue
+        for v in (value if isinstance(value, list) else [value]):
+            if v not in accepted:
+                warnings.append(f"metadata.{field} '{v}' is not in the vocabulary; it is "
+                                f"registered as written (known: "
+                                f"{', '.join(sorted(e['id'] for e in entries))})")
     return warnings
-
-
-def _validate_vocab(metadata, field, model_key, model, warnings, is_list=False):
-    """Check a metadata field against the catalog model vocabulary.
-
-    `metadata` is a validated DatasetMetadata model. Accepts both canonical IDs
-    and known aliases.
-    """
-    value = getattr(metadata, field, None)
-    if value is None:
-        return
-    allowed = [entry["id"] for entry in model.get(model_key, [])]
-    aliases = get_alias_map(model, model_key)
-    if not allowed:
-        return
-    all_accepted = set(allowed) | set(aliases.keys())
-    values = value if is_list and isinstance(value, list) else [value]
-    for v in values:
-        if v not in all_accepted:
-            warnings.append(
-                f"metadata.{field} '{v}' not in catalog model — allowed: {allowed}"
-            )

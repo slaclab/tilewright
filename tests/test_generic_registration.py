@@ -321,10 +321,8 @@ class TestGenericBehavior:
                 "key": "DTYPE_PROBE",
                 "metadata": {"method": ["RIXS"], "data_type": "simulation",
                              "material": "NiPS3", "producer": "edrixs"},
-                "data": {"directory": str(data_dir), "layout": "per_entity",
-                         "file_pattern": "*.h5"},
+                "source": {"files": {"directory": str(data_dir), "pattern": "*.h5"}},
                 "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}],
-                "parameters": {"location": "root_scalars"},
             }, fh)
 
         ent_path, art_path = generate_manifests(

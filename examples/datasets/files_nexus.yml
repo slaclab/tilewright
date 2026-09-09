@@ -1,0 +1,51 @@
+# files, NeXus-structured: one NeXus file per entity (here, one S(Q,E) reduction per
+# incident energy). Nothing here is NeXus-specific: scalars spread over several groups
+# become nested metadata through `params.groups`, and the NXdata arrays are artifacts.
+#
+#   Ei60_NiPS3_SQE.h5
+#   └── entry/                          [NXentry]
+#       ├── data/                       [NXdata]
+#       │   ├── data        (280, 260)  → artifact
+#       │   ├── data_errors (280, 260)  → artifact
+#       │   ├── E           (281,) meV  → artifact (the grid follows Ei, so it is per entity)
+#       │   └── Q           (261,) 1/Å  → artifact
+#       ├── instrument/   Ei, Speed1, name, ...   → metadata.instrument.*
+#       ├── parameters/   temperature             → metadata.parameters.*
+#       ├── sample/       chemical_formula, mass  → metadata.sample.*
+#       └── definition, title, start_time         → metadata.entry.*
+#
+# Each field's HDF5 attributes (units, long_name, ...) ride along as `<field>_units` etc.
+# Queryable as Key("instrument.Ei") > 50.
+# Expected: entities = files matched, artifacts = entities × 4.
+
+label: Example Files NeXus
+key: EXAMPLE_FILES_NEXUS
+
+metadata:
+  method: [INS]
+  data_type: experimental
+  material: NiPS3
+  facility: SNS
+  instrument: SEQUOIA
+  proposal: IPTS-37598
+  project: MAIQMag
+
+source:
+  files:
+    directory: /abs/path/to/nexus_files
+    pattern: "*.h5"
+    params:
+      groups:                        # name → HDF5 group; scalars nest as metadata.<name>.<field>
+        instrument: /entry/instrument
+        parameters: /entry/parameters
+        sample:     /entry/sample
+        entry:      /entry           # root-level scalars: definition, title, start_time
+      exclude: [/entry/instrument/BL17:SEEMeta:JSON]   # a large JSON blob, not a parameter
+      # recursive: true              # would also capture /entry/instrument/detector/*
+    identity: provenance             # repeated runs may share every parameter: identify by file
+
+artifacts:
+  - {type: data,        dataset: /entry/data/data}
+  - {type: data_errors, dataset: /entry/data/data_errors}
+  - {type: E,           dataset: /entry/data/E}
+  - {type: Q,           dataset: /entry/data/Q}

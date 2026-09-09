@@ -1,0 +1,36 @@
+# batch: many entities stacked along axis 0 of each file's datasets; entity i is row i.
+#
+#   /abs/path/to/sim/
+#   ├── batch_0/simulations.h5
+#   │   ├── /spectra      (2000, 151, 40)  → artifact, one (151, 40) row per entity
+#   │   ├── /params/tenDq (2000,)          → parameter, one value per entity
+#   │   ├── /params/sigma (2000,)
+#   │   ├── /eloss        (151,)           → shared axis (identical in every file)
+#   │   └── /omega_bounds (2,)             → shared axis
+#   ├── batch_1/simulations.h5
+#   └── ...
+#
+# Expected: entities = Σ rows over files (5 × 2000 = 10000), artifacts = entities × 1.
+
+label: Example Batch
+key: EXAMPLE_BATCH
+
+metadata:
+  method: [RIXS]
+  data_type: simulation
+  material: NiPS3
+  producer: lajer2025Hamiltonian
+  project: MAIQMag
+
+source:
+  batch:
+    directory: /abs/path/to/sim
+    pattern: "*/simulations.h5"
+    params: {group: /params}       # 1-D datasets of length N; 0-dim ones broadcast
+
+artifacts:
+  - {type: rixs_spectrum, dataset: /spectra}
+
+shared:
+  - {type: eloss, dataset: /eloss}
+  - {type: omega_bounds, dataset: /omega_bounds}
