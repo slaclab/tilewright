@@ -12,8 +12,7 @@ them, for seven facets: `method`, `material`, `producer`, `project`, `proposal`,
 An unknown value warns and validates. Your dataset onboards either way.
 
 - A known alias is rewritten to its canonical id: `EDRIXS` becomes `RIXS`, `nips3` becomes
-  `NiPS3`, `HRSTEM` becomes `STEM`. Some aliases imply a default too, so `EDRIXS` also
-  implies `data_type: simulation`.
+  `NiPS3`, `HRSTEM` becomes `STEM`. An alias changes spelling and nothing else.
 - An unknown value is left as you wrote it, and `tilewright manifest` prints a note.
 
 The stricter option would be to reject unknown values. That fails badly for the first
@@ -31,7 +30,7 @@ are soft.
 By pull request, from evidence. `scripts/vocab_report.py` asks a live server for the
 distinct values of every facet, diffs them against the vocabulary, and prints what is
 off-list with a count and an example dataset. A person then decides, per value, whether
-it is an alias of an existing id or a new id, writes the label and any implied fields, and
+it is an alias of an existing id or a new id, writes the label, and
 opens the PR; the `vocab-review` skill walks through it. Nothing is promoted
 automatically, because the label, the aliases and the implications are judgment.
 

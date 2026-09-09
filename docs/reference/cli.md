@@ -85,7 +85,10 @@ tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-
   proceeds; a different fingerprint is refused with both printed; a container without one
   needs `--adopt` ([identity and keys](../explanation/identity.md)).
 - **Incremental.** An entity whose key already exists is skipped, so a re-run resumes
-  rather than duplicates.
+  rather than duplicates. A skipped artifact whose source file changed on disk since it
+  was registered (modification time or size, stamped at registration) is reported as
+  `Changed on disk` and the command exits `1` with the rebuild steps; nothing is
+  rewritten in place.
 - **Shared axes go first**: the manifest's `uid`-less rows, one array child of the dataset
   container each, over the same transport as entity artifacts. Independent of `-n`; an
   existing axis is skipped.

@@ -56,6 +56,17 @@ def nips3_manifests():
     return ent_df, art_df, str(nips3_dir)
 
 
+def on_server(art_rows):
+    """What ``ent_container.items()`` returns for artifacts already registered from these
+    manifest rows: (key, node) pairs whose metadata carries the file stamps."""
+    nodes = []
+    for _, row in art_rows.iterrows():
+        node = MagicMock()
+        node.metadata = {"file_mtime": row.get("file_mtime"), "file_size": row.get("file_size")}
+        nodes.append((row["type"], node))
+    return nodes
+
+
 def register_entity(manifests, row=0, dataset_key="TEST_KEY",
                     server_base_dir=None, inherited=None, upload=False):
     """Register one entity against a mock parent; return what it sent to Tiled.
@@ -101,7 +112,7 @@ class TestVDPRegistration:
 
     def test_registers_entity_and_all_its_artifacts(self, vdp_manifests):
         reg = register_entity(vdp_manifests)
-        assert reg.result == (1, 3, 0, 0)          # 1 entity, 3 artifacts, 0 skipped, 0 failed
+        assert reg.result == (1, 3, 0, 0, 0)          # 1 entity, 3 artifacts, 0 skipped, 0 failed
         assert len(reg.artifacts) == 3
 
     def test_entity_key_derived_from_uid(self, vdp_manifests):
@@ -162,10 +173,10 @@ class TestVDPRegistration:
         from tilewright.register import _register_one_entity
 
         ent_df, art_df, base_dir = vdp_manifests
+        mine = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
         parent = MagicMock()
         parent.__contains__.return_value = True    # already registered, complete:
-        parent.__getitem__.return_value.keys.return_value = list(
-            art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]["type"])
+        parent.__getitem__.return_value.items.return_value = on_server(mine)
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
@@ -174,7 +185,7 @@ class TestVDPRegistration:
             dataset_key="TEST_KEY",
         )
 
-        assert result == (0, 0, 1, 0)              # counted as skipped
+        assert result == (0, 0, 1, 0, 0)           # counted as skipped, nothing stale
         parent.create_container.assert_not_called()
         parent.__getitem__.return_value.new.assert_not_called()
 
@@ -190,7 +201,8 @@ class TestVDPRegistration:
         parent = MagicMock()
         parent.__contains__.return_value = True
         existing = parent.__getitem__.return_value
-        existing.keys.return_value = mine[:1]                  # only the first attached
+        rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
+        existing.items.return_value = on_server(rows.iloc[:1])  # only the first attached
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
@@ -199,10 +211,34 @@ class TestVDPRegistration:
             dataset_key="TEST_KEY",
         )
 
-        assert result == (0, len(mine) - 1, 1, 0)              # skipped entity, added the rest
+        assert result == (0, len(mine) - 1, 1, 0, 0)           # skipped entity, added the rest
         parent.create_container.assert_not_called()            # the container is reused
         assert [c.kwargs["key"] for c in existing.new.call_args_list] == mine[1:]
         assert "half-registered" in capsys.readouterr().out
+
+    def test_changed_file_is_reported_not_rewritten(self, vdp_manifests, capsys):
+        """The manifest's file_mtime differs from the one stamped on the server: the
+        artifact is counted as stale and never rewritten (registration cannot open the
+        file to know which side is right)."""
+        from tilewright.register import _register_one_entity
+
+        ent_df, art_df, base_dir = vdp_manifests
+        rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
+        parent = MagicMock()
+        parent.__contains__.return_value = True
+        nodes = on_server(rows)
+        nodes[0][1].metadata["file_mtime"] = "2020-01-01T00:00:00+00:00"   # older on the server
+
+        result = _register_one_entity(
+            ent_df.iloc[0], list(ent_df.columns),
+            art_df.groupby("uid"), list(art_df.columns),
+            parent, base_dir=base_dir, server_base_dir=None,
+            dataset_key="TEST_KEY",
+        )
+
+        assert result == (0, 0, 1, 0, 1)
+        parent.__getitem__.return_value.new.assert_not_called()
+        assert "changed on disk since registration" in capsys.readouterr().out
 
 
 # ─── NiPS3-style: batched files ──────────────────────────────────────────────
@@ -213,7 +249,7 @@ class TestNiPS3Registration:
 
     def test_registers_entity_and_all_its_artifacts(self, nips3_manifests):
         reg = register_entity(nips3_manifests)
-        assert reg.result == (1, 2, 0, 0)
+        assert reg.result == (1, 2, 0, 0, 0)
         assert set(reg.artifacts) == {"rixs", "mag"}
 
     def test_entity_metadata_has_nips3_params(self, nips3_manifests):
@@ -392,7 +428,7 @@ class TestUploadMode:
 
         reg = register_entity(vdp_manifests, upload=True)
         assert not reg.artifacts                    # the DataSource route is idle
-        assert reg.result == (1, 3, 0, 0)
+        assert reg.result == (1, 3, 0, 0, 0)
 
         ent_df, art_df, base_dir = vdp_manifests
         uid = str(ent_df.iloc[0]["uid"])
@@ -430,7 +466,7 @@ class TestUploadMode:
         reg = register_entity((ent_df, art_df, base_dir), upload=True)
         assert not reg.uploads
         n_arts = (art_df["uid"] == str(ent_df.iloc[0]["uid"])).sum()
-        assert reg.result == (1, 0, 0, n_arts)
+        assert reg.result == (1, 0, 0, n_arts, 0)
 
 
 # ─── Shared axes: artifact rows with no uid, registered under the dataset ─────
@@ -480,7 +516,7 @@ class TestSharedAxes:
         from tiled.structures.core import StructureFamily
         art_df, base_dir, _ = shared_setup
         parent, changed = self._drive(art_df, base_dir)
-        assert changed is True
+        assert changed.changed
         kw = parent.new.call_args.kwargs
         assert kw["key"] == "energy"
         assert kw["structure_family"] == StructureFamily.array
@@ -505,7 +541,7 @@ class TestSharedAxes:
         import numpy as np
         art_df, base_dir, energy = shared_setup
         parent, changed = self._drive(art_df, base_dir, upload=True)
-        assert changed is True
+        assert changed.changed
         data = parent.write_array.call_args.args[0]
         kw = parent.write_array.call_args.kwargs
         np.testing.assert_array_equal(data, energy)
@@ -516,7 +552,7 @@ class TestSharedAxes:
     def test_existing_axis_is_skipped(self, shared_setup):
         art_df, base_dir, _ = shared_setup
         parent, changed = self._drive(art_df, base_dir, existing={"energy"})
-        assert changed is False
+        assert not changed.changed
         parent.new.assert_not_called()
         parent.write_array.assert_not_called()
 
@@ -525,7 +561,7 @@ class TestSharedAxes:
         bad = art_df.copy()
         bad["shape"] = "[99]"
         parent, changed = self._drive(bad, base_dir, upload=True)
-        assert changed is False
+        assert not changed.changed
         parent.write_array.assert_not_called()
 
     def test_shared_rows_do_not_leak_into_entities(self, shared_setup, vdp_manifests):

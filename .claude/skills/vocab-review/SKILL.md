@@ -32,8 +32,9 @@ its description before deciding. For each value, exactly one of:
 
 - **Alias of an existing id.** The author meant something already listed under a
   different spelling (`HRSTEM` → `STEM`, `PowderDiffraction` → `Diffraction`, `Mantid` →
-  `mantid`). Add it to that entry's `aliases`. If the alias implies another field the way
-  `EDRIXS` implies `data_type: simulation`, write the `implies` mapping.
+  `mantid`). Add it to that entry's `aliases`. An alias changes spelling only; if the
+  value carries extra meaning (EDRIXS is always a simulation), that stays the author's
+  to write in `data_type`.
 - **New id.** A genuinely new method, material, producer, facility, project or proposal.
   Add an entry with `id` (as authors will type it), a `label` (the full name), and for
   producers the `repo`. Keep ids short and stable; put alternative spellings in `aliases`.

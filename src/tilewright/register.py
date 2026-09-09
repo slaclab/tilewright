@@ -40,6 +40,8 @@ import datetime
 import json
 import os
 import time
+from collections import namedtuple
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import h5py
@@ -198,10 +200,12 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
     the main thread can aggregate across futures without shared state.
 
     Returns:
-        (ent_added, art_added, skipped, art_failed) — exactly one of
+        (ent_added, art_added, skipped, art_failed, stale) — exactly one of
         ent_added or skipped is 1; art_added counts artifacts successfully
         registered (for a skipped entity: the ones a crashed earlier run left
-        missing), art_failed counts artifacts that raised during register.
+        missing), art_failed counts artifacts that raised during register, and
+        stale counts existing artifacts whose source file changed on disk since
+        they were registered (see ``_changed_on_disk``).
     """
     if inherited is None:
         inherited = {}
@@ -219,10 +223,17 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
         # existing container. (A *changed* path is not detected here: an
         # existing artifact is never rewritten — delete and re-register.)
         ent_container = parent_client[ent_key]
-        present = set(ent_container.keys())
+        present = {key: node.metadata for key, node in ent_container.items()}
+        stale = 0
+        for row in art_rows:
+            if _changed_on_disk(present.get(make_artifact_key(row)), row):
+                stale += 1
+                print(f"  WARNING ent={ent_key} art={make_artifact_key(row)}: file changed "
+                      f"on disk since registration (manifest {row.get('file_mtime')}, "
+                      f"server {present[make_artifact_key(row)].get('file_mtime')})")
         art_rows = [row for row in art_rows if make_artifact_key(row) not in present]
         if not art_rows:
-            return (0, 0, 1, 0)
+            return (0, 0, 1, 0, stale)
         print(f"  WARNING ent={ent_key} half-registered: {len(present)} of "
               f"{len(present) + len(art_rows)} artifacts on the server; "
               f"registering the {len(art_rows)} missing")
@@ -254,6 +265,7 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
             key=ent_key, metadata=metadata,
         )
         ent_added = 1
+        stale = 0
 
     art_added = 0
     art_failed = 0
@@ -266,7 +278,25 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
             art_failed += 1
             print(f"  ERROR ent={ent_key} art={make_artifact_key(art_row)}: {e}")
 
-    return (ent_added, art_added, 1 - ent_added, art_failed)
+    return (ent_added, art_added, 1 - ent_added, art_failed, stale)
+
+
+def _changed_on_disk(node_metadata, art_row):
+    """True if an artifact already on the server came from a file that has since changed.
+
+    Registration never opens files, so this is the one drift check it can make: the
+    manifest records each source file's modification time and size, registration stamps
+    them on the array node, and a rerun compares the two. A mismatch means the catalog
+    serves stale bytes (uploaded) or an unchecked file (pointer); an existing artifact is
+    never rewritten, so the fix is regenerate, delete, register.
+    """
+    if not isinstance(node_metadata, Mapping) or not node_metadata:
+        return False
+    for col in ("file_mtime", "file_size"):
+        theirs, ours = node_metadata.get(col), art_row.get(col)
+        if theirs is not None and ours is not None and pd.notna(ours) and str(theirs) != str(ours):
+            return True
+    return False
 
 
 def _register_artifact(container, art_row, art_columns, base_dir, server_base_dir,
@@ -319,6 +349,17 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
             key=art_key,
             metadata=art_metadata,
         )
+
+
+class RegisterSummary(namedtuple(
+        "RegisterSummary", "entities artifacts skipped failed shared_added shared_skipped stale")):
+    """What one ``register_dataset_http`` run did. ``stale`` counts artifacts already on
+    the server whose source file changed on disk since registration; nothing is
+    rewritten for them and the caller says how to rebuild."""
+
+    @property
+    def changed(self):
+        return self.entities > 0 or self.artifacts > 0 or self.shared_added > 0
 
 
 def _now():
@@ -426,13 +467,15 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
         adopt: Claim a container registered before fingerprints existed.
 
     Returns:
-        bool: True if any entities or shared axes were registered.
+        RegisterSummary: the counts printed in the summary block; ``.stale`` is the
+        number of already-registered artifacts whose source file changed on disk.
     """
     start_time = time.time()
     ent_count = 0
     art_count = 0
     skip_count = 0
     art_fail_count = 0
+    stale_count = 0
 
     storage = STORAGE_UPLOADED if upload else STORAGE_EXTERNAL
     parent_client = dataset_container(client, dataset_key, dataset_metadata, storage,
@@ -453,6 +496,9 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
         key = make_artifact_key(row)
         if key in parent_client:
             shared_skipped += 1
+            if _changed_on_disk(parent_client[key].metadata, row):
+                stale_count += 1
+                print(f"  WARNING shared axis '{key}': file changed on disk since registration")
             continue
         try:
             _register_artifact(
@@ -488,11 +534,12 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
         ]
 
         for i, future in enumerate(as_completed(futures)):
-            ent_added, art_added, skipped, art_failed = future.result()
+            ent_added, art_added, skipped, art_failed, stale = future.result()
             ent_count += ent_added
             art_count += art_added
             skip_count += skipped
             art_fail_count += art_failed
+            stale_count += stale
 
             if (i + 1) % 5 == 0 or (i + 1) == n:
                 elapsed = time.time() - start_time
@@ -510,9 +557,12 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     if len(shared_rows):
         print(f"  Shared axes:     {shared_added} registered, "
               f"{shared_skipped} skipped, {shared_failed} errors")
+    if stale_count:
+        print(f"  Changed on disk: {stale_count} (the catalog serves stale data for these)")
     print(f"  Time:            {elapsed_total:.1f} seconds")
 
-    return ent_count > 0 or art_count > 0 or shared_added > 0
+    return RegisterSummary(ent_count, art_count, skip_count, art_fail_count,
+                           shared_added, shared_skipped, stale_count)
 
 
 def verify_registration_http(client, dataset_keys=None):

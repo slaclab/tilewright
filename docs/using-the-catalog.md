@@ -84,7 +84,7 @@ arr[0:5, :]                               # numpy array
 ```
 
 The server does the slice, so five rows of a ten-thousand-entity batch file reads five
-rows ([sliced reads](explanation/sliced-reads.md)).
+rows ([sliced reads](explanation/data-model.md#an-entity-is-a-slice)).
 
 Whole entity in one round trip:
 

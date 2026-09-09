@@ -53,6 +53,16 @@ changes that entity's key.
 
 Nothing about identity appears in the YAML unless you write `identity: provenance`.
 
+## What a rerun can and cannot see
+
+`register` never opens a file, so it cannot tell whether an array changed. What it can
+compare is the modification time and size the manifest recorded against the ones stamped
+on the array node when it was registered. A mismatch on a skipped artifact is reported as
+changed on disk, the command exits non-zero, and nothing is rewritten: the fix is
+regenerate, delete, register. Under `params` identity a regenerated file with the same
+parameters would otherwise be skipped silently and the catalog would serve the old bytes;
+this check is what stops that.
+
 ## What is deliberately not identity
 
 Attribute labels (`Ei_units`) are stored beside a parameter but never hashed, so fixing a

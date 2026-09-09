@@ -60,6 +60,51 @@ the prose also exists as a key, and the key is authoritative. Anything a reader 
 know before trusting the data (a masked region, a trust ceiling) belongs there too, as
 prose plus the keys the author names.
 
+## An entity is a slice
+
+A `batch` dataset keeps ten thousand entities in one HDF5 file, arranged like a table
+whose rows are arrays:
+
+```
+spectra: shape (10000, 151, 40)
+         ─────  ───────────────
+         rows   each row is a 151x40 image
+```
+
+Slicing on axis 0 is the HDF5 equivalent of a `WHERE` clause, and the catalog takes that
+literally. Registration never copies a batch array apart. Each entity's artifact is a
+pointer naming the file, the dataset inside it, and one row; a reader asks for
+`client[DATASET][ENTITY][ARTIFACT][0:5]`, gets a `(5, 40)` array, and sees no sign it
+came from row 42 of a file holding 9,999 others. So a batch dataset costs about what its
+manifest costs: ten thousand entities register over HTTP, the catalog database lands
+around 5 MB, and the gigabytes of arrays are never read. The same property lets a server
+that cannot see your files be handed pointers to them anyway.
+
+Tiled's stock HDF5 adapter would defeat this: it materializes the whole
+`(10000, 151, 40)` dataset through dask before applying the user's slice. So arrays are
+registered against `LazyHDF5ArrayAdapter` (`src/tilewright/adapter.py`), which evaluates
+`h5py.Dataset[base_index][user_slice]` in one step and never reads more than was asked
+for. Cheap slicing is not an optimization bolted on afterwards; it is what makes the
+entity level possible for batch data. A server has to be told about the adapter
+([How to host a server](../host-a-server.md)).
+
+## Two ways in
+
+Serving slices over HTTP is enough for interactive work, not for a training loop pulling
+thousands of arrays where the per-request hop dominates. So the catalog records enough
+for both: every entity carries locator metadata naming its file, dataset, and row, and
+anyone on the same filesystem reads with h5py at full speed. Neither path needs the other;
+both come out of the same registration, and an uploaded dataset has only the first.
+Both are shown in [How to read a registered catalog](../using-the-catalog.md).
+
+## Readable keys
+
+No level of `client[DATASET][ENTITY][ARTIFACT]` uses an opaque UUID. A key like
+`EDRIXS_636ce3e41ea05` can be pasted into a message and still resolve tomorrow, because
+each level derives from something the producer declared: the dataset key from the
+label, the entity key from its identity, the artifact key from its `type`
+([identity and keys](identity.md)).
+
 ## What TileWright does
 
 Tiled stores the containers, answers the metadata queries, and slices the arrays.
@@ -68,5 +113,4 @@ TileWright decides what shape to register, and writes it the same way every time
 parameter name appears anywhere in its code. That is what makes it dataset-agnostic.
 
 See also [the Parquet manifest](../reference/manifest.md), where those columns come from,
-[identity and keys](identity.md) for how entities are named, and
-[sliced reads](sliced-reads.md) for how an artifact is served once registered.
+and [sources](sources.md) for where the entity boundary falls in each kind of data.

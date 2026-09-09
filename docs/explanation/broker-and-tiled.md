@@ -66,7 +66,7 @@ data, and TileWright answers them for this kind of data.
 - **One server-side adapter.** The only TileWright code that runs inside the server.
   Tiled's stock HDF5 adapter materializes a whole dataset through dask before slicing,
   which is pathological for batch sources; `LazyHDF5ArrayAdapter` slices in h5py instead
-  ([sliced reads](sliced-reads.md)). It is dispatched on the private mimetype
+  ([sliced reads](data-model.md#an-entity-is-a-slice)). It is dispatched on the private mimetype
   `application/x-hdf5-broker`, which a server must be told about.
 
 ## The dividing line

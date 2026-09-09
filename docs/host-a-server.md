@@ -34,7 +34,7 @@ readable_storage:
 ```
 
 The adapter line makes the server slice batched arrays in h5py instead of materializing
-whole datasets ([sliced reads](explanation/sliced-reads.md)). It is an import path
+whole datasets ([sliced reads](explanation/data-model.md#an-entity-is-a-slice)). It is an import path
 resolved inside the server, so `tilewright` must be installed in the server's
 environment. Without it, `tilewright register` succeeds and every read returns HTTP 500.
 

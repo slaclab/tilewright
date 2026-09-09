@@ -217,14 +217,15 @@ class TestVocabulary:
         for facet in FACETS.values():
             assert facet in vocab, facet
 
-    def test_alias_rewrites_and_implies(self):
-        raw = files_cfg(metadata={"method": ["EDRIXS"], "material": "NIPS", "data_type": ""})
-        raw["metadata"].pop("data_type")
+    def test_alias_rewrites_spelling_only(self):
+        raw = files_cfg(metadata={"method": ["EDRIXS"], "material": "NIPS", "data_type": "simulation"})
         cfg, notes = load_dataset(raw)
         assert cfg.metadata.method == ["RIXS"]
         assert cfg.metadata.material == "NiPS3"
-        assert cfg.metadata.data_type == "simulation"
-        assert any("implied" in n for n in notes)
+        assert [n for n in notes if "alias" in n] == [
+            "metadata.method: alias 'EDRIXS' -> 'RIXS'", "metadata.material: alias 'NIPS' -> 'NiPS3'"]
+        raw["metadata"].pop("data_type")
+        assert "metadata.data_type is required" in errors_of(raw)
 
     def test_unknown_value_warns_not_errors(self):
         raw = files_cfg(metadata={**META, "material": "Unobtainium", "method": ["HRSTEM"]})

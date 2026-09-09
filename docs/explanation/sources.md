@@ -82,7 +82,7 @@ ADR.
 
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
   and stores the row number in `index`. An entity is a slice, read by slicing in h5py
-  rather than pulling the whole stacked dataset ([sliced reads](sliced-reads.md)).
+  rather than pulling the whole stacked dataset ([sliced reads](data-model.md#an-entity-is-a-slice)).
 - **`groups`**: an artifact's `dataset` path resolves relative to each entity group.
 - **`files`**: the file is the entity boundary, so there is no index.
 - **`table`**: entity identity is the `id` column; nothing is served as an array.

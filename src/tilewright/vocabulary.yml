@@ -2,7 +2,7 @@
 #
 # An id is what discovery keys on: Key("material") == "NiPS3" finds every dataset whose
 # author wrote NiPS3, NIPS or nips3, because the aliases are rewritten to the id before
-# registration. An alias may `imply` other fields (EDRIXS is RIXS, simulated).
+# registration. An alias only changes spelling; it never fills another field.
 #
 # Values not listed here register as written, with a warning. To add one: edit this file
 # in a pull request (see CONTRIBUTING.md, "Adding a vocabulary term"); the vocab-review
@@ -15,9 +15,7 @@ methods:
     label: Inelastic Neutron Scattering
   - id: RIXS
     label: Resonant Inelastic X-ray Scattering
-    aliases:
-      - id: EDRIXS
-        implies: {data_type: simulation}
+    aliases: [EDRIXS]
   - id: Diffraction
     label: Diffraction
     aliases: [TOF_Laue_Diffraction, PowderDiffraction, XRD]

@@ -1,9 +1,8 @@
 """The soft vocabulary: canonical ids and aliases for the dataset-level facets.
 
 ``vocabulary.yml`` lists, per facet, the ids we key discovery on and the aliases people
-actually type. ``resolve_aliases`` rewrites an alias to its id (and applies what the alias
-implies, e.g. ``EDRIXS`` -> ``RIXS`` + ``data_type: simulation``); ``check`` warns about a
-value on no list. A warning never blocks onboarding (ADR-0003): the dataset registers with
+actually type. ``resolve_aliases`` rewrites an alias to its id (``EDRIXS`` -> ``RIXS``,
+``nips3`` -> ``NiPS3``); ``check`` warns about a value on no list. A warning never blocks onboarding (ADR-0003): the dataset registers with
 the value as written, and ``scripts/vocab_report.py`` shows what is off-list on a server so
 a person can promote it by pull request.
 
@@ -33,23 +32,17 @@ def load_vocabulary():
 
 
 def alias_map(vocab, facet):
-    """``{alias: {"canonical": id, "implies": {...}}}`` for one facet list."""
-    out = {}
-    for entry in vocab.get(facet) or []:
-        for alias in entry.get("aliases") or []:
-            if isinstance(alias, dict):
-                out[alias["id"]] = {"canonical": entry["id"], "implies": alias.get("implies") or {}}
-            else:
-                out[alias] = {"canonical": entry["id"], "implies": {}}
-    return out
+    """``{alias: canonical id}`` for one facet list."""
+    return {alias: entry["id"]
+            for entry in vocab.get(facet) or []
+            for alias in entry.get("aliases") or []}
 
 
 def resolve_aliases(metadata, vocab):
     """Rewrite aliases in ``metadata`` (a dict, mutated in place) to canonical ids.
 
     Returns informational messages, one per rewrite. A facet that holds a list
-    (``method``) is rewritten element-wise; an alias's ``implies`` fills fields the
-    author left empty.
+    (``method``) is rewritten element-wise. Nothing else in the metadata is touched.
     """
     messages = []
     if not isinstance(metadata, dict):
@@ -62,16 +55,12 @@ def resolve_aliases(metadata, vocab):
         values = value if isinstance(value, list) else [value]
         resolved = []
         for v in values:
-            hit = aliases.get(v)
-            if hit is None:
+            canonical = aliases.get(v)
+            if canonical is None:
                 resolved.append(v)
                 continue
-            resolved.append(hit["canonical"])
-            messages.append(f"metadata.{field}: alias '{v}' -> '{hit['canonical']}'")
-            for k, implied in hit["implies"].items():
-                if not metadata.get(k):
-                    metadata[k] = implied
-                    messages.append(f"metadata.{k}: '{implied}' implied by '{v}'")
+            resolved.append(canonical)
+            messages.append(f"metadata.{field}: alias '{v}' -> '{canonical}'")
         metadata[field] = resolved if isinstance(value, list) else resolved[0]
     return messages
 

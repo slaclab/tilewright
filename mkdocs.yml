@@ -136,7 +136,6 @@ nav:
       - Data model: explanation/data-model.md
       - Sources: explanation/sources.md
       - Identity and keys: explanation/identity.md
-      - Sliced reads: explanation/sliced-reads.md
       - Soft vocabulary: explanation/vocabulary.md
       - NeXus support: explanation/nexus.md
   - Reference:

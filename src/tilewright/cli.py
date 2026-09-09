@@ -151,6 +151,7 @@ def register_main():
     client = from_uri(tiled_url, api_key=api_key)
     print(f"Connected to {tiled_url} ({len(client)} existing containers)")
 
+    stale_datasets = []
     for config_path, cfg in datasets:
         label, dataset_key = cfg.label, cfg.catalog_key
         body = cfg.source.body
@@ -206,7 +207,7 @@ def register_main():
             kwargs["max_workers"] = max_workers
 
         try:
-            register_dataset_http(client, ent_df, art_df, base_dir, label,
+            summary = register_dataset_http(client, ent_df, art_df, base_dir, label,
                                   dataset_key=dataset_key,
                                   dataset_metadata=dataset_metadata,
                                   server_base_dir=server_base_dir,
@@ -216,8 +217,18 @@ def register_main():
         except ValueError as e:
             print(f"\nERROR: {e}", file=sys.stderr)
             sys.exit(1)
+        stale = summary.stale
+        if stale:
+            print(f"\nERROR: {stale} artifact(s) of '{dataset_key}' changed on disk since they "
+                  f"were registered; an existing artifact is never rewritten. Rebuild:\n"
+                  f"    tilewright manifest {config_path}\n"
+                  f"    tilewright delete {dataset_key}\n"
+                  f"    tilewright register {config_path}", file=sys.stderr)
+            stale_datasets.append(dataset_key)
 
     verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets])
+    if stale_datasets:
+        sys.exit(1)
 
     print("\nDone!")
 

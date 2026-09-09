@@ -197,10 +197,13 @@ proceeds; different data under your label is refused, with both fingerprints and
 existing container's description printed, and you pick another label
 ([identity and keys](explanation/identity.md)).
 
-Regenerate first if a shape or dtype changed. After changing any path in the YAML:
-regenerate, `tilewright delete`, register again; existing artifacts are never rewritten.
-A metadata-only correction needs no delete: edit the YAML and
-`tilewright register --update`.
+Three kinds of change, three procedures:
+
+| You changed | Do |
+|---|---|
+| Dataset metadata in the YAML (description, contact, a facet) | `tilewright register --update`. One node is patched; Tiled keeps the previous metadata as a revision |
+| Nothing, but more entities exist (an interrupted run, new files) | `tilewright manifest --append`, then `register`. Existing entities are skipped |
+| The files, a path, a shape or dtype | `tilewright manifest`, `tilewright delete MY_DATASET`, `register`. Existing artifacts are never rewritten in place, and a rerun that finds a registered artifact's source file changed on disk stops and prints these three commands |
 
 ## 5. Read it back
 
