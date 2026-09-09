@@ -1,5 +1,5 @@
 <svg id="dg-layouts" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 250" role="img"
-     aria-label="The three layouts: per_entity where one file is one entity, batched where one row of a stacked dataset is one entity, and grouped where one HDF5 group is one entity."
+     aria-label="The sources: files where one file is one entity, batch where one row of a stacked dataset is one entity, and groups where one HDF5 group is one entity."
      font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" fill="currentColor">
   <style>
     #dg-layouts .box  { fill: none; stroke: currentColor; stroke-width: 1.4; }
@@ -11,7 +11,7 @@
     #dg-layouts .dim  { font-size: 10px; opacity: .5; }
     #dg-layouts .sep  { stroke: currentColor; opacity: .2; stroke-width: 1; }
   </style>
-  <text class="name" x="0"   y="16">per_entity</text>
+  <text class="name" x="0"   y="16">files</text>
   <text class="rule" x="0"   y="34">one file = one entity</text>
   <rect class="hit" x="0"  y="46" width="120" height="26" rx="4"/>
   <text class="mono" x="10" y="63">entity_0001.h5</text>
@@ -22,7 +22,7 @@
   <text class="dim" x="0" y="156">params: scalars at</text>
   <text class="dim" x="0" y="169">the file root</text>
   <line class="sep" x1="180" y1="8" x2="180" y2="200"/>
-  <text class="name" x="212" y="16">batched</text>
+  <text class="name" x="212" y="16">batch</text>
   <text class="rule" x="212" y="34">one row = one entity</text>
   <rect class="box" x="212" y="46" width="150" height="90" rx="4"/>
   <text class="mono" x="222" y="62">run.h5  /spectra</text>
@@ -36,7 +36,7 @@
   <text class="dim" x="212" y="169">usually /params</text>
   <text class="dim" x="212" y="182">shape drops axis 0</text>
   <line class="sep" x1="410" y1="8" x2="410" y2="200"/>
-  <text class="name" x="442" y="16">grouped</text>
+  <text class="name" x="442" y="16">groups</text>
   <text class="rule" x="442" y="34">one group = one entity</text>
   <rect class="box" x="442" y="46" width="170" height="90" rx="4"/>
   <text class="mono" x="452" y="62">samples.h5  /samples</text>

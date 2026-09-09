@@ -1,5 +1,5 @@
 <svg id="dg-paths" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 330" role="img"
-     aria-label="The path agreement trap: data.directory is a path on your host used by generate, server_base_dir is the same data as the server sees it and is written into the catalog, and readable_storage is the server's permission to read that root."
+     aria-label="The path agreement trap: directory is a path on your host used by manifest, server_base_dir is the same data as the server sees it and is written into the catalog, and readable_storage is the server's permission to read that root."
      font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" fill="currentColor">
   <style>
     #dg-paths .host  { fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -18,14 +18,14 @@
   </defs>
   <text class="zone" x="0" y="14">YOUR HOST</text>
   <rect class="host" x="0" y="22" width="270" height="120" rx="6"/>
-  <text class="key"  x="14" y="44">data.directory</text>
+  <text class="key"  x="14" y="44">directory</text>
   <text class="path" x="14" y="62">/sdf/data/…/results/Zhantao</text>
-  <text class="note" x="14" y="86">tcb generate globs this and</text>
+  <text class="note" x="14" y="86">tilewright manifest scans this and</text>
   <text class="note" x="14" y="101">reads each array's shape + dtype</text>
   <text class="note" x="14" y="125">required — always your own view</text>
   <text class="zone" x="370" y="14">THE SERVER</text>
   <rect class="host" x="370" y="22" width="270" height="120" rx="6"/>
-  <text class="key"  x="384" y="44">data.server_base_dir</text>
+  <text class="key"  x="384" y="44">server_base_dir</text>
   <text class="path" x="384" y="62">/prjmaiqmag01/…/Zhantao</text>
   <text class="note" x="384" y="86">stamped into the catalog as the</text>
   <text class="note" x="384" y="101">pointer the server follows on read</text>

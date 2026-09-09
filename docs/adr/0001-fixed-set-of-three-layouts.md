@@ -6,7 +6,7 @@ The broker supports exactly three dataset **layouts** — `per_entity`, `batched
 We chose this over (a) collapsing to a single canonical layout and (b) accepting arbitrary
 producer arrangements. A single layout would force every producer to physically reshape
 existing data (including the 19.5 GB grouped Zhantao set from the #72 study); arbitrary
-layouts are what make `tilewright inspect`/`tilewright generate` complex and is explicitly out of scope
+layouts are what make `tilewright generate` (now `tilewright manifest`; `inspect` was removed in 2026-04) complex and is explicitly out of scope
 ("we do not support an arbitrary number of dataset configurations"). Three fixed layouts
 cover the real producer data we have while keeping the data contract small enough to
 document precisely and onboard against — by an agent or a human — without code reference.

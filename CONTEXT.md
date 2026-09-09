@@ -1,89 +1,73 @@
-# Tiled Catalog Broker
+# TileWright
 
-A config-driven system for registering multi-modal scientific HDF5 datasets into a
-Tiled catalog so they can be consistently registered and discovered. The broker is
-**dataset-agnostic** but **not structure-agnostic**: producers must shape their data to
-one of a small, fixed set of supported layouts.
+A config-driven system for registering multi-entity scientific HDF5 datasets into a Tiled
+catalog so they can be consistently registered and discovered. TileWright is
+**dataset-agnostic** but **not structure-agnostic**: producers shape their data to one of
+a small, fixed set of supported sources.
 
 ## Language
 
 ### Hierarchy
 
-**Dataset**:
-A top-level container (VDP, EDRIXS, SUNNY, ...) with provenance metadata. Holds entities.
-_Avoid_: collection, repo.
+**Dataset**: a top-level container with facets (method, material, producer, contact,
+description). Holds entities. _Avoid_: collection, repo.
 
-**Entity**:
-A container whose physics parameters are queryable metadata; the unit a query selects.
-_Avoid_: sample, record, row.
+**Entity**: a container whose physics parameters are queryable metadata; the unit a query
+selects. _Avoid_: sample, record, row.
 
-**Artifact**:
-An array child of an entity (a spectrum, a magnetization curve). The thing arrays load from.
-_Avoid_: observable (that's the physics word; in the catalog it's an artifact), output.
+**Artifact**: an array child of an entity (a spectrum, an image). The thing arrays load
+from. _Avoid_: observable (the physics word), output.
 
-These three levels are nested Tiled **containers**, and an entity's parameters are a
-**free-form metadata dict** rather than declared columns — benchmarked against the flat and
-typed-column alternatives and kept because it is the only shape compatible with being
-dataset-agnostic (ADR-0004).
+**Shared axis**: an array identical for every entity, registered once as an array child of
+the dataset and announced as `shared_dataset_<type>`.
 
-### Onboarding
+These are nested Tiled **containers**; an entity's parameters are a **free-form metadata
+dict**, not declared columns (ADR-0004).
 
-**Onboarding**:
-The end-to-end process of taking a producer's HDF5 dataset and registering it into the
-catalog: author a dataset YAML (agent or human, against the contract surface) →
-`tilewright stamp-key` (key into the YAML) → `tilewright generate` (manifests) → `tilewright register`.
-Registration has exactly one route, HTTP `tilewright register` (ADR-0002); learning what a valid
-dataset looks like is the contract surface's job (see below), not a command's.
-_Avoid_: ingest, inspect.
+### The contract
 
-**Layout**:
-The physical on-disk arrangement of a dataset's HDF5 files. Exactly **three** are
-supported and this set is frozen (see ADR-0001):
-- `per_entity` — one HDF5 file per entity; scalars are parameters.
-- `batched` — entities stacked along axis-0 of datasets within each file.
-- `grouped` — one HDF5 group per entity inside a single file.
-_Avoid_: format, structure (reserve "structure" for the broader data contract).
+**Dataset YAML**: the per-dataset file, `<data root>/.tilewright/datasets/<KEY>.yml`,
+declaring label, metadata, source, artifacts, shared. The authored input; the Parquet
+manifest is the output.
 
-**Data contract**:
-The full set of rules a producer's data + YAML must satisfy to be onboarded: one of the
-three layouts, the YAML field contract, and the controlled vocabulary. "We tell users
-their data must follow this — we do not support arbitrary configurations."
+**Source**: where entities come from, one of exactly four tags (ADR-0006): `files` (one
+file per entity), `batch` (stacked on axis 0), `groups` (one group per entity), `table`
+(rows of a sidecar table, no arrays). Each tag owns only its keys. _Avoid_: layout, format.
 
-**Dataset YAML**:
-The per-dataset config file that declares identity, layout, artifacts, parameters, and
-metadata. The human-and-agent-authored input contract; the Parquet manifest is the output.
+**Identity**: how an entity's uid is computed (ADR-0007). `params` (default): a hash of
+parameter values. `provenance`: a hash of file path plus row or group; forced when there
+are no parameters. Duplicate identities fail the manifest.
 
-**Semantic model**:
-The controlled vocabulary in `vocabulary.yml` — canonical ids (and
-aliases) for `method`, `material`, `producer`, `project`, `facility`, `data_type`. It keeps
-cross-dataset discovery (`Key("project") == "MAIQMag"`) honest. It is **soft**: unknown
-values warn (not error), aliases normalize to canonical ids (ADR-0003). It is a
-normalization + reference layer, not a rigid gate.
-_Avoid_: schema (overloaded — the structural pydantic models are also a "schema").
+**Key**: the dataset container key, `slug(label)`, written by `tilewright manifest`.
 
-**Contract surface**:
-The referenceable artifacts that define what a valid dataset is — the pydantic YAML models
-(`contract.py`), the semantic model, the layout definitions, `docs/ONBOARDING.md`, and
-the annotated `datasets/examples/*.yml`. The onboarding principle is **implementation vs.
-contract**: an agent (or human) onboards by reading the *contract surface*, never by reading
-broker *implementation* (`generate.py`, `register.py`). Needing to reverse-engineer
-implementation to learn what a valid dataset looks like is a gap in the contract surface —
-fix the surface.
-_Avoid_: "source" (ambiguous — distinguish contract artifacts from implementation code).
+**Fingerprint**: a hash of which data a YAML describes (tag, server-visible directory,
+pattern, params, identity), stamped on the container; `register` refuses a different
+fingerprint under the same key.
+
+**Vocabulary**: canonical ids and aliases for the facets, in `vocabulary.yml`. Soft:
+unknown values warn (ADR-0003). Grows by pull request. _Avoid_: schema, semantic model.
+
+**Contract surface**: the artifacts that define a valid dataset: `contract.py`, the
+generated YAML reference, `vocabulary.yml`, `examples/datasets/*.yml`,
+`docs/ONBOARDING.md`. Onboarding reads the surface, never the implementation.
+
+### Commands
+
+**`tilewright manifest`**: validate the YAML, write the key, scan the data, write the two
+Parquet manifests. _Avoid_: generate, stamp-key, inspect.
+
+**`tilewright register`**: manifests → server over HTTP; the single route (ADR-0002).
+Pointer by default, `--upload` streams arrays; `--update` merge-patches dataset metadata.
+
+**Transport**: `external` (the server reads the files) or `uploaded` (the server holds the
+bytes); a dataset is one or the other.
+
+**Read paths**: through the server, or straight from the files via locators. _Avoid_:
+Mode A, Mode B.
 
 ## Relationships
 
-- A **Dataset** contains one or more **Entities**; an **Entity** contains one or more **Artifacts**.
-- A **Dataset YAML** describes exactly one **Dataset** and declares its **Layout**.
-- The **Semantic model** constrains the metadata vocabulary used across all **Datasets**.
-
-## Flagged ambiguities
-
-- **Controlled-vocabulary drift (resolved).** The #72 study found agents without sight of
-  the semantic model independently invented `measurement` (use **`method`**),
-  `organization` (use **`project`**), and `Sunny.jl` (use the canonical id **`sunny_jl`**).
-  These synonyms break cross-dataset queries; the semantic model's canonical ids are
-  authoritative.
-- **"schema"** is overloaded: it means both the structural contract (pydantic models in
-  `contract.py`) and, loosely, the semantic vocabulary. Prefer **semantic model** for
-  the vocabulary and **YAML contract / pydantic models** for structure.
+- A Dataset contains Entities; an Entity contains Artifacts; a Dataset may hold Shared axes.
+- A Dataset YAML describes exactly one Dataset and declares its Source and Identity.
+- The Vocabulary constrains the facet values of every Dataset; the Contract constrains its
+  shape.

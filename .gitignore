@@ -264,3 +264,9 @@ knowledge/
 # Solved per-machine by `pixi install`. Not checked in: there is no CI keeping it
 # consistent with uv.lock, so a stale copy is worse than none.
 pixi.lock
+
+# Server state from local `tiled serve` runs (config.yml, config.upload.yml)
+*.db
+*.db-journal
+catalog.db*
+upload_catalog.db*

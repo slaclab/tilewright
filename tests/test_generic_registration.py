@@ -120,7 +120,7 @@ class TestVDPRegistration:
             assert param in meta
 
     def test_entity_metadata_has_locators(self, vdp_manifests):
-        """Locators (path_, dataset_) stored in entity metadata for Mode A."""
+        """Locators (path_, dataset_) stored in entity metadata for the direct-file path."""
         meta = register_entity(vdp_manifests).metadata
         for art_type in ("mh_powder_30T", "gs_state", "ins_12meV"):
             assert f"path_{art_type}" in meta
@@ -298,7 +298,7 @@ class TestGenericBehavior:
         """dtype is captured from the file at generate time and carried through.
 
         End-to-end because that is now the whole guarantee: registration never
-        opens HDF5, so if `tilewright generate` doesn't record the real dtype nothing
+        opens HDF5, so if `tilewright manifest` does not record the real dtype nothing
         downstream can recover it. The read adapter re-validates dtype against
         the file and raises on a mismatch, so a wrong value registers cleanly
         and then fails *every* read — a failure mode no float64 fixture catches.
@@ -347,7 +347,7 @@ class TestGenericBehavior:
         _, art_df, _ = vdp_manifests
         require_shape_dtype(art_df)                     # current manifests are fine
 
-        with pytest.raises(ValueError, match="tilewright generate"):
+        with pytest.raises(ValueError, match="tilewright manifest"):
             require_shape_dtype(art_df.drop(columns=["shape", "dtype"]))
 
     def test_server_base_dir_overrides_asset_uri(self, vdp_manifests):
@@ -552,7 +552,7 @@ class TestSharedAxes:
 class TestNestedMetadata:
 
     def test_dotted_columns_nest(self, vdp_manifests):
-        """`instrument.Ei` (from parameters.groups) → metadata["instrument"]["Ei"]."""
+        """`instrument.Ei` (from params.groups) → metadata["instrument"]["Ei"]."""
         ent_df, art_df, base_dir = vdp_manifests
         ent_df = ent_df.copy()
         ent_df["instrument.Ei"] = 60.0

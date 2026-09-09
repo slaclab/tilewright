@@ -100,10 +100,9 @@ markdown_extensions:
 plugins:
   - search
 
-# Deliberately unpublished. The tutorial is written and verified but kept back so the
-# all-hands audience has one obvious path in. The ADRs are internal engineering records:
-# they cite issue numbers, colleagues, and dataset specifics that have no business on a
-# public site, and a reader looking for "how do I" is not served by a decision log.
+# Deliberately unpublished. The ADRs are internal engineering records: they cite issue
+# numbers, colleagues, and dataset specifics that have no business on a public site, and
+# a reader looking for "how do I" is not served by a decision log.
 not_in_nav: |
   adr/*.md
 
@@ -113,7 +112,7 @@ extra_css:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/carbonscott/tiled-catalog-broker
+      link: https://github.com/slaclab/TileWright
       name: Source on GitHub
     - icon: material/book-open-variant
       link: https://blueskyproject.io/tiled/
@@ -124,24 +123,24 @@ extra:
 # concepts before the field tables mean anything.
 #
 # Guides run flat, in the order a dataset moves through them, so Material's footer
-# "next" button walks the whole path: install, prepare, publish, read, explore.
+# "next" button walks the whole path: install, publish, read, host.
 nav:
   - Home: index.md
   - Guides:
       - Install: install.md
-      - Prepare for the workshop: workshop-prep.md
       - Publish a dataset: ONBOARDING.md
       - Read a registered catalog: using-the-catalog.md
-      - Explore a dataset in a notebook: exploring-your-data.md
+      - Host a server: host-a-server.md
   - Understand:
-      - Tiled Catalog Broker + Tiled: explanation/broker-and-tiled.md
+      - TileWright and Tiled: explanation/broker-and-tiled.md
       - Data model: explanation/data-model.md
-      - Three layouts: explanation/layouts.md
+      - Sources: explanation/sources.md
+      - Identity and keys: explanation/identity.md
       - Sliced reads: explanation/sliced-reads.md
       - Soft vocabulary: explanation/vocabulary.md
       - NeXus support: explanation/nexus.md
   - Reference:
-      - tilewright cli tool: reference/cli.md
+      - tilewright command line: reference/cli.md
       - YAML contract: reference/dataset-yaml.md
       - Parquet manifest: reference/manifest.md
       - Errors and warnings: reference/errors.md

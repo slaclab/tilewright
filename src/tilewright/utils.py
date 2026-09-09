@@ -131,7 +131,7 @@ def make_entity_key(ent_row, dataset_key):
 def make_artifact_key(art_row):
     """The Tiled node key for an artifact: its manifest ``type`` verbatim.
 
-    `tilewright generate` is responsible for producing unique type values per entity,
+    `tilewright manifest` guarantees unique type values per entity,
     so the type is already the key (e.g. ``mh_powder_30T``, ``rixs``).
     """
     return art_row["type"]

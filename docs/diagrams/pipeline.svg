@@ -1,5 +1,5 @@
 <svg id="dg-pipeline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" role="img"
-     aria-label="The pipeline: a dataset YAML is keyed by stamp-key, turned into Parquet manifests by generate, and registered into a Tiled catalog by register, which is the only step needing a server."
+     aria-label="The pipeline: a dataset YAML is validated, keyed and turned into Parquet manifests by tilewright manifest, then registered into a Tiled catalog by tilewright register, which is the only step needing a server."
      font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" fill="currentColor">
   <style>
     #dg-pipeline .box   { fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -19,13 +19,9 @@
   <text class="name" x="12" y="50">dataset YAML</text>
   <text class="note" x="12" y="66">you author this</text>
   <path class="arrow" d="M 150 53 H 214" marker-end="url(#a)"/>
-  <rect class="cmd" x="214" y="34" width="112" height="38" rx="5"/>
-  <text class="name" x="226" y="51">stamp-key</text>
-  <text class="dim"  x="226" y="65">writes key:</text>
-  <path class="arrow" d="M 326 53 H 390" marker-end="url(#a)"/>
-  <rect class="cmd" x="390" y="34" width="112" height="38" rx="5"/>
-  <text class="name" x="402" y="51">generate</text>
-  <text class="dim"  x="402" y="65">reads your HDF5</text>
+  <rect class="cmd" x="214" y="34" width="288" height="38" rx="5"/>
+  <text class="name" x="226" y="51">tilewright manifest</text>
+  <text class="dim"  x="226" y="65">validates the contract, writes key:, reads your HDF5</text>
   <path class="arrow" d="M 446 72 V 118" marker-end="url(#a)"/>
   <rect class="box" x="330" y="118" width="240" height="46" rx="5"/>
   <text class="name" x="342" y="138">entities.parquet</text>
@@ -33,7 +29,7 @@
   <text class="dim"  x="470" y="147">shape + dtype captured</text>
   <path class="arrow" d="M 330 141 H 244" marker-end="url(#a)"/>
   <rect class="cmd" x="132" y="122" width="112" height="38" rx="5"/>
-  <text class="name" x="144" y="139">register</text>
+  <text class="name" x="144" y="139">tilewright register</text>
   <text class="dim"  x="144" y="153">reads only these</text>
   <path class="arrow" d="M 188 160 V 206" marker-end="url(#a)"/>
   <rect class="box" x="60" y="206" width="256" height="60" rx="5"/>

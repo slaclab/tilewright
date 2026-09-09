@@ -13,19 +13,19 @@ artifact bytes:
 
 - external (default): each artifact is a DataSource pointing at an HDF5 file
   the server reads from its own filesystem. Shape and dtype come from the
-  manifest (captured by `tilewright generate`), so this path never opens HDF5.
+  manifest (captured by `tilewright manifest`), so this path never opens HDF5.
 - upload (`upload=True`): each artifact's array is read from the *local* HDF5
   file and written through the server into its writable storage. For data the
   server cannot see on disk (e.g. remote users registering their own data).
 
-Shared axes (the YAML's ``shared:`` block, captured by ``tilewright generate`` as
+Shared axes (the YAML's ``shared:`` block, captured by ``tilewright manifest`` as
 artifact rows with no ``uid``) are registered once as array children of the
 *dataset* container, through the same two transports and the same code path
 as entity artifacts — so ``ds["eloss"][:]`` reads over HTTP whether the
 server holds a pointer or the bytes.
 
 Entity metadata is built from every entity-manifest column; a dotted column
-(``instrument.Ei`` — from ``parameters.groups``) is nested on the way in, so
+(``instrument.Ei`` — from ``params.groups``) is nested on the way in, so
 it is queryable as ``Key("instrument.Ei")``.
 
 Registration is incremental in both modes: an entity (or shared axis) already
@@ -86,7 +86,7 @@ def require_shape_dtype(art_df):
     if missing:
         raise ValueError(
             f"artifact manifest is missing {', '.join(missing)}. "
-            "Run `tilewright generate <dataset>.yml` to rebuild the manifests, "
+            "Run `tilewright manifest <dataset>.yml` to rebuild the manifests, "
             "then register again."
         )
 
@@ -99,14 +99,14 @@ def create_data_source(art_row, base_dir, server_base_dir=None):
 
     Args:
         art_row: DataFrame row with artifact manifest columns. Must carry
-            `shape` and `dtype`, written by `tilewright generate`.
+            `shape` and `dtype`, written by `tilewright manifest`.
         base_dir: Base directory for resolving relative file paths on the
-            authoring host (used by `tilewright generate` and Mode A reads).
+            authoring host (used by `tilewright manifest` and direct-file reads).
         server_base_dir: Optional server-side mount path. If set, becomes
             the asset `data_uri` base — needed when the Tiled server sees
             the filesystem at a different mount than the authoring host
             (K8s pod, reverse proxy). Set by the author in the YAML's
-            `data.server_base_dir:` field when host and server mounts differ.
+            `server_base_dir:` field when host and server mounts differ.
 
     Returns:
         The DataSource. Shape and dtype are read from the manifest row, so
@@ -229,7 +229,7 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
         ent_added = 0
     else:
         # Build metadata dynamically from ALL manifest columns. A dotted column
-        # (`instrument.Ei`, from parameters.groups) is nested: metadata["instrument"]["Ei"].
+        # (`instrument.Ei`, from params.groups) is nested: metadata["instrument"]["Ei"].
         metadata = {}
         for col in ent_columns:
             *parents, leaf = col.split(".")
@@ -238,7 +238,7 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
                 node = node.setdefault(p, {})
             node[leaf] = to_json_safe(ent_row[col])
 
-        # Attach artifact locators to metadata (for Mode A access)
+        # Attach artifact locators to metadata (the direct-file read path)
         for art_row in art_rows:
             art_key = make_artifact_key(art_row)
             metadata[f"path_{art_key}"] = art_row["file"]
@@ -306,7 +306,7 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
             raise ValueError(
                 f"manifest records shape={data_shape} dtype={data_dtype} "
                 f"but the file holds shape={list(data.shape)} "
-                f"dtype={data.dtype}; re-run `tilewright generate`"
+                f"dtype={data.dtype}; re-run `tilewright manifest`"
             )
         container.write_array(data, key=art_key, metadata=art_metadata)
     else:
@@ -397,8 +397,8 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     """Register one dataset via HTTP through a running Tiled server.
 
     Creates a dataset container, its shared axes (artifact rows with no uid)
-    as array children, then entity containers with locator metadata (Mode A)
-    and array children (Mode B).
+    as array children, then entity containers with locator metadata (for direct-file reads)
+    and array children (for reads through the server).
 
     Args:
         client: Tiled client connected to a running server.

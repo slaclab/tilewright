@@ -1,76 +1,49 @@
 # The `tilewright` command line
 
-`tilewright` dispatches four subcommands. Run bare or with `-h` / `--help` for the list; an
-unrecognized subcommand exits `1`.
+`tilewright` dispatches three subcommands. Run bare or with `-h` / `--help` for the list;
+an unrecognized subcommand exits `1`.
 
 ```
 tilewright <command> [args]
 
-  generate    Generate Parquet manifests from a finalized YAML contract
-  stamp-key   Write the derived catalog key into a YAML
-  register    HTTP registration against a running Tiled server
+  manifest    Validate a dataset YAML, derive its key, write its Parquet manifests
+  register    Register manifests into a running Tiled server over HTTP
   delete      Delete registered data from a running Tiled server
 ```
 
-Pipeline order is `stamp-key` → `generate` → `register`; the walkthrough is
-[How to publish a dataset](../ONBOARDING.md). Source:
-`src/tilewright/cli.py`.
+Pipeline order is `manifest` → `register`; the walkthrough is
+[How to publish a dataset](../ONBOARDING.md). Source: `src/tilewright/cli.py`.
+
+Server-facing commands take the server from `--url` and `--api-key`, or from `TILED_URL`
+and `TILED_API_KEY` in the environment. Nothing is read from a file.
 
 ---
 
-## `tilewright stamp-key`
+## `tilewright manifest`
 
-Writes the derived catalog key into a dataset YAML's `key:` field.
-
-```
-tilewright stamp-key CONFIG [CONFIG ...]
-```
-
-| | |
-|---|---|
-| Reads | each `CONFIG`'s `label` |
-| Writes | `key:` in each `CONFIG`, in place |
-| Server | not required |
-
-The key is `slugify_key(label)` — `"Broad Sigma"` becomes `BROAD_SIGMA`. The YAML
-round-trips through `ruamel.yaml` with `preserve_quotes`, so comments and quoting survive.
-
-Exit status:
-
-| Condition | Status |
-|---|---|
-| Key written, or already equal to `slug(label)` (no change) | `0` |
-| `CONFIG` does not exist | `1` |
-| `label` missing | `1` |
-| Existing `key` differs from `slug(label)` | `1` |
-
-A drifted key is never silently rewritten. Recovery is in
-[errors and warnings](errors.md#tilewright-stamp-key).
-
----
-
-## `tilewright generate`
-
-Scans the HDF5 files and writes the two Parquet manifests that registration reads.
+Validates a dataset YAML, writes its key, scans the data, and writes the two Parquet
+manifests that registration reads.
 
 ```
-tilewright generate YAML_PATH [-o OUTPUT_DIR] [--append]
+tilewright manifest YAML_PATH [-o OUTPUT_DIR] [--append] [--check]
 ```
 
 | Flag | Effect |
 |---|---|
 | `-o`, `--output-dir DIR` | Write manifests to `DIR` instead of the default |
 | `--append` | Keep existing manifests and add only entities whose `uid` is not already present |
+| `--check` | Validate the contract, print `contract OK: ...`, and stop; writes nothing |
 
 | | |
 |---|---|
-| Reads | the YAML, and every HDF5 file matched by `data.directory` + `data.file_pattern` |
-| Writes | `entities.parquet` and `artifacts.parquet` in `<yaml_dir>/manifests/<label>/` |
+| Reads | the YAML, and every file matched by the source's `directory` + `pattern` (or the table) |
+| Writes | `key:` into the YAML if absent; `entities.parquet` and `artifacts.parquet` in `<root>/manifests/<KEY>/`, where `<root>` is the YAML's directory, or its parent when the YAML sits in a `datasets/` directory (the `.tilewright/datasets/<KEY>.yml` → `.tilewright/manifests/<KEY>/` layout) |
 | Server | not required |
 
-Takes exactly one YAML, unlike `stamp-key` and `register`. Validates against the contract
-first — including that `key` is stamped — and prints non-fatal controlled-vocabulary
-warnings.
+Prints `dataset=<KEY> entities=N artifacts=M shared=S` on success. Contract problems are
+printed as one `contract error:` line each, all of them, then exit `1`; a data problem
+(file not found, array missing, shared axis differing, duplicate identities) names the
+file and the path and exits `1`.
 
 Each artifact's `shape` and `dtype` are captured here, which is what lets registration run
 without opening a single HDF5 file, and why the manifest must be regenerated when the data
@@ -84,113 +57,77 @@ Registers manifests into a running Tiled server over HTTP. This is the only regi
 route.
 
 ```
-tilewright register CONFIG [CONFIG ...] [-n NUM] [--max-workers N] [--upload]
+tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-workers N]
+                    [--upload] [--update] [--adopt]
 ```
 
 | Flag | Effect |
 |---|---|
+| `--url URL` | Server URL (default `$TILED_URL`, else `http://localhost:8005`) |
+| `--api-key KEY` | API key with write scopes (default `$TILED_API_KEY`) |
 | `-n`, `--max-entities NUM` | Register at most `NUM` entities per dataset (default: all) |
 | `--max-workers N` | Concurrent registration workers (default: `TILEWRIGHT_MAX_WORKERS`, else `8`) |
 | `--upload` | Read the arrays from local HDF5 and write them through the server into its writable storage, instead of registering pointers to files the server reads itself |
+| `--update` | Also merge-patch the dataset container's metadata from the YAML. Same data only; the previous version is kept as a Tiled revision |
+| `--adopt` | Claim a container registered before fingerprints existed |
 
 | | |
 |---|---|
-| Reads | each `CONFIG`, its manifests, and with `--upload` the HDF5 files themselves |
+| Reads | each YAML, its manifests, and with `--upload` the HDF5 files themselves |
 | Writes | catalog entries on the server; with `--upload`, array data in the server's storage |
 | Server | **required** |
 
+- **Validates before connecting.** Every YAML must be a valid contract carrying the key
+  `manifest` wrote, and its manifests must match its source block, before the network is
+  touched.
+- **Checks the key against the server.** A new key is created with `storage`,
+  `fingerprint` and `registered_at` stamped. An existing key with the same fingerprint
+  proceeds; a different fingerprint is refused with both printed; a container without one
+  needs `--adopt` ([identity and keys](../explanation/identity.md)).
 - **Incremental.** An entity whose key already exists is skipped, so a re-run resumes
   rather than duplicates.
-- **Shared axes go first** — the manifest's `uid`-less rows, one array child of the dataset
+- **Shared axes go first**: the manifest's `uid`-less rows, one array child of the dataset
   container each, over the same transport as entity artifacts. Independent of `-n`; an
   existing axis is skipped.
-- **Without `--upload`** the server opens the files itself, so `data.directory`,
-  `data.server_base_dir`, and the server's `readable_storage` all have to agree. Getting
-  them wrong registers cleanly and fails on every read — see
-  [How to publish a dataset](../ONBOARDING.md#paths-where-your-view-and-the-servers-view-differ).
-- **With `--upload`**, `data.server_base_dir` is ignored (announced, not an error) and
-  `data.directory` must exist locally. A dataset cannot mix uploaded and pointer entities.
-
-Manifests are searched for in this order, taking the first directory holding both files:
-
-```
-<yaml_dir>/manifests/<label>/
-<cwd>/manifests/<label>/
-```
-
-A `label` containing spaces is matched both verbatim and underscore-normalized; if neither
-directory has them, the searched paths are printed with the `tilewright generate` command to run.
-
-Exit status is `1` for an unreachable server, a missing config or manifest, an unstamped or
-drifted `key`, or a `ValueError` during registration.
+- **Without `--upload`** the server opens the files itself, so `directory`,
+  `server_base_dir`, and the server's `readable_storage` all have to agree. Getting them
+  wrong registers cleanly and fails on every read; see
+  [How to publish a dataset](../ONBOARDING.md#3-make-local-and-server-paths-agree).
+- **With `--upload`**, `server_base_dir` is ignored (announced, not an error) and
+  `directory` must exist locally. A dataset cannot mix uploaded and pointer entities.
+- **Verifies** the datasets it just registered: container, shared axes, first entity,
+  first artifact. That is a structural probe, not a read; the read-back in the publishing
+  guide is the proof.
 
 ---
 
 ## `tilewright delete`
 
-Removes registered data from a running server. Granularity is inferred from the number of
-positional arguments.
+Deletes registered data at one of four granularities.
 
 ```
-tilewright delete DATASET [ENTITY [ARTIFACT]] [-y] [--dry-run]
+tilewright delete DATASET [ENTITY [ARTIFACT]] [--url URL] [--api-key KEY] [--dry-run] [--yes]
 tilewright delete all [--confirm URL] [--dry-run]
 ```
 
-| Form | Deletes |
+| Form | Removes |
 |---|---|
-| `tilewright delete DATASET` | the dataset container and everything under it |
-| `tilewright delete DATASET ENTITY` | one entity and its artifacts |
-| `tilewright delete DATASET ENTITY ARTIFACT` | one artifact array |
-| `tilewright delete all` | every top-level container |
+| `DATASET` | the dataset container and everything under it |
+| `DATASET ENTITY` | one entity and its artifacts |
+| `DATASET ENTITY ARTIFACT` | one array |
+| `all` | every top-level container on the server |
 
 | Flag | Effect |
 |---|---|
-| `-y`, `--yes` | Skip the `y`/`yes` prompt (granular forms only) |
-| `--confirm URL` | Bypass the URL-retype prompt for `all`; must match `TILED_URL` after normalization |
-| `--dry-run` | Print the preview block and exit without deleting |
+| `--dry-run` | Print the preview (target, child counts, storage note) and exit without deleting |
+| `--yes` | Skip the `y/yes` confirmation for the granular forms |
+| `--confirm URL` | For `all`: the server URL, retyped, instead of the interactive prompt; must match exactly |
 
-`all` is a reserved sentinel and takes no further arguments, so a dataset whose key is
-literally `all` cannot be deleted with the single-argument form.
+What is removed depends on the dataset's `storage` marker: an external dataset loses only
+its catalog pointers, the HDF5 files on disk are untouched; an uploaded dataset also loses
+the array bytes the server holds, since there is no other copy. `all` decides per
+container.
 
-Confirmation differs by form:
-
-- **Granular** — prompts for `y` or `yes`.
-- **`all`** — requires retyping the server URL. Comparison lowercases scheme and host and
-  strips trailing slashes, so `https://Tiled.example.com/` matches
-  `https://tiled.example.com`; path, query, and fragment case are preserved.
-- **Non-interactive shell** — no prompt is shown; the command exits `2` telling you to pass
-  `--yes` or `--confirm`.
-
-External HDF5 files are never removed. For an `--upload` dataset the stored arrays go with
-the catalog entries, since the catalog is their only home; the preview block says which
-case applies before it asks.
-
-Exit status is `0` on success or `--dry-run`, `1` on an unreachable server, an unresolvable
-target, a declined confirmation, or any failure during `all`, and `2` on an argument or
-non-interactive-confirmation error.
-
----
-
-## Environment
-
-Server settings come from the environment, not a CLI flag. Source:
-`src/tilewright/config.py`.
-
-| Variable | Used by | Default |
-|---|---|---|
-| `TILED_URL` | `register`, `delete` | `http://localhost:8005` |
-| `TILED_API_KEY` | `register`, `delete` | falls back to `TILED_KEY`, then empty |
-| `TILEWRIGHT_MAX_WORKERS` | `register` | `8` |
-
-A `.env` in the working directory is loaded automatically on import via `setdefault`, so a
-variable already exported in the shell wins over the file. Switching servers comes down to
-which `.env` you are next to.
-
-!!! note
-
-    Child processes do not inherit that load. A separate program such as `marimo` needs the
-    variables exported into its own environment (`set -a; source .env; set +a`) — which is
-    why the [read-back guide](../exploring-your-data.md) insists on it.
-
-`config.yml` is the **Tiled server's** configuration, consumed by
-`tiled serve config config.yml`. The broker never reads it.
+Exit status: `0` deleted (or dry run); `1` a target does not exist, or with `all` any
+container failed; `2` bad arguments, or a confirmation was needed in a non-interactive
+shell without `--yes` / `--confirm`.

@@ -1,80 +1,55 @@
-# Tiled Catalog Broker
+# TileWright
 
-**📖 [Read the documentation](https://carbonscott.github.io/tiled-catalog-broker/)**
-
-Register scientific HDF5 datasets in a
-[Tiled](https://blueskyproject.io/tiled/) catalog, find them by their physics,
-and read them from anywhere.
-
-One dataset YAML is the contract. The broker does not hardcode parameter names,
-artifact types, or scientific metadata.
-
-## Quick start
-
-Python 3.12 or later.
+Register scientific HDF5 datasets into a [Tiled](https://blueskyproject.io/tiled/)
+catalog from one YAML contract, then find them by their physics and read them from
+anywhere. Your data keeps the names and the files it already has.
 
 ```bash
-uv run tilewright --help   # builds .venv from uv.lock on first use; or: pip install -e ".[test]" / pixi install
+tilewright manifest .tilewright/datasets/MY_DATASET.yml     # validate, derive the key, scan the files
+tilewright register .tilewright/datasets/MY_DATASET.yml     # publish into a running server
 ```
-
-Author a dataset YAML, then walk it through the pipeline:
-
-```bash
-tilewright stamp-key datasets/mydata.yml  # derive the catalog key from the label
-tilewright generate datasets/mydata.yml   # scan HDF5 and write Parquet manifests
-tilewright register datasets/mydata.yml   # register with the configured server
-```
-
-Check the entity and artifact counts printed by `tilewright generate` before
-registering. Set the server with `TILED_URL` and `TILED_API_KEY`; a `.env` in
-the working directory is loaded automatically. Add `--upload` to `tilewright register`
-when the server cannot open the files itself.
-
-Read a registered dataset from anywhere:
 
 ```python
 from tiled.client import from_uri
 from tiled.queries import Key
 
-client = from_uri("http://localhost:8005", api_key="secret")
-hits = client["BROAD_SIGMA"].search(Key("sigma") >= 0.04)
-spectrum = hits.values().first()["rixs_spectrum"][:]
+c = from_uri(URL, api_key=KEY)
+hits = c["MY_DATASET"].search(Key("sigma") >= 0.04)
+hits.values().first()["rixs_spectrum"][:]        # (151, 40), sliced server-side
 ```
 
-Reading needs none of the install above — just `pip install 'tiled[client]'`.
+Every dataset registers as the same three levels, Dataset → Entity → Artifact, with the
+entity's parameters as queryable metadata and its arrays served lazily. One YAML says
+where the entities come from (`files`, `batch`, `groups` or `table`), what arrays they
+carry, and the facets a reader searches by. Nothing about your science is hardcoded.
 
-## Documentation
+**Documentation:** <https://slaclab.github.io/TileWright/>
 
-The [documentation site](https://carbonscott.github.io/tiled-catalog-broker/)
-is the complete reference.
+- [Install](docs/install.md) (Python ≥ 3.11, `uv run tilewright --help`)
+- [Publish a dataset](docs/ONBOARDING.md), with an agent or by hand
+- [Read a registered catalog](docs/using-the-catalog.md), which needs only `tiled[client]`
+- [Host a server](docs/host-a-server.md)
+- [The YAML contract](docs/reference/dataset-yaml.md), generated from `src/tilewright/contract.py`
 
-| Goal | Page |
-|---|---|
-| Install `tilewright` and point it at a server | [How to install](https://carbonscott.github.io/tiled-catalog-broker/install/) |
-| Register your own dataset, either transport | [How to publish a dataset](https://carbonscott.github.io/tiled-catalog-broker/ONBOARDING/) |
-| Read a registered catalog | [How to read a registered catalog](https://carbonscott.github.io/tiled-catalog-broker/using-the-catalog/) |
-| Look up a command or YAML field | [`tilewright` commands](https://carbonscott.github.io/tiled-catalog-broker/reference/cli/) · [dataset YAML](https://carbonscott.github.io/tiled-catalog-broker/reference/dataset-yaml/) |
-| Work out why something failed | [Errors and warnings](https://carbonscott.github.io/tiled-catalog-broker/reference/errors/) |
-| Understand the design | [broker vs. Tiled](https://carbonscott.github.io/tiled-catalog-broker/explanation/broker-and-tiled/) · [data model](https://carbonscott.github.io/tiled-catalog-broker/explanation/data-model/) |
+**Automatic ingestion** for AmSC lives in
+[slaclab/amsc-catalog-publisher](https://github.com/slaclab/amsc-catalog-publisher).
 
-Domain terminology and the implementation-versus-contract principle are in
-[`CONTEXT.md`](CONTEXT.md).
+## Repository
 
-## Develop
-
-```bash
-# Unit tests
-uv run --with pytest pytest -v -m "not integration"
-
-# Integration tests; requires a running server with registered data
-uv run --with pytest pytest -v -m integration
-
-# Local Tiled server for the integration tests
-uv run tiled serve config config.yml --api-key secret
-
-# Documentation preview at http://127.0.0.1:8000
-uv run --with 'mkdocs-material>=9,<10' mkdocs serve
+```
+src/tilewright/      the package: contract, vocabulary, manifest, register, delete, client, adapter
+examples/datasets/   one annotated YAML per source tag, with expected counts
+examples/notebook.py marimo tour of the read path
+docs/                the site (mkdocs-material); docs/adr/ is internal
+scripts/             maintainer tools; see CONTRIBUTING.md
+.claude/skills/      onboarding (for producers) and vocab-review (for maintainers)
+config.yml           a local pointer-serving server; config.upload.yml hosts uploads
 ```
 
-The test modules state their scope in their names and markers; use
-`pytest --collect-only` to inspect the current suite.
+`uv run --extra test pytest` runs the offline suite; `-m integration` needs a server.
+Contributing, the one-fact-one-home documentation rule, and how to add a vocabulary term:
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+TileWright continues [carbonscott/tiled-catalog-broker](https://github.com/carbonscott/tiled-catalog-broker)
+and draws on [carbonscott/tilewright](https://github.com/carbonscott/tilewright); see
+`docs/adr/0005-tilewright-lineage.md`. Apache-2.0.

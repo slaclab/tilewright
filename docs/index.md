@@ -4,26 +4,25 @@ hide:
   - toc
 ---
 
-# Tiled Catalog Broker
+# TileWright
 
-Register scientific HDF5 datasets in a [Tiled](https://blueskyproject.io/tiled/) catalog, then find them by their physics and read them from anywhere.
+Register scientific HDF5 datasets in a [Tiled](https://blueskyproject.io/tiled/) catalog,
+then find them by their physics and read them from anywhere. Your data keeps the names and
+the files it already has.
 
-We create a YAML that describes a dataset, and then we will use it to register the data with [Tiled](https://blueskyproject.io/tiled/). Your data keeps the names it already uses.
-
-Describe a dataset once, and publish it:
+Describe a dataset once, in one YAML, and publish it in two commands:
 
 ```bash
-tilewright stamp-key datasets/mydata.yml   # name it
-tilewright generate  datasets/mydata.yml   # describe it
-tilewright register  datasets/mydata.yml   # publish it
+tilewright manifest .tilewright/datasets/MY_DATASET.yml     # validate, derive the key, scan the files
+tilewright register .tilewright/datasets/MY_DATASET.yml     # publish into a running server
 ```
 
-From then on anyone who can reach the server can query it by its physics and read
-an array without knowing where the files live:
+From then on anyone who can reach the server can query it by its physics and read an
+array without knowing where the files live:
 
 ```python
 c = from_uri(URL, api_key=KEY)
-hits = c["BROAD_SIGMA"].search(Key("sigma") >= 0.04)
+hits = c["MY_DATASET"].search(Key("sigma") >= 0.04)
 hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 ```
 
@@ -33,23 +32,25 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Clone the repo and install `tilewright`. Reading a catalog someone else built needs only the Tiled client.
+    Install `tilewright` and point it at a server. Reading a catalog someone else built
+    needs only the Tiled client.
 
     [:octicons-arrow-right-24: Install](install.md)
 
-- :material-school:{ .lg .middle } **MAIQMag all-hands**
+- :material-upload:{ .lg .middle } **Publish a dataset**
 
     ---
 
-    Once `tilewright` is installed: get your key working and check your data is in a shape the catalog accepts. 15–20 minutes, before the session.
+    Author the YAML (an agent can draft it), build the manifests, register, read it back.
 
-    [:octicons-arrow-right-24: Prepare for the workshop](workshop-prep.md)
+    [:octicons-arrow-right-24: Publish](ONBOARDING.md)
 
 - :material-lightbulb-on:{ .lg .middle } **Understand**
 
     ---
 
-    The concepts behind this broker: what it adds to Tiled, and the data model it registers.
+    What TileWright adds to Tiled, the data model it registers, and why the contract is
+    shaped the way it is.
 
     [:octicons-arrow-right-24: Explanation](explanation/broker-and-tiled.md)
 
@@ -57,7 +58,8 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Look up the `tilewright` commands, every dataset YAML field, and the Parquet manifest columns.
+    The three commands, every dataset YAML field, the Parquet manifest columns, and every
+    error by symptom.
 
     [:octicons-arrow-right-24: Reference](reference/cli.md)
 

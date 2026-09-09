@@ -4,7 +4,7 @@ A registered dataset has three levels of nested Tiled containers:
 
 <figure class="tw-diagram">
 --8<-- "diagrams/hierarchy.svg"
-<figcaption>Three levels. Provenance on the dataset, physics parameters on the entity, arrays on the artifact, and a shared axis stored once beside the entities.</figcaption>
+<figcaption>Three levels. Facets on the dataset, physics parameters on the entity, arrays on the artifact, and a shared axis stored once beside the entities.</figcaption>
 </figure>
 
 Datasets hold entities; entities hold artifacts. Every parameter on an entity is queryable
@@ -16,7 +16,7 @@ An entity is one simulation run, one sample, or one measurement: the parameters 
 on, plus one or more arrays. Two things look like they could do that job instead:
 
 - **A file.** In one dataset a file is a run; in the next, a file holds ten thousand runs.
-  See [the three layouts](layouts.md).
+  See [sources](sources.md).
 - **An array.** An entity often has several. A spectrum and a magnetization curve share one
   set of parameters, and you want them back together.
 
@@ -39,23 +39,34 @@ shares one table. Two producers with unrelated physics:
 | an atomic-multiplet code | `Udd`, `Delta`, `crystal_10Dq` |
 
 They overlap in nothing. A typed table would have to hold every column any producer ever
-needed, each dataset filling in a few and leaving the rest null — and a new producer would
-mean a schema migration, run by someone with write access, before your data could be
-registered at all. A free-form dict holds `{Ja_meV, spin_s}` beside
+needed, each dataset filling in a few and leaving the rest null, and a new producer would
+mean a schema migration before its data could be registered at all. Across the fifteen
+real datasets on one test server there were 141 distinct parameter names and zero shared
+across producers. A free-form dict holds `{Ja_meV, spin_s}` beside
 `{Udd, Delta, crystal_10Dq}` with no shared schema and no nulls.
 
-What you give up: nothing checks that two datasets using `sigma` mean the same quantity, or
-stops a third from calling it `sig`. The [soft vocabulary](vocabulary.md) covers only the
-few facets used for cross-dataset discovery, such as `material` and `method` — not the
+What you give up: nothing checks that two datasets using `sigma` mean the same quantity,
+or stops a third from calling it `sig`. The [soft vocabulary](vocabulary.md) covers only
+the few facets used for cross-dataset discovery, such as `material` and `method`, not the
 physics parameters.
 
-## What the broker does
+## Dataset metadata is the human record
 
-Tiled stores the containers, answers the metadata queries, and slices the arrays. The
-broker decides what shape to register, and writes it the same way every time:
+The dataset container carries the facets (`method`, `material`, `producer`, ...), a
+`contact`, and a `description`. The description is the abstract a person reads to decide
+whether to open the dataset, and the thing full-text search finds when nobody knows the
+key names. Repeating a defining number in it is fine; the rule is that every number in
+the prose also exists as a key, and the key is authoritative. Anything a reader should
+know before trusting the data (a masked region, a trust ceiling) belongs there too, as
+prose plus the keys the author names.
+
+## What TileWright does
+
+Tiled stores the containers, answers the metadata queries, and slices the arrays.
+TileWright decides what shape to register, and writes it the same way every time:
 `register.py` builds each entity's metadata from all the manifest's columns, so no
-parameter name appears anywhere in the broker's code. That is what makes it
-dataset-agnostic.
+parameter name appears anywhere in its code. That is what makes it dataset-agnostic.
 
 See also [the Parquet manifest](../reference/manifest.md), where those columns come from,
-and [sliced reads](sliced-reads.md) for how an artifact is served once registered.
+[identity and keys](identity.md) for how entities are named, and
+[sliced reads](sliced-reads.md) for how an artifact is served once registered.

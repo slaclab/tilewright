@@ -7,6 +7,8 @@ on:
       - "docs/**"
       - "includes/**"
       - "mkdocs.yml"
+      - "src/tilewright/contract.py"
+      - "scripts/build_yaml_reference.py"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
@@ -14,6 +16,8 @@ on:
       - "docs/**"
       - "includes/**"
       - "mkdocs.yml"
+      - "src/tilewright/contract.py"
+      - "scripts/build_yaml_reference.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -33,6 +37,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v4
+
+      - name: The YAML reference must match the contract models
+        run: uv run scripts/build_yaml_reference.py --check
 
       - name: Build the site
         run: uv run --no-project --with 'mkdocs-material>=9,<10' mkdocs build --strict

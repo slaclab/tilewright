@@ -93,16 +93,16 @@ class TestHttpRegistration:
         assert "Dc_meV" in h.metadata
 
     def test_container_has_artifact_paths(self, tiled_client):
-        """Test that containers have artifact paths in metadata (Mode A)."""
+        """Test that containers have artifact locators in metadata."""
         ent_key = list(tiled_client.keys())[0]
         h = tiled_client[ent_key]
 
-        # Check for path metadata (Mode A support)
+        # locators for the direct-file path
         path_keys = [k for k in h.metadata.keys() if k.startswith("path_")]
         assert len(path_keys) > 0
 
     def test_container_has_children(self, tiled_client):
-        """Test that containers have artifact children (Mode B)."""
+        """Test that containers have artifact children (the server path)."""
         ent_key = list(tiled_client.keys())[0]
         h = tiled_client[ent_key]
 

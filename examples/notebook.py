@@ -57,7 +57,7 @@ def _(mo):
     ```
 
     The dataset key is the slug of the YAML's `label` (written by
-    `tilewright stamp-key`); entity keys are `{DATASET_KEY}_{uid}`. Shared axis
+    `tilewright manifest`); entity keys are `{DATASET_KEY}_{uid}`. Shared axis
     arrays (energy grids, etc.) are registered once as direct children of
     the dataset container, alongside the entities.
 
@@ -78,7 +78,7 @@ def _():
     # ---------------------------------------------------------------
     # Replace with your dataset here.
     #
-    # DATASET_KEY   the key `tilewright stamp-key` wrote into your YAML
+    # DATASET_KEY   the key `tilewright manifest` wrote into your YAML
     # ARTIFACT_KEY  the artifact to read -- one of your YAML's
     #               `artifacts:` `type:` values. Leave it None to use
     #               whichever artifact the first entity carries.
@@ -128,7 +128,7 @@ def _(mo):
 
     Direct access by key — the slug of the dataset's `label`
     (`"Broad Sigma"` → `BROAD_SIGMA`), stamped into the YAML by
-    `tilewright stamp-key`.
+    `tilewright manifest`.
     """)
     return
 
@@ -324,7 +324,7 @@ def _(artifact_key, entity, mo, os):
 
     # An externally-registered artifact carries a DataSource, and that
     # DataSource is self-describing: its asset `data_uri` is the absolute
-    # path, and its `parameters` hold the HDF5 dataset path and (for batched
+    # path, and its `parameters` hold the HDF5 dataset path and (for batch
     # layouts) the row. So there is no base directory to configure per
     # machine and no path to join by hand -- ask, then open.
     #
@@ -378,7 +378,7 @@ def _(artifact_key, entity, mo, os):
 
     ```python
     src = entity[artifact_key].data_sources()[0]
-    row = src.parameters.get("slice")      # batched layouts only; None otherwise
+    row = src.parameters.get("slice")      # batch sources only; None otherwise
     with h5py.File(urlparse(src.assets[0].data_uri).path) as f:
         ds = f[src.parameters["dataset"]]
         spectrum = ds[int(row)] if row is not None else ds[...]

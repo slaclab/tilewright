@@ -12,11 +12,11 @@
 """
 Integration tests for data retrieval in both access modes.
 
-Mode A (Expert): query_catalog() -> direct HDF5 loading via load_artifacts()
-Mode B (Visualizer): Tiled adapter access via HTTP
+Direct-file path: query_catalog() -> direct HDF5 loading via load_artifacts()
+Server path: Tiled adapter access via HTTP
 
 The catalog has a two-level hierarchy: root -> dataset containers -> entities.
-Mode A/B tests use mh_dataset_client (scoped to the MH dataset container).
+Both read-path tests use mh_dataset_client (scoped to the MH dataset container).
 
 Prerequisites:
     # Start server with registered data:
@@ -55,7 +55,7 @@ def base_dirs():
 
 @pytest.mark.integration
 class TestModeAQueryCatalog:
-    """Tests for Mode A: Expert path-based access via query_catalog.
+    """Tests for the direct-file path via query_catalog.
 
     Uses mh_dataset_client (dataset-level container) since query_catalog
     iterates immediate children. The root client has dataset containers as
@@ -142,7 +142,7 @@ class TestModeAQueryCatalog:
 
 @pytest.mark.integration
 class TestModeBTiledAdapter:
-    """Tests for Mode B: Visualizer access via Tiled adapters."""
+    """Tests for the server path via Tiled adapters."""
 
     def test_mh_array_child_registered(self, mh_dataset_client):
         """mh_powder_30T must be a registered array child — hard failure if absent."""
@@ -212,7 +212,7 @@ class TestModeAModeBEquivalence:
     """Tests verifying both modes return identical data."""
 
     def test_mh_curve_data_matches(self, mh_dataset_client, base_dirs):
-        """Test that Mode A and Mode B return same M(H) data."""
+        """Both read paths return the same M(H) data."""
         mh_base_dir = base_dirs.get("GenericSpin_Sunny_MH")
         if mh_base_dir is None:
             pytest.skip("No dataset config found for GenericSpin_Sunny_MH")
@@ -223,10 +223,10 @@ class TestModeAModeBEquivalence:
         if "mh_powder_30T" not in h.keys():
             pytest.skip("mh_powder_30T not available")
 
-        # Mode B: Tiled adapter access
+        # server path: Tiled adapter access
         mode_b_data = h["mh_powder_30T"][:]
 
-        # Mode A: Direct HDF5 access via locators from metadata
+        # direct-file path: h5py via locators from metadata
         path_rel = h.metadata.get("path_mh_powder_30T")
         dataset_path = h.metadata.get("dataset_mh_powder_30T")
         if not path_rel or not dataset_path:
@@ -237,7 +237,7 @@ class TestModeAModeBEquivalence:
         with h5py.File(path, "r") as f:
             mode_a_data = f[dataset_path][:]
 
-        assert np.allclose(mode_a_data, mode_b_data), "Mode A and Mode B data mismatch!"
+        assert np.allclose(mode_a_data, mode_b_data), "read paths disagree"
 
     def test_metadata_matches_hdf5(self, mh_dataset_client, base_dirs):
         """Test that metadata matches values in HDF5 files."""

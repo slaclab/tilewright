@@ -1,24 +1,13 @@
-Both `tilewright` and the Python client take the server URL and your API key from the
-environment. Put them in a `.env` file in the directory you work from — the root of
-your checkout, if you have one:
-
-```
-TILED_URL=<the server URL>
-TILED_API_KEY=<your key>
-```
-
-In a checkout, `cp .env.example .env` gives you the file to fill in. `.env` is
-gitignored; treat it like a password.
-
-`tilewright` reads `.env` from the working directory by itself. Nothing else does. A
-notebook, a script, or a `python -c` needs the variables **exported** into its own
-environment first:
+`tilewright` and the Python client both need the server URL and an API key with write
+scopes. Export them once in the shell you work from, or pass `--url` and `--api-key` on
+each command; nothing is read from a file.
 
 ```bash
-set -a; source .env; set +a
+export TILED_URL=<the server URL>
+export TILED_API_KEY=<your key>
 ```
 
-Check that both halves worked:
+Check that both work:
 
 ```bash
 python -c "
@@ -28,12 +17,11 @@ print(list(from_uri(os.environ['TILED_URL'], api_key=os.environ['TILED_API_KEY']
 "
 ```
 
-A list of dataset keys means you are connected. `KeyError` means the variables are
-in the file but not in this shell. `Connection refused` means the URL is wrong or
-the server is down. `401` means the key is wrong or expired.
+A list of dataset keys means you are connected. `KeyError` means a variable is not
+exported in this shell. `Connection refused` means the URL is wrong or the server is down.
+`401` means the key is wrong or expired.
 
 !!! tip "Pixi users"
 
-    If that snippet fails with `SyntaxError: invalid syntax`, the quotes were
-    stripped before Python saw them. Run `pixi shell` once, then run the
-    `python -c ...` normally.
+    If that snippet fails with `SyntaxError: invalid syntax`, the quotes were stripped
+    before Python saw them. Run `pixi shell` once, then run the `python -c ...` normally.

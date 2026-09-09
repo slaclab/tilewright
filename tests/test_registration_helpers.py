@@ -83,7 +83,7 @@ def test_verify_empty_root(capsys):
 
 
 def test_verify_entity_with_no_artifacts(capsys):
-    """Entity has no array children: warns about Mode B failure."""
+    """Entity has no array children: warns that server reads will fail."""
     ent = MagicMock()
     ent.metadata = {"path_x": "/data/x.h5"}
     ent.keys.return_value = []

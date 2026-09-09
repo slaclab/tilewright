@@ -1,6 +1,6 @@
 # Controlled vocabulary is soft normalization, not a rigid gate
 
-The semantic model (`catalog_model.yml`) stays **soft**: unknown metadata values produce
+The semantic model (`vocabulary.yml` (then `catalog_model.yml`)) stays **soft**: unknown metadata values produce
 **warnings**, not errors, and known aliases are rewritten to canonical ids
 (`resolve_aliases`). We deliberately do **not** make the vocabulary a hard gate that
 rejects novel values.
@@ -15,7 +15,7 @@ contradict that and foreclose the flexible-discovery direction.
 
 Consequence: field *presence* and field *value* are enforced separately. `_models.py`
 hard-requires the **presence** of `data_type`, `method`, and `material` (a config missing
-one errors), and `catalog_model.yml`'s `dataset_fields: required` list now matches that set.
+one errors), and `vocabulary.yml` (then `catalog_model.yml`)'s `dataset_fields: required` list now matches that set.
 What stays **soft is the value** — an out-of-vocab `material` validates with only a warning,
 per this ADR. The field→vocab mapping that drives those warnings still lives in `schema.py`;
 a pydantic model of the vocab file's own shape is deferred (low value until it's edited widely).
