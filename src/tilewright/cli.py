@@ -38,6 +38,7 @@ def _build_dataset_metadata(cfg):
     """The dataset container's metadata: every metadata key as written, plus one
     `shared_dataset_<type>` locator per shared axis (how readers find the axes)."""
     md = cfg.metadata.model_dump(by_alias=True, exclude_none=True)
+    md.setdefault("label", cfg.label)
     for ax in cfg.shared:
         md[f"shared_dataset_{ax.type}"] = ax.dataset
     return md
@@ -89,6 +90,17 @@ def register_main():
     parser.add_argument("--api-key", default=None, metavar="KEY",
                         help="API key with write scopes (default: $TILED_API_KEY)")
     parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Also merge-patch the dataset container's metadata from the YAML "
+             "(same data only; the previous version is kept as a revision)",
+    )
+    parser.add_argument(
+        "--adopt",
+        action="store_true",
+        help="Claim a container registered before fingerprints existed",
+    )
+    parser.add_argument(
         "--upload",
         action="store_true",
         help="Upload artifact arrays through the server into its writable "
@@ -105,6 +117,8 @@ def register_main():
             max_workers = int(env_val)
 
     import pandas as pd
+    import pyarrow.parquet as pq
+    from tilewright.contract import source_fingerprint
     from tilewright.utils import check_server, server_settings
     from tilewright.register import register_dataset_http, verify_registration_http
 
@@ -162,6 +176,13 @@ def register_main():
 
         ent_df = pd.read_parquet(ent_path)
         art_df = pd.read_parquet(art_path)
+        fingerprint = source_fingerprint(cfg)
+        stamped = (pq.read_schema(ent_path).metadata or {}).get(b"fingerprint", b"").decode()
+        if stamped and stamped != fingerprint:
+            print(f"\nERROR: the manifests in {ent_path.parent} were generated from a "
+                  f"different source block than {config_path} now has. Run\n"
+                  f"    tilewright manifest {config_path}\nto rebuild them.", file=sys.stderr)
+            sys.exit(1)
 
         # Shared axes are artifact rows with no uid. A YAML that declares
         # `shared:` but whose manifest has none was generated before shared
@@ -189,14 +210,14 @@ def register_main():
                                   dataset_key=dataset_key,
                                   dataset_metadata=dataset_metadata,
                                   server_base_dir=server_base_dir,
-                                  upload=args.upload,
+                                  upload=args.upload, fingerprint=fingerprint,
+                                  update=args.update, adopt=args.adopt,
                                   **kwargs)
         except ValueError as e:
             print(f"\nERROR: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Verify
-    verify_registration_http(client)
+    verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets])
 
     print("\nDone!")
 

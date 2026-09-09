@@ -49,6 +49,10 @@ STORAGE_KEY = "storage"
 STORAGE_EXTERNAL = "external"
 STORAGE_UPLOADED = "uploaded"
 
+# Dataset-container metadata key holding contract.source_fingerprint(): which data the
+# container describes, so two labels never silently merge (register.dataset_container).
+FINGERPRINT_KEY = "fingerprint"
+
 
 # Standard columns in the artifact manifest that are NOT stored as metadata.
 # Everything else becomes artifact-level metadata dynamically.

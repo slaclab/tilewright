@@ -1,8 +1,8 @@
 """
-Mode A Discovery API: Query Tiled catalog, load artifacts directly from HDF5.
+Reading straight from the files: query the catalog for locators, open the HDF5 with h5py.
 
-This is the "expert" access mode. For visualization/chunked access,
-use the Tiled adapter pattern instead (client["entity"]["artifact"][:]).
+For readers on the same filesystem as the data. Everyone else reads through the server:
+client["DATASET"]["entity"]["artifact"][:].
 
 Usage:
     from tiled.client import from_uri
@@ -100,3 +100,35 @@ def load_artifacts(manifest_df, artifact_type, base_dir):
             else:
                 arrays.append(ds[:])
     return arrays
+
+
+def locate(entity):
+    """Where each of an entity's artifacts lives on disk: ``{type: {file, dataset, index}}``.
+
+    Read off the ``path_<type>`` / ``dataset_<type>`` / ``index_<type>`` locators that
+    registration stamps on every entity. ``file`` is relative to the dataset's directory
+    (the caller knows where that is mounted); ``index`` is the row for batch sources,
+    else None.
+    """
+    meta = dict(entity.metadata)
+    out = {}
+    for k, v in meta.items():
+        if k.startswith("path_"):
+            t = k[len("path_"):]
+            idx = meta.get(f"index_{t}")
+            out[t] = {"file": v, "dataset": meta[f"dataset_{t}"],
+                      "index": None if idx is None else int(idx)}
+    return out
+
+
+def load(entity, artifact_type, base_dir, slc=None):
+    """Read one artifact of one entity straight from its HDF5 file with h5py.
+
+    For readers on the same filesystem as the data. ``slc`` is applied *after* the batch
+    row index (``ds[index][slc]``), which is the one detail that is easy to get wrong.
+    """
+    loc = locate(entity)[artifact_type]
+    with h5py.File(os.path.join(base_dir, loc["file"]), "r") as f:
+        ds = f[loc["dataset"]]
+        arr = ds[loc["index"]] if loc["index"] is not None else ds[()]
+    return arr if slc is None else arr[slc]

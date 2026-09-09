@@ -36,6 +36,7 @@ is never rewritten, so a changed path means delete + re-register.
 Per-entity work runs on a ThreadPoolExecutor (see _DEFAULT_MAX_WORKERS).
 """
 
+import datetime
 import json
 import os
 import time
@@ -50,6 +51,7 @@ from tiled.structures.core import StructureFamily
 from tiled.structures.data_source import Asset, DataSource, Management
 
 from .utils import (
+    FINGERPRINT_KEY,
     make_artifact_key,
     make_entity_key,
     to_json_safe,
@@ -319,11 +321,79 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
         )
 
 
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def dataset_container(client, dataset_key, dataset_metadata, storage, fingerprint,
+                      update=False, adopt=False):
+    """Create or claim the dataset container for ``dataset_key``.
+
+    The fingerprint (``contract.source_fingerprint``) says *which data* a manifest
+    describes, independent of label or metadata. Four cases:
+
+    1. key absent: create it, stamped with ``storage``, ``fingerprint``, ``registered_at``.
+    2. key present, same fingerprint: the same data; proceed incrementally. With
+       ``update``, merge-patch the container's metadata from the YAML first (Tiled
+       keeps the previous version as a revision) and stamp ``updated_at``.
+    3. key present, different fingerprint: someone else's data (or yours from another
+       directory) under this label. Refused; pick another label.
+    4. key present, no fingerprint: registered before this convention. Refused unless
+       ``adopt``, which stamps the fingerprint and proceeds.
+
+    A transport mismatch (external vs uploaded) is refused in every case.
+    """
+    if dataset_key not in client:
+        stamps = {STORAGE_KEY: storage, "registered_at": _now()}
+        if fingerprint:
+            stamps[FINGERPRINT_KEY] = fingerprint
+        parent = client.create_container(key=dataset_key,
+                                         metadata={**dataset_metadata, **stamps})
+        print(f"Created dataset container '{dataset_key}' (storage: {storage})")
+        return parent
+
+    parent = client[dataset_key]
+    existing = dict(parent.metadata)
+    existing_storage = existing.get(STORAGE_KEY, STORAGE_EXTERNAL)
+    if existing_storage != storage:
+        raise ValueError(
+            f"dataset '{dataset_key}' exists with storage='{existing_storage}' but this "
+            f"run would register storage='{storage}'. Delete the dataset first "
+            f"(tilewright delete {dataset_key}) or use a new label.")
+    existing_fp = existing.get(FINGERPRINT_KEY)
+    if fingerprint and existing_fp and existing_fp != fingerprint:
+        raise ValueError(
+            f"'{dataset_key}' already holds different data.\n"
+            f"  on the server: fingerprint {existing_fp}, label {existing.get('label')!r}, "
+            f"description {str(existing.get('description') or '')[:80]!r}\n"
+            f"  this manifest: fingerprint {fingerprint}\n"
+            f"Choose a different label for your dataset.")
+    if fingerprint and not existing_fp and not adopt:
+        raise ValueError(
+            f"'{dataset_key}' was registered before fingerprints existed, so it cannot "
+            f"be told apart from other data. If it is this dataset, re-run with --adopt "
+            f"to stamp it; otherwise choose a different label.")
+    patch = {}
+    if fingerprint and not existing_fp:
+        patch[FINGERPRINT_KEY] = fingerprint
+        print(f"Adopting '{dataset_key}': stamping fingerprint {fingerprint}")
+    if update:
+        patch.update({k: v for k, v in dataset_metadata.items()
+                      if k not in (STORAGE_KEY, FINGERPRINT_KEY, "registered_at")})
+        patch["updated_at"] = _now()
+        print(f"Updating metadata of '{dataset_key}' from the YAML "
+              f"({len(patch) - 1} keys; the previous version is kept as a revision)")
+    if patch:
+        parent.update_metadata(patch)
+    print(f"Using existing dataset container '{dataset_key}'")
+    return parent
+
+
 def register_dataset_http(client, ent_df, art_df, base_dir, label,
                           dataset_key, dataset_metadata,
                           server_base_dir=None,
                           max_workers=_DEFAULT_MAX_WORKERS,
-                          upload=False):
+                          upload=False, fingerprint=None, update=False, adopt=False):
     """Register one dataset via HTTP through a running Tiled server.
 
     Creates a dataset container, its shared axes (artifact rows with no uid)
@@ -350,6 +420,10 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
             of registering a DataSource pointing at the file. The dataset
             container is stamped ``storage: uploaded`` (vs ``external``);
             a dataset cannot mix the two.
+        fingerprint: The manifest's source fingerprint; see ``dataset_container``.
+        update: Merge-patch the dataset container's metadata from
+            ``dataset_metadata`` when the fingerprints match.
+        adopt: Claim a container registered before fingerprints existed.
 
     Returns:
         bool: True if any entities or shared axes were registered.
@@ -361,27 +435,8 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     art_fail_count = 0
 
     storage = STORAGE_UPLOADED if upload else STORAGE_EXTERNAL
-
-    # Create or reuse dataset container
-    if dataset_key in client:
-        parent_client = client[dataset_key]
-        # Incremental re-runs must keep one transport per dataset: mixing
-        # external pointers and uploaded arrays would make delete semantics
-        # (which bytes does the server own?) ambiguous per-entity.
-        existing = dict(parent_client.metadata).get(STORAGE_KEY, STORAGE_EXTERNAL)
-        if existing != storage:
-            raise ValueError(
-                f"dataset '{dataset_key}' exists with storage='{existing}' but "
-                f"this run would register storage='{storage}'. Delete the "
-                f"dataset first (tilewright delete {dataset_key}) or use a new label."
-            )
-        print(f"Using existing dataset container '{dataset_key}'")
-    else:
-        parent_client = client.create_container(
-            key=dataset_key,
-            metadata={**dataset_metadata, STORAGE_KEY: storage},
-        )
-        print(f"Created dataset container '{dataset_key}' (storage: {storage})")
+    parent_client = dataset_container(client, dataset_key, dataset_metadata, storage,
+                                      fingerprint, update=update, adopt=adopt)
 
     require_shape_dtype(art_df)
     ent_columns = list(ent_df.columns)
@@ -460,29 +515,34 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     return ent_count > 0 or art_count > 0 or shared_added > 0
 
 
-def verify_registration_http(client):
-    """Smoke-probe registration via Tiled client.
+def verify_registration_http(client, dataset_keys=None):
+    """Smoke-probe the datasets just registered (or the first one on the server).
 
-    Samples the first dataset, first entity under it, and first artifact
-    under that — root -> dataset -> entity -> artifact — and reports
-    dual-mode access status (metadata locators + array children) on the
-    sampled entity. Not a full per-row verification; the goal is to catch
-    structural breakage (empty container, wrong hierarchy depth) post-
-    register without iterating the whole catalog.
+    For each key: the dataset container, its shared axes, its first entity and that
+    entity's first artifact — root -> dataset -> entity -> artifact. Not a per-row
+    check; it catches structural breakage (empty container, no array children) without
+    walking the catalog. A registration can pass this and still serve nothing: the
+    read-back in the onboarding skill is the real proof.
     """
     print("\n" + "=" * 50)
     print("Verification")
     print("=" * 50)
 
-    dataset_keys = list(client.keys())
-    print(f"Dataset containers at root: {len(dataset_keys)}")
-    if not dataset_keys:
+    all_keys = list(client.keys())
+    print(f"Dataset containers at root: {len(all_keys)}")
+    if not all_keys:
         print("No datasets registered yet.")
         return
-    print(f"  {dataset_keys[:5]}")
+    for ds_key in (dataset_keys or all_keys[:1]):
+        _verify_dataset(client, ds_key)
 
-    ds_key = dataset_keys[0]
-    ds = client[ds_key]
+
+def _verify_dataset(client, ds_key):
+    try:
+        ds = client[ds_key]
+    except KeyError:
+        print(f"\nDataset '{ds_key}': NOT FOUND on the server")
+        return
     ds_meta = dict(ds.metadata)
     print(f"\nDataset '{ds_key}':")
     print(f"  metadata keys: {len(ds_meta)}")

@@ -22,6 +22,7 @@ def test_build_dataset_metadata_keeps_extras_and_adds_shared_locators():
     md = _build_dataset_metadata(cfg)
     assert md["prior_distribution"] == "uniform" and md["contact"] == "A <a@b>"
     assert md["shared_dataset_energy"] == "/energy"
+    assert md["label"] == "X"
     assert "producer" not in md  # None fields are not written
 
 

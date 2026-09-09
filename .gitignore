@@ -22,7 +22,7 @@ profile_*.py
 PROFILING_REPORT.md
 
 # Uploaded-array storage written by a server started from config.demo.yml
-demo_storage/
+upload_storage/
 
 # Generated manifests and storage
 manifests/
