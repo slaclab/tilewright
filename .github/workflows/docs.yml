@@ -44,9 +44,18 @@ jobs:
       - name: Build the site
         run: uv run --no-project --with 'mkdocs-material>=9,<10' mkdocs build --strict
 
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+      # What upload-pages-artifact does, inlined: that action is a composite whose
+      # inner upload-artifact is tag-pinned, which the organisation's SHA-only policy
+      # rejects. deploy-pages wants one artifact named github-pages holding artifact.tar.
+      - name: Pack the site for Pages
+        run: tar --dereference --hard-dereference --directory site -cf "$RUNNER_TEMP/artifact.tar" .
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          path: site
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   # Publishing only happens on main; a pull request gets the build check alone.
   deploy:
