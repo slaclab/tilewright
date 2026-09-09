@@ -1,4 +1,4 @@
-Both `tcb` and the Python client take the server URL and your API key from the
+Both `tilewright` and the Python client take the server URL and your API key from the
 environment. Put them in a `.env` file in the directory you work from — the root of
 your checkout, if you have one:
 
@@ -10,7 +10,7 @@ TILED_API_KEY=<your key>
 In a checkout, `cp .env.example .env` gives you the file to fill in. `.env` is
 gitignored; treat it like a password.
 
-`tcb` reads `.env` from the working directory by itself. Nothing else does. A
+`tilewright` reads `.env` from the working directory by itself. Nothing else does. A
 notebook, a script, or a `python -c` needs the variables **exported** into its own
 environment first:
 

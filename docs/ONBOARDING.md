@@ -3,7 +3,7 @@
 Turn a directory of HDF5 files into a dataset in a Tiled catalog: searchable by its
 physics, readable from anywhere.
 
-**Before you start:** [install `tcb`](install.md), arrange the files in one of the
+**Before you start:** [install `tilewright`](install.md), arrange the files in one of the
 [three supported layouts](explanation/layouts.md), and set `TILED_URL` and `TILED_API_KEY`.
 
 ## Pick a transport first
@@ -12,14 +12,14 @@ This decision changes two steps below; everything else is the same either way.
 
 | | The server reads your files | You upload the arrays |
 |---|---|---|
-| **Command** | `tcb register` | `tcb register --upload` |
+| **Command** | `tilewright register` | `tilewright register --upload` |
 | **Use when** | The data is on a filesystem the Tiled server can open — the normal case for facility storage | The server cannot see your disk — a laptop, a university cluster |
 | **What is registered** | Pointers. No array bytes move | The arrays themselves, streamed into the server's storage |
 | **Afterwards** | The files stay where they are, and stay load-bearing | The server owns the bytes; your local files are no longer involved |
 
-A dataset is one transport or the other — `tcb register` refuses to mix them.
+A dataset is one transport or the other — `tilewright register` refuses to mix them.
 
-<figure class="tcb-diagram">
+<figure class="tw-diagram">
 --8<-- "diagrams/pipeline.svg"
 <figcaption>What each step reads and writes. Only the last one needs a running server.</figcaption>
 </figure>
@@ -27,7 +27,7 @@ A dataset is one transport or the other — `tcb register` refuses to mix them.
 ## 1. Author the dataset YAML
 
 The YAML is the contract: enough about your files to register them without knowing
-anything about your science. `tcb generate` *reads* it — nothing generates it. Leave `key`
+anything about your science. `tilewright generate` *reads* it — nothing generates it. Leave `key`
 for step 2.
 
 ### With an agent (recommended)
@@ -45,7 +45,7 @@ YAML from what is there: layout, artifacts, parameters, shared axes. Uploading? 
 line:
 
 > This is remote registration — the server cannot see my filesystem, so we will use
-> `tcb register --upload`.
+> `tilewright register --upload`.
 
 **You are still the reviewer.** An agent reads shapes and dtypes off your files; `method`,
 `material`, and `producer` are provenance claims only you can confirm.
@@ -62,7 +62,7 @@ Then edit:
   Powder`, not `My Dataset`.
 - **`data`** — `directory`, `layout`, and `file_pattern` if the default `**/*.h5` misses.
 - **`metadata`** — `method`, `data_type`, `material` required. Prefer ids from
-  `src/tiled_catalog_broker/tools/schema/catalog_model.yml`; unknown ones warn, not fail.
+  `src/tilewright/vocabulary.yml`; unknown ones warn, not fail.
 - **`artifacts`** — one per array an entity exposes. Arrays common to *every* entity, like
   an energy axis, go under `shared`.
 - **`parameters`** — `location`, plus the matching group fields.
@@ -104,8 +104,8 @@ NeXus files start from `datasets/examples/per_entity_nexus.yml`. Full field list
 ## 2. Stamp the key and generate the manifests
 
 ```bash
-tcb stamp-key datasets/my_dataset.yml
-tcb generate datasets/my_dataset.yml
+tilewright stamp-key datasets/my_dataset.yml
+tilewright generate datasets/my_dataset.yml
 ```
 
 `stamp-key` derives the catalog key from `label` and writes it in. `generate` validates the
@@ -134,14 +134,14 @@ the wrong entity group.
 
     Three settings have to describe the same bytes:
 
-    <figure class="tcb-diagram">
+    <figure class="tw-diagram">
     --8<-- "diagrams/paths.svg"
     <figcaption>Two of the three are in your dataset YAML; the third is the server's own config.</figcaption>
     </figure>
 
     | Setting | Filesystem | Purpose |
     |---|---|---|
-    | `data.directory` | yours | Root scanned by `tcb generate` |
+    | `data.directory` | yours | Root scanned by `tilewright generate` |
     | `data.server_base_dir` | server | Equivalent root stored in catalog pointers |
     | `readable_storage` in `config.yml` | server | Roots the server may read |
 
@@ -162,7 +162,7 @@ the wrong entity group.
 
     ```yaml
     adapters_by_mimetype:
-      application/x-hdf5-broker: "tiled_catalog_broker.adapters.lazy_hdf5:LazyHDF5ArrayAdapter"
+      application/x-hdf5-broker: "tilewright.adapter:LazyHDF5ArrayAdapter"
     ```
 
     It is an import path resolved server-side, so the broker must be importable in the
@@ -182,8 +182,8 @@ Register a small sample first, then the rest:
 === "Server reads the files"
 
     ```bash
-    tcb register -n 5 datasets/my_dataset.yml
-    tcb register datasets/my_dataset.yml
+    tilewright register -n 5 datasets/my_dataset.yml
+    tilewright register datasets/my_dataset.yml
     ```
 
     No array bytes move: registration reads the manifest and never opens an HDF5 file,
@@ -192,8 +192,8 @@ Register a small sample first, then the rest:
 === "Upload from my machine"
 
     ```bash
-    tcb register --upload -n 5 datasets/my_dataset.yml
-    tcb register --upload datasets/my_dataset.yml
+    tilewright register --upload -n 5 datasets/my_dataset.yml
+    tilewright register --upload datasets/my_dataset.yml
     ```
 
     This moves the real data, so wall-clock scales with size and uplink, not entity count.
@@ -204,7 +204,7 @@ Either way registration is incremental — an existing entity is skipped, so the
 command continues from the first and an interrupted run resumes.
 
 Regenerate first if a shape or dtype changed. After changing any path in the YAML:
-regenerate, `tcb delete`, register again — existing artifacts are never rewritten.
+regenerate, `tilewright delete`, register again — existing artifacts are never rewritten.
 
 ## 5. Read it back
 
@@ -236,7 +236,7 @@ Next: [read a registered catalog](using-the-catalog.md), or
 ## 6. Start over
 
 ```bash
-tcb delete MY_DATASET
+tilewright delete MY_DATASET
 ```
 
 This removes the catalog entries — and, for an uploaded dataset, the arrays the server
@@ -246,15 +246,15 @@ stored, since the catalog is their only home. Your HDF5 files are never touched.
 
 | Symptom | Fix |
 |---|---|
-| `missing 'key' field` | Run `tcb stamp-key` first |
+| `missing 'key' field` | Run `tilewright stamp-key` first |
 | `stored key ... does not match slug(label)` | Restore the label, or remove `key` and stamp it again |
-| `manifests not found` | Run `tcb generate` with this YAML |
+| `manifests not found` | Run `tilewright generate` with this YAML |
 | Entity or artifact counts are wrong | Check `file_pattern`, the batched leading axis, or `entity_group` |
 | Parameters are missing | Correct `parameters.location`, `group`, or `groups` |
 | Registration succeeds but every read returns HTTP 500 | Either the server is missing `adapters_by_mimetype` (step 3), or `server_base_dir` / `readable_storage` / a symlinked path is wrong. Fix, then regenerate, delete, and register again |
-| Only *some* reads return HTTP 500 | Those files changed shape or dtype since `tcb generate`. Regenerate |
+| Only *some* reads return HTTP 500 | Those files changed shape or dtype since `tilewright generate`. Regenerate |
 | Entity count lower than expected | An interrupted run. Re-run the same command; it skips what is already there |
 
 Every other message with a specific cause is in
 [errors and warnings](reference/errors.md); flags and exit codes are in
-[the `tcb` reference](reference/cli.md).
+[the `tilewright` reference](reference/cli.md).

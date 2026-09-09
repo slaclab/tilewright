@@ -14,20 +14,20 @@ artifact types, or scientific metadata.
 Python 3.12 or later.
 
 ```bash
-uv run tcb --help   # builds .venv from uv.lock on first use; or: pip install -e ".[test]" / pixi install
+uv run tilewright --help   # builds .venv from uv.lock on first use; or: pip install -e ".[test]" / pixi install
 ```
 
 Author a dataset YAML, then walk it through the pipeline:
 
 ```bash
-tcb stamp-key datasets/mydata.yml  # derive the catalog key from the label
-tcb generate datasets/mydata.yml   # scan HDF5 and write Parquet manifests
-tcb register datasets/mydata.yml   # register with the configured server
+tilewright stamp-key datasets/mydata.yml  # derive the catalog key from the label
+tilewright generate datasets/mydata.yml   # scan HDF5 and write Parquet manifests
+tilewright register datasets/mydata.yml   # register with the configured server
 ```
 
-Check the entity and artifact counts printed by `tcb generate` before
+Check the entity and artifact counts printed by `tilewright generate` before
 registering. Set the server with `TILED_URL` and `TILED_API_KEY`; a `.env` in
-the working directory is loaded automatically. Add `--upload` to `tcb register`
+the working directory is loaded automatically. Add `--upload` to `tilewright register`
 when the server cannot open the files itself.
 
 Read a registered dataset from anywhere:
@@ -50,10 +50,10 @@ is the complete reference.
 
 | Goal | Page |
 |---|---|
-| Install `tcb` and point it at a server | [How to install](https://carbonscott.github.io/tiled-catalog-broker/install/) |
+| Install `tilewright` and point it at a server | [How to install](https://carbonscott.github.io/tiled-catalog-broker/install/) |
 | Register your own dataset, either transport | [How to publish a dataset](https://carbonscott.github.io/tiled-catalog-broker/ONBOARDING/) |
 | Read a registered catalog | [How to read a registered catalog](https://carbonscott.github.io/tiled-catalog-broker/using-the-catalog/) |
-| Look up a command or YAML field | [`tcb` commands](https://carbonscott.github.io/tiled-catalog-broker/reference/cli/) · [dataset YAML](https://carbonscott.github.io/tiled-catalog-broker/reference/dataset-yaml/) |
+| Look up a command or YAML field | [`tilewright` commands](https://carbonscott.github.io/tiled-catalog-broker/reference/cli/) · [dataset YAML](https://carbonscott.github.io/tiled-catalog-broker/reference/dataset-yaml/) |
 | Work out why something failed | [Errors and warnings](https://carbonscott.github.io/tiled-catalog-broker/reference/errors/) |
 | Understand the design | [broker vs. Tiled](https://carbonscott.github.io/tiled-catalog-broker/explanation/broker-and-tiled/) · [data model](https://carbonscott.github.io/tiled-catalog-broker/explanation/data-model/) |
 

@@ -129,10 +129,10 @@ def load(entity, artifact_type, base_dir):
 ```
 
 For the common case — query, then bulk-load every match — the broker ships this as
-`clients/query_manifest.py`:
+`client.py`:
 
 ```python
-from tiled_catalog_broker.clients.query_manifest import query_catalog, load_artifacts
+from tilewright.client import query_catalog, load_artifacts
 
 manifest = query_catalog(hits, artifact_type="rixs_spectrum")   # DataFrame: params + locators
 arrays = load_artifacts(manifest, artifact_type="rixs_spectrum", base_dir="/path/to/data")
@@ -143,7 +143,7 @@ Theta = manifest[["sigma", "gamma"]].to_numpy()                 # your choice of
 
 `base_dir` is required — there is no inference from the catalog.
 
-None of this works for a dataset registered with `tcb register --upload` — the server holds
+None of this works for a dataset registered with `tilewright register --upload` — the server holds
 the bytes and there is no external file to open. Read through the server instead; same
 array.
 

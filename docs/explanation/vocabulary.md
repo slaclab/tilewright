@@ -3,7 +3,7 @@
 `Key("material") == "NiPS3"` is only useful if everyone spelled NiPS3 the same way. The
 semantic model is how that agreement is kept.
 
-It lives in `src/tiled_catalog_broker/tools/schema/catalog_model.yml` and defines canonical
+It lives in `src/tilewright/vocabulary.yml` and defines canonical
 ids, plus aliases for them, across six fields: `method`, `material`, `producer`, `project`,
 `facility`, `data_type`.
 
@@ -14,7 +14,7 @@ An unknown value warns and validates. Your dataset onboards either way.
 - A known alias is rewritten to its canonical id: `EDRIXS` becomes `RIXS`, `nips3` becomes
   `NiPS3`. Some aliases imply a default too, so `EDRIXS` also implies
   `data_type: simulation`.
-- An unknown value is left as you wrote it, and `tcb generate` prints a warning.
+- An unknown value is left as you wrote it, and `tilewright generate` prints a warning.
 
 The stricter option would be to reject unknown values. That fails badly for the first
 person to bring a new material: they cannot register anything until someone edits a

@@ -1,5 +1,5 @@
 # Tiled server configuration for hosting UPLOADED datasets
-# (`tcb register --upload` — see docs/ONBOARDING.md).
+# (`tilewright register --upload` — see docs/ONBOARDING.md).
 #
 # Registrants stream their arrays through the server, which stores them
 # under `writable_storage`. The server never reads registrants' files from
@@ -21,5 +21,5 @@ trees:
       uri: "sqlite:///demo_catalog.db"
       init_if_not_exists: true
       # Where uploaded array bytes live. Size it for the sum of what
-      # participants will upload; `tcb delete` reclaims space.
+      # participants will upload; `tilewright delete` reclaims space.
       writable_storage: "demo_storage"

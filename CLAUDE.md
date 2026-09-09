@@ -1,6 +1,6 @@
 ## Environment Setup
 
-Use `uv` to run python programs (`uv run tcb ...`, `uv run --with pytest pytest ...`).
+Use `uv` to run python programs (`uv run tilewright ...`, `uv run --with pytest pytest ...`).
 Nothing in this repo assumes a particular machine or facility: it runs from any checkout
 with `uv` installed, and the local server config (`config.yml`) serves data placed under
 `./data/` with no edits.
@@ -36,7 +36,7 @@ metadata.
   The default, and the only option for an uploaded dataset.
 - **Straight from the files** — entities carry `path_/dataset_/index_` locators, so a
   reader on the same filesystem can open the HDF5 with h5py and skip the server. For
-  bulk reads; `clients/query_manifest.py` is the helper.
+  bulk reads; `client.py` is the helper.
 
 The terms **"Mode A" and "Mode B" are retired from the docs site** — they were a
 taxonomy readers had to memorize before either name meant anything. The concept stays;
@@ -54,10 +54,10 @@ tiled-catalog-broker/
 ├── pyproject.toml             # Package definition (tiled-catalog-broker)
 ├── config.yml                 # Tiled server configuration
 ├── src/
-│   └── tiled_catalog_broker/  # Installable Python package
-│       ├── cli.py             # CLI: tcb {generate,stamp-key,register,delete}
+│   └── tilewright/  # Installable Python package
+│       ├── cli.py             # CLI: tilewright {generate,stamp-key,register,delete}
 │       ├── config.py          # Server connection settings from the environment
-│       ├── http_register.py   # HTTP registration via Tiled client (the single route)
+│       ├── register.py   # HTTP registration via Tiled client (the single route)
 │       ├── utils.py           # Shared helpers
 │       ├── adapters/          # Tiled array adapters
 │       ├── tools/             # Data-prep tools
@@ -79,13 +79,13 @@ tiled-catalog-broker/
 # Run from the checkout: uv builds .venv from the checked-in uv.lock on first use
 # (pixi.lock deliberately is not checked in). Extra tools come in per command
 # with --with (pytest, marimo, mkdocs-material) — nothing beyond `test` is a declared extra.
-uv run tcb --help
+uv run tilewright --help
 
 # Pipeline: author YAML → stamp-key → generate → register
-tcb stamp-key datasets/my_dataset.yml
-tcb generate datasets/my_dataset.yml
-tcb register datasets/my_dataset.yml     # needs a running server (TILED_URL, TILED_API_KEY)
-tcb register --upload datasets/my_dataset.yml  # stream arrays into server storage (server can't see the files)
+tilewright stamp-key datasets/my_dataset.yml
+tilewright generate datasets/my_dataset.yml
+tilewright register datasets/my_dataset.yml     # needs a running server (TILED_URL, TILED_API_KEY)
+tilewright register --upload datasets/my_dataset.yml  # stream arrays into server storage (server can't see the files)
 
 # Serve (from the repo root: config.yml's readable_storage lists `data`, resolved
 # relative to the server's CWD, so ./data/<DATASET> is readable with no config change)
@@ -156,15 +156,15 @@ Two conventions keep the guides from re-explaining each other:
 | Document | Description |
 |----------|-------------|
 | `CONTEXT.md` | Domain language + the implementation-vs-contract principle |
-| `docs/install.md` | How-to: install `tcb` (clone, Python 3.12+, uv / pip / pixi), point at a server, troubleshoot. Reading a catalog needs only `tiled[client]`, so that case is one admonition at the top rather than a page of its own |
+| `docs/install.md` | How-to: install `tilewright` (clone, Python 3.12+, uv / pip / pixi), point at a server, troubleshoot. Reading a catalog needs only `tiled[client]`, so that case is one admonition at the top rather than a page of its own |
 | `docs/workshop-prep.md` | How-to: what all-hands participants do before the session |
 | `docs/ONBOARDING.md` | How-to: publish a dataset (titled "How to publish a dataset"; filename kept so the published URL and the `/onboarding` skill's references still resolve). **Both transports** — pointer and `--upload` — as linked content tabs at steps 1, 3, and 4 |
 | `docs/using-the-catalog.md` | How-to: read a registered dataset — through the server, and straight from the files |
 | `docs/exploring-your-data.md` | How-to: browse a registered dataset in the marimo notebook |
-| `docs/reference/cli.md` | Reference: the four `tcb` subcommands, flags, exit codes, env vars |
+| `docs/reference/cli.md` | Reference: the four `tilewright` subcommands, flags, exit codes, env vars |
 | `docs/reference/dataset-yaml.md` | Reference: every dataset-YAML field |
 | `docs/reference/manifest.md` | Reference: the two Parquet manifests and their columns |
-| `docs/reference/errors.md` | Reference: every `tcb`/server message with a specific cause, by pipeline stage. The full symptom→cause→fix table; `docs/ONBOARDING.md`'s Troubleshooting section carries only the common rows and links here |
+| `docs/reference/errors.md` | Reference: every `tilewright`/server message with a specific cause, by pipeline stage. The full symptom→cause→fix table; `docs/ONBOARDING.md`'s Troubleshooting section carries only the common rows and links here |
 | `docs/explanation/broker-and-tiled.md` | Explanation: what the broker adds to stock Tiled, and where the line falls |
 | `docs/explanation/data-model.md` | Explanation: why Dataset → Entity → Artifact |
 | `docs/explanation/layouts.md` | Explanation: the three layouts and why the set is frozen |

@@ -1,10 +1,10 @@
-site_name: Tiled Catalog Broker
+site_name: TileWright
 site_description: >-
   Register multi-modal scientific HDF5 datasets into a Tiled catalog, and read
   them back from anywhere.
-site_url: https://carbonscott.github.io/tiled-catalog-broker/
-repo_url: https://github.com/carbonscott/tiled-catalog-broker
-repo_name: carbonscott/tiled-catalog-broker
+site_url: https://slaclab.github.io/TileWright/
+repo_url: https://github.com/slaclab/TileWright
+repo_name: slaclab/TileWright
 edit_uri: edit/main/docs/
 docs_dir: docs
 strict: true
@@ -141,7 +141,7 @@ nav:
       - Soft vocabulary: explanation/vocabulary.md
       - NeXus support: explanation/nexus.md
   - Reference:
-      - tcb cli tool: reference/cli.md
+      - tilewright cli tool: reference/cli.md
       - YAML contract: reference/dataset-yaml.md
       - Parquet manifest: reference/manifest.md
       - Errors and warnings: reference/errors.md

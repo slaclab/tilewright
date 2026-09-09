@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tiled_catalog_broker.cli import _require_key, stamp_key_main
+from tilewright.cli import _require_key, stamp_key_main
 
 
 class TestRequireKey:
@@ -25,7 +25,7 @@ class TestRequireKey:
         assert exc.value.code == 1
         err = capsys.readouterr().err
         assert "missing 'key'" in err
-        assert "tcb stamp-key" in err
+        assert "tilewright stamp-key" in err
 
     def test_drifted_key_exits(self, capsys):
         config = {"label": "Broad Sigma", "key": "OLD_NAME"}
@@ -41,10 +41,10 @@ class TestRequireKey:
 
 
 class TestStampKeyMain:
-    """End-to-end tests for `tcb stamp-key`."""
+    """End-to-end tests for `tilewright stamp-key`."""
 
     def _run(self, *args):
-        with patch.object(sys, "argv", ["tcb stamp-key", *args]):
+        with patch.object(sys, "argv", ["tilewright stamp-key", *args]):
             stamp_key_main()
 
     def test_stamps_fresh_yaml(self, tmp_path):

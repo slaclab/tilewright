@@ -3,7 +3,7 @@
 Your HDF5 files have to match one of three layouts. What you call your parameters and your
 arrays, and how many entities you have, are all up to you.
 
-<figure class="tcb-diagram">
+<figure class="tw-diagram">
 --8<-- "diagrams/layouts.svg"
 <figcaption>Where the entity boundary falls in each layout, and where each one keeps its parameters.</figcaption>
 </figure>

@@ -10,8 +10,8 @@ Run with: uv run --with pytest pytest tests/test_registration_helpers.py -v
 
 from unittest.mock import MagicMock
 
-from tiled_catalog_broker.cli import _build_dataset_metadata
-from tiled_catalog_broker.http_register import verify_registration_http
+from tilewright.cli import _build_dataset_metadata
+from tilewright.register import verify_registration_http
 
 
 # ---------- _build_dataset_metadata: provenance None guard ----------

@@ -1,7 +1,7 @@
 """The annotated example dataset YAMLs are part of the contract surface.
 
-Each `datasets/examples/<layout>.yml` must parse and validate cleanly against the
-contract (`tcb generate` runs the same `validate()`), and must use canonical vocabulary
+Each `examples/datasets/<layout>.yml` must parse and validate cleanly against the
+contract (`tilewright generate` runs the same `validate()`), and must use canonical vocabulary
 so it produces zero warnings — they are the templates producers copy.
 """
 
@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
 
-from tiled_catalog_broker.tools.schema import validate
+from tilewright.vocabulary import validate
 
-EXAMPLES_DIR = Path(__file__).parent.parent / "datasets" / "examples"
+EXAMPLES_DIR = Path(__file__).parent.parent / "examples" / "datasets"
 EXAMPLE_FILES = sorted(EXAMPLES_DIR.glob("*.yml"))
 
 

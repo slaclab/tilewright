@@ -1,6 +1,6 @@
 # The Parquet manifest
 
-`tcb generate` writes two Parquet files per dataset; `tcb register` reads them and nothing
+`tilewright generate` writes two Parquet files per dataset; `tilewright register` reads them and nothing
 else. They are the contract between the two halves of the pipeline.
 
 ```
@@ -50,7 +50,7 @@ registration trusts it.
 
 - A manifest that no longer matches the data is not detected at registration. The read
   adapter re-checks both against the file and raises on a mismatch, so the discrepancy
-  surfaces as HTTP 500 on read rather than as silently wrong data. `tcb generate` rebuilds
+  surfaces as HTTP 500 on read rather than as silently wrong data. `tilewright generate` rebuilds
   the snapshot; it is idempotent.
 - A manifest with no `shape`/`dtype` columns is rejected at registration, with a message
   naming the command that regenerates it.

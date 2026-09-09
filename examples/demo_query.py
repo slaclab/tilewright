@@ -57,7 +57,7 @@ def _(mo):
     ```
 
     The dataset key is the slug of the YAML's `label` (written by
-    `tcb stamp-key`); entity keys are `{DATASET_KEY}_{uid}`. Shared axis
+    `tilewright stamp-key`); entity keys are `{DATASET_KEY}_{uid}`. Shared axis
     arrays (energy grids, etc.) are registered once as direct children of
     the dataset container, alongside the entities.
 
@@ -78,7 +78,7 @@ def _():
     # ---------------------------------------------------------------
     # Replace with your dataset here.
     #
-    # DATASET_KEY   the key `tcb stamp-key` wrote into your YAML
+    # DATASET_KEY   the key `tilewright stamp-key` wrote into your YAML
     # ARTIFACT_KEY  the artifact to read -- one of your YAML's
     #               `artifacts:` `type:` values. Leave it None to use
     #               whichever artifact the first entity carries.
@@ -87,8 +87,8 @@ def _():
     # even where the HDF5 files live -- is read back out of the catalog,
     # so these two names are the whole configuration.
     # ---------------------------------------------------------------
-    DATASET_KEY = os.environ.get("TCB_DEMO_DATASET", "BROAD_SIGMA")
-    ARTIFACT_KEY = os.environ.get("TCB_DEMO_ARTIFACT") or None
+    DATASET_KEY = os.environ.get("TILEWRIGHT_DEMO_DATASET", "BROAD_SIGMA")
+    ARTIFACT_KEY = os.environ.get("TILEWRIGHT_DEMO_ARTIFACT") or None
     return ARTIFACT_KEY, DATASET_KEY, os
 
 
@@ -128,7 +128,7 @@ def _(mo):
 
     Direct access by key — the slug of the dataset's `label`
     (`"Broad Sigma"` → `BROAD_SIGMA`), stamped into the YAML by
-    `tcb stamp-key`.
+    `tilewright stamp-key`.
     """)
     return
 
@@ -330,7 +330,7 @@ def _(artifact_key, entity, mo, os):
     #
     # The file can be unreachable for two reasons, and both are detected
     # here rather than assumed:
-    #   1. the dataset was registered with `tcb register --upload`, so Tiled
+    #   1. the dataset was registered with `tilewright register --upload`, so Tiled
     #      owns the bytes and no external file exists to open;
     #   2. the file exists, but is not mounted where this notebook runs.
     # The read through the server below always works, which is why the

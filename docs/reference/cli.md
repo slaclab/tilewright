@@ -1,10 +1,10 @@
-# The `tcb` command line
+# The `tilewright` command line
 
-`tcb` dispatches four subcommands. Run bare or with `-h` / `--help` for the list; an
+`tilewright` dispatches four subcommands. Run bare or with `-h` / `--help` for the list; an
 unrecognized subcommand exits `1`.
 
 ```
-tcb <command> [args]
+tilewright <command> [args]
 
   generate    Generate Parquet manifests from a finalized YAML contract
   stamp-key   Write the derived catalog key into a YAML
@@ -14,16 +14,16 @@ tcb <command> [args]
 
 Pipeline order is `stamp-key` → `generate` → `register`; the walkthrough is
 [How to publish a dataset](../ONBOARDING.md). Source:
-`src/tiled_catalog_broker/cli.py`.
+`src/tilewright/cli.py`.
 
 ---
 
-## `tcb stamp-key`
+## `tilewright stamp-key`
 
 Writes the derived catalog key into a dataset YAML's `key:` field.
 
 ```
-tcb stamp-key CONFIG [CONFIG ...]
+tilewright stamp-key CONFIG [CONFIG ...]
 ```
 
 | | |
@@ -45,16 +45,16 @@ Exit status:
 | Existing `key` differs from `slug(label)` | `1` |
 
 A drifted key is never silently rewritten. Recovery is in
-[errors and warnings](errors.md#tcb-stamp-key).
+[errors and warnings](errors.md#tilewright-stamp-key).
 
 ---
 
-## `tcb generate`
+## `tilewright generate`
 
 Scans the HDF5 files and writes the two Parquet manifests that registration reads.
 
 ```
-tcb generate YAML_PATH [-o OUTPUT_DIR] [--append]
+tilewright generate YAML_PATH [-o OUTPUT_DIR] [--append]
 ```
 
 | Flag | Effect |
@@ -78,19 +78,19 @@ changes shape or dtype. See [The Parquet manifest](manifest.md).
 
 ---
 
-## `tcb register`
+## `tilewright register`
 
 Registers manifests into a running Tiled server over HTTP. This is the only registration
 route.
 
 ```
-tcb register CONFIG [CONFIG ...] [-n NUM] [--max-workers N] [--upload]
+tilewright register CONFIG [CONFIG ...] [-n NUM] [--max-workers N] [--upload]
 ```
 
 | Flag | Effect |
 |---|---|
 | `-n`, `--max-entities NUM` | Register at most `NUM` entities per dataset (default: all) |
-| `--max-workers N` | Concurrent registration workers (default: `TCB_MAX_WORKERS`, else `8`) |
+| `--max-workers N` | Concurrent registration workers (default: `TILEWRIGHT_MAX_WORKERS`, else `8`) |
 | `--upload` | Read the arrays from local HDF5 and write them through the server into its writable storage, instead of registering pointers to files the server reads itself |
 
 | | |
@@ -119,29 +119,29 @@ Manifests are searched for in this order, taking the first directory holding bot
 ```
 
 A `label` containing spaces is matched both verbatim and underscore-normalized; if neither
-directory has them, the searched paths are printed with the `tcb generate` command to run.
+directory has them, the searched paths are printed with the `tilewright generate` command to run.
 
 Exit status is `1` for an unreachable server, a missing config or manifest, an unstamped or
 drifted `key`, or a `ValueError` during registration.
 
 ---
 
-## `tcb delete`
+## `tilewright delete`
 
 Removes registered data from a running server. Granularity is inferred from the number of
 positional arguments.
 
 ```
-tcb delete DATASET [ENTITY [ARTIFACT]] [-y] [--dry-run]
-tcb delete all [--confirm URL] [--dry-run]
+tilewright delete DATASET [ENTITY [ARTIFACT]] [-y] [--dry-run]
+tilewright delete all [--confirm URL] [--dry-run]
 ```
 
 | Form | Deletes |
 |---|---|
-| `tcb delete DATASET` | the dataset container and everything under it |
-| `tcb delete DATASET ENTITY` | one entity and its artifacts |
-| `tcb delete DATASET ENTITY ARTIFACT` | one artifact array |
-| `tcb delete all` | every top-level container |
+| `tilewright delete DATASET` | the dataset container and everything under it |
+| `tilewright delete DATASET ENTITY` | one entity and its artifacts |
+| `tilewright delete DATASET ENTITY ARTIFACT` | one artifact array |
+| `tilewright delete all` | every top-level container |
 
 | Flag | Effect |
 |---|---|
@@ -174,13 +174,13 @@ non-interactive-confirmation error.
 ## Environment
 
 Server settings come from the environment, not a CLI flag. Source:
-`src/tiled_catalog_broker/config.py`.
+`src/tilewright/config.py`.
 
 | Variable | Used by | Default |
 |---|---|---|
 | `TILED_URL` | `register`, `delete` | `http://localhost:8005` |
 | `TILED_API_KEY` | `register`, `delete` | falls back to `TILED_KEY`, then empty |
-| `TCB_MAX_WORKERS` | `register` | `8` |
+| `TILEWRIGHT_MAX_WORKERS` | `register` | `8` |
 
 A `.env` in the working directory is loaded automatically on import via `setdefault`, so a
 variable already exported in the shell wins over the file. Switching servers comes down to

@@ -4,7 +4,7 @@ description: >-
   Onboard a new HDF5 dataset into the Tiled catalog. Reads the contract surface
   (docs/ONBOARDING.md, the pydantic dataset models, the semantic vocabulary, and the
   example YAMLs), then explores the user's data + codebase to draft a first-pass dataset
-  YAML with predicted entity/artifact counts, pauses for the user's review, runs tcb
+  YAML with predicted entity/artifact counts, pauses for the user's review, runs tilewright
   stamp-key → generate and compares the counts, pauses again for the go, then registers
   and proves the result by reading it back through the server. Use when the user wants to
   onboard, register, or add a new dataset, or asks to "get ready to onboard a dataset".
@@ -13,25 +13,25 @@ description: >-
 # Onboarding a dataset
 
 Goal: take a producer's HDF5 dataset and register it into the catalog by authoring **one
-dataset YAML** against the contract surface, then running `tcb stamp-key → generate →
+dataset YAML** against the contract surface, then running `tilewright stamp-key → generate →
 register`. You onboard by reading the *contract*, never broker *implementation*.
 
 ## Step 0 — Read the contract surface (do this first, do not skip)
 
 Read these, in order. They define what a valid dataset is; do not reverse-engineer it from
-`generate.py`/`http_register.py`:
+`generate.py`/`register.py`:
 
 1. `docs/ONBOARDING.md` — the walkthrough: pick a transport, author, stamp/generate, make
    paths agree, register, read back. It links the layout, field, and error references.
-2. `src/tiled_catalog_broker/tools/_models.py` — the authoritative field contract (every YAML
+2. `src/tilewright/contract.py` — the authoritative field contract (every YAML
    field, its type, whether it's required).
-3. `src/tiled_catalog_broker/tools/schema/catalog_model.yml` — the controlled vocabulary
+3. `src/tilewright/vocabulary.yml` — the controlled vocabulary
    (canonical ids + aliases for method/material/producer/project/facility/data_type).
 4. `datasets/examples/{per_entity,batched,grouped}.yml` — one worked example per layout;
    `per_entity_nexus.yml` shows a NeXus tree mapped onto the contract (several parameter
    groups → nested metadata).
 5. `docs/ONBOARDING.md` step 4, the upload tab — **only if** the server cannot see the user's files (they
-   will say so, or you learn it in Step 1). It is the `tcb register --upload` route: same
+   will say so, or you learn it in Step 1). It is the `tilewright register --upload` route: same
    contract, different transport.
 
 ## Step 1 — Report ready, ask for the starting context (and wait)
@@ -45,7 +45,7 @@ block). Then ask them for the starting context you need to explore:
 - the **codebase / producer scripts** that generated it, if available (for inferring method,
   producer, material, parameter meanings);
 - **where the server runs** relative to the data (same filesystem → pointer registration;
-  server can't see the files → `tcb register --upload`); and
+  server can't see the files → `tilewright register --upload`); and
 - any other context they want to give (paper, README, prior YAML, etc.).
 
 **This is a conversation — stop and wait for the answer**, even if the data path was
@@ -100,7 +100,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
 ## Step 3 — Draft a first-pass YAML (don't blind-guess)
 
 Copy the `datasets/examples/<layout>.yml` that matches and fill it from what you found. Set
-`label`; leave `key` for `tcb stamp-key`. Keep the closed sections (`data`, `artifacts`,
+`label`; leave `key` for `tilewright stamp-key`. Keep the closed sections (`data`, `artifacts`,
 `parameters`, `shared`) free of unknown keys — typos there are hard errors.
 
 **Mark uncertainty as comments — do not silently guess.** If you can infer a value but it was
@@ -122,7 +122,7 @@ never stated inside the HDF5 — expect them to be blank until the user fills th
 of `artifacts[0]`; `grouped`: Σ entity groups) and artifacts (entities × number of
 `artifacts` entries, plus one per `shared:` axis). Say how you got each number ("5 files ×
 `/spectra` leading axis 2000 = 10,000 entities; 1 artifact each + 2 shared axes = 10,002").
-These are what `tcb generate` will be checked against in Step 5.
+These are what `tilewright generate` will be checked against in Step 5.
 
 ## Step 4 — Hand it to the user for review (a dialogue, not a hand-off)
 
@@ -133,7 +133,7 @@ becomes the key), and the artifact/shared `type` names you chose. **Wait for the
 answers**, apply them, show the result, and iterate until they say it's right. Only then
 move on. Never fill a blank from anything other than the data or what the user told you.
 
-**Run no `tcb` command before this sign-off — `stamp-key` and `generate` included.** They
+**Run no `tilewright` command before this sign-off — `stamp-key` and `generate` included.** They
 are local and re-runnable, but they bake the label into a key and snapshot the YAML into
 manifests, which presents decisions the user hasn't made yet (label, inferred metadata) as
 settled. The review is about the YAML's *content*, not only about what reaches the server.
@@ -143,8 +143,8 @@ settled. The review is about the YAML's *content*, not only about what reaches t
 Once the user has signed off:
 
 ```bash
-tcb stamp-key datasets/<name>.yml    # writes key = slug(label)
-tcb generate datasets/<name>.yml     # validates + writes the manifests; prints Entities/Artifacts
+tilewright stamp-key datasets/<name>.yml    # writes key = slug(label)
+tilewright generate datasets/<name>.yml     # validates + writes the manifests; prints Entities/Artifacts
 ```
 
 Compare `generate`'s `Entities: N` / `Artifacts: M (S shared axes)` with the prediction
@@ -162,7 +162,7 @@ before registering.**
 Before reporting "good to register", two checks:
 
 - **Where does the server run relative to the data?** Same filesystem → omit
-  `data.server_base_dir`; mounts it elsewhere → set it; cannot see it at all → `tcb
+  `data.server_base_dir`; mounts it elsewhere → set it; cannot see it at all → `tilewright
   register --upload` (`docs/ONBOARDING.md` step 4; trial with `-n 5`, verify, re-run). The
   rules — `readable_storage`, the physical-path caveat, what "the server's view" means —
   are **`docs/ONBOARDING.md` step 3, "Make local and server paths agree"**; follow that
@@ -179,10 +179,10 @@ Before reporting "good to register", two checks:
 ## Step 6 — Register (on the user's go)
 
 ```bash
-tcb register datasets/<name>.yml     # registers over HTTP (the single route)
+tilewright register datasets/<name>.yml     # registers over HTTP (the single route)
 ```
 
-(or `tcb register --upload ...` — trial with `-n 5` first, verify, re-run without `-n`).
+(or `tilewright register --upload ...` — trial with `-n 5` first, verify, re-run without `-n`).
 Read the summary block, not the exit code: `Artifact errors` must be 0, and `Entities` +
 `Skipped` should equal the entity count from Step 5. Any `WARNING ... half-registered`
 lines mean a previous run died mid-entity and this run attached the rest — fine.
@@ -219,9 +219,9 @@ rewritten.
   history (other dataset YAMLs, deleted files, `git show`, `config.yml` roots, README
   example keys, old manifests) for a dataset's metadata. If in doubt, ask the user.
 - **It's a conversation, with two stops.** Ask for starting context and wait (Step 1);
-  explore; ask the open questions in one batched round and wait (Step 4) — run **no `tcb`
+  explore; ask the open questions in one batched round and wait (Step 4) — run **no `tilewright`
   command** until the user has signed off on the YAML. After `generate`, report the
-  count comparison and wait again (Step 5) — run **no `tcb register`** until they say go.
+  count comparison and wait again (Step 5) — run **no `tilewright register`** until they say go.
 - **Predict, then compare.** Give the entity/artifact counts you expect with the draft
   (Step 3/4); after `generate`, compare and say whether you're good to register. A mismatch
   means you misread the data — don't register, find out why.

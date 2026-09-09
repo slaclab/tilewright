@@ -53,7 +53,7 @@ Tiled's stock HDF5 adapter routes reads through `dask.delayed` → `from_delayed
 slice — so asking for five rows would read all ten thousand spectra.
 
 So arrays are registered against `LazyHDF5ArrayAdapter`
-(`src/tiled_catalog_broker/adapters/lazy_hdf5.py`) instead. It reads the `dataset` and
+(`src/tilewright/adapter.py`) instead. It reads the `dataset` and
 `slice` parameters already on the data source and evaluates
 `h5py.Dataset[base_index][user_slice]` in one step, never reading more than was asked for.
 Cheap slicing is not a bolt-on optimization; it is what makes the data model possible.
@@ -88,7 +88,7 @@ re-registration and identical for identical physics — which is what makes regi
 incremental and safe to re-run — but it also means changing a parameter creates a *new*
 entity rather than updating the old one. Exact derivations:
 [the manifest reference](../reference/manifest.md) and
-[`tcb stamp-key`](../reference/cli.md#tcb-stamp-key).
+[`tilewright stamp-key`](../reference/cli.md#tilewright-stamp-key).
 
 See also [the three layouts](layouts.md) for where `batched` sits among the alternatives,
 and [the data model](data-model.md) for why the entity carries the parameters.

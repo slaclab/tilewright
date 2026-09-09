@@ -13,9 +13,9 @@ We create a YAML that describes a dataset, and then we will use it to register t
 Describe a dataset once, and publish it:
 
 ```bash
-tcb stamp-key datasets/mydata.yml   # name it
-tcb generate  datasets/mydata.yml   # describe it
-tcb register  datasets/mydata.yml   # publish it
+tilewright stamp-key datasets/mydata.yml   # name it
+tilewright generate  datasets/mydata.yml   # describe it
+tilewright register  datasets/mydata.yml   # publish it
 ```
 
 From then on anyone who can reach the server can query it by its physics and read
@@ -33,7 +33,7 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Clone the repo and install `tcb`. Reading a catalog someone else built needs only the Tiled client.
+    Clone the repo and install `tilewright`. Reading a catalog someone else built needs only the Tiled client.
 
     [:octicons-arrow-right-24: Install](install.md)
 
@@ -41,7 +41,7 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Once `tcb` is installed: get your key working and check your data is in a shape the catalog accepts. 15–20 minutes, before the session.
+    Once `tilewright` is installed: get your key working and check your data is in a shape the catalog accepts. 15–20 minutes, before the session.
 
     [:octicons-arrow-right-24: Prepare for the workshop](workshop-prep.md)
 
@@ -57,7 +57,7 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Look up the `tcb` commands, every dataset YAML field, and the Parquet manifest columns.
+    Look up the `tilewright` commands, every dataset YAML field, and the Parquet manifest columns.
 
     [:octicons-arrow-right-24: Reference](reference/cli.md)
 

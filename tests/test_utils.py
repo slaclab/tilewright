@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tiled_catalog_broker.utils import make_artifact_key, make_entity_key, to_json_safe
+from tilewright.utils import make_artifact_key, make_entity_key, to_json_safe
 
 
 class TestMakeEntityKey:

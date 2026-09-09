@@ -31,8 +31,8 @@ dataset-agnostic (ADR-0004).
 **Onboarding**:
 The end-to-end process of taking a producer's HDF5 dataset and registering it into the
 catalog: author a dataset YAML (agent or human, against the contract surface) →
-`tcb stamp-key` (key into the YAML) → `tcb generate` (manifests) → `tcb register`.
-Registration has exactly one route, HTTP `tcb register` (ADR-0002); learning what a valid
+`tilewright stamp-key` (key into the YAML) → `tilewright generate` (manifests) → `tilewright register`.
+Registration has exactly one route, HTTP `tilewright register` (ADR-0002); learning what a valid
 dataset looks like is the contract surface's job (see below), not a command's.
 _Avoid_: ingest, inspect.
 
@@ -54,7 +54,7 @@ The per-dataset config file that declares identity, layout, artifacts, parameter
 metadata. The human-and-agent-authored input contract; the Parquet manifest is the output.
 
 **Semantic model**:
-The controlled vocabulary in `tools/schema/catalog_model.yml` — canonical ids (and
+The controlled vocabulary in `vocabulary.yml` — canonical ids (and
 aliases) for `method`, `material`, `producer`, `project`, `facility`, `data_type`. It keeps
 cross-dataset discovery (`Key("project") == "MAIQMag"`) honest. It is **soft**: unknown
 values warn (not error), aliases normalize to canonical ids (ADR-0003). It is a
@@ -63,10 +63,10 @@ _Avoid_: schema (overloaded — the structural pydantic models are also a "schem
 
 **Contract surface**:
 The referenceable artifacts that define what a valid dataset is — the pydantic YAML models
-(`tools/_models.py`), the semantic model, the layout definitions, `docs/ONBOARDING.md`, and
+(`contract.py`), the semantic model, the layout definitions, `docs/ONBOARDING.md`, and
 the annotated `datasets/examples/*.yml`. The onboarding principle is **implementation vs.
 contract**: an agent (or human) onboards by reading the *contract surface*, never by reading
-broker *implementation* (`generate.py`, `http_register.py`). Needing to reverse-engineer
+broker *implementation* (`generate.py`, `register.py`). Needing to reverse-engineer
 implementation to learn what a valid dataset looks like is a gap in the contract surface —
 fix the surface.
 _Avoid_: "source" (ambiguous — distinguish contract artifacts from implementation code).
@@ -85,5 +85,5 @@ _Avoid_: "source" (ambiguous — distinguish contract artifacts from implementat
   These synonyms break cross-dataset queries; the semantic model's canonical ids are
   authoritative.
 - **"schema"** is overloaded: it means both the structural contract (pydantic models in
-  `tools/_models.py`) and, loosely, the semantic vocabulary. Prefer **semantic model** for
+  `contract.py`) and, loosely, the semantic vocabulary. Prefer **semantic model** for
   the vocabulary and **YAML contract / pydantic models** for structure.

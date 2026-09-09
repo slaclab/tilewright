@@ -1,10 +1,10 @@
-"""Tests for the delete module and `tcb delete` CLI.
+"""Tests for the delete module and `tilewright delete` CLI.
 
 Unit tests use a MagicMock client and run without a server.
 Integration tests use the `tiled_client` fixture from conftest.py and
 require a reachable Tiled server (auto-skipped if unavailable).
 
-The `all`-form integration test is gated behind TCB_ALLOW_DESTRUCTIVE_TESTS=1
+The `all`-form integration test is gated behind TILEWRIGHT_ALLOW_DESTRUCTIVE_TESTS=1
 so CI never wipes a shared server by accident.
 """
 
@@ -14,12 +14,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tiled_catalog_broker.delete import (
+from tilewright.delete import (
     resolve_target, preview_counts, delete_target, delete_all, is_uploaded,
 )
 
 
-TEST_KEY_PREFIX = "TCB_DELETE_TEST_"
+TEST_KEY_PREFIX = "TILEWRIGHT_DELETE_TEST_"
 
 
 # ── unit tests (no server) ───────────────────────────────────
@@ -191,7 +191,7 @@ class TestUploadedDeletion:
 # validate the container-level delete path that applies to dataset and
 # entity granularities on any Tiled server, including tiled-test which has
 # no filesystem mount for external reads. Artifact-level deletion against
-# real external data is exercised via tcb register + tcb delete on a
+# real external data is exercised via tilewright register + tilewright delete on a
 # data-mounted server (tiled-dev) -- see test_delete_artifact_external.
 
 @pytest.mark.integration
@@ -260,8 +260,8 @@ class TestDeleteIntegration:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    os.environ.get("TCB_ALLOW_DESTRUCTIVE_TESTS") != "1",
-    reason="Destructive: set TCB_ALLOW_DESTRUCTIVE_TESTS=1 to run the 'all' test.",
+    os.environ.get("TILEWRIGHT_ALLOW_DESTRUCTIVE_TESTS") != "1",
+    reason="Destructive: set TILEWRIGHT_ALLOW_DESTRUCTIVE_TESTS=1 to run the 'all' test.",
 )
 class TestDeleteAllIntegration:
     def test_delete_all_wipes_root(self, tiled_client):

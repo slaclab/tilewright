@@ -4,7 +4,7 @@
 to a plotted array. Point it at something you just registered and it confirms the data
 landed, the metadata is queryable, and the arrays read back at the shape you expect.
 
-Being the read side, it needs no `tcb`, no HDF5 files, and no shared filesystem — just the
+Being the read side, it needs no `tilewright`, no HDF5 files, and no shared filesystem — just the
 server URL, an API key, and your stamped dataset key. It works the same for a collaborator
 who was never involved in registering, which is the point.
 
@@ -35,19 +35,19 @@ Two names configure the whole notebook. Export them in the shell you start marim
 from:
 
 ```bash
-export TCB_DEMO_DATASET=<YOUR_DATASET_KEY>    # the key `tcb stamp-key` wrote
-export TCB_DEMO_ARTIFACT=<AN_ARTIFACT_TYPE>   # optional
+export TILEWRIGHT_DEMO_DATASET=<YOUR_DATASET_KEY>    # the key `tilewright stamp-key` wrote
+export TILEWRIGHT_DEMO_ARTIFACT=<AN_ARTIFACT_TYPE>   # optional
 ```
 
 `<YOUR_DATASET_KEY>` is the `key:` field in your YAML — the slug of your `label:`, so
-`label: "My Dataset"` becomes `MY_DATASET`. `TCB_DEMO_ARTIFACT` is one of your `artifacts:`
+`label: "My Dataset"` becomes `MY_DATASET`. `TILEWRIGHT_DEMO_ARTIFACT` is one of your `artifacts:`
 `type:` values; unset, the notebook reads whichever artifact the first entity carries.
 
 Both are also editable in the notebook's first code cell:
 
 ```python
-DATASET_KEY = os.environ.get("TCB_DEMO_DATASET", "BROAD_SIGMA")
-ARTIFACT_KEY = os.environ.get("TCB_DEMO_ARTIFACT") or None
+DATASET_KEY = os.environ.get("TILEWRIGHT_DEMO_DATASET", "BROAD_SIGMA")
+ARTIFACT_KEY = os.environ.get("TILEWRIGHT_DEMO_ARTIFACT") or None
 ```
 
 Those two names are the entire configuration — parameters, shared axes, shapes, dtypes,
@@ -77,8 +77,8 @@ files are not mounted here. The plot reads through the server either way.
 | Symptom | Cause |
 |---|---|
 | `TILED_API_KEY is not set in this kernel's environment` | The key reached your shell but not marimo. `echo $VAR` prints variables that were merely assigned; only *exported* ones reach child processes. Check with `env \| grep TILED_API_KEY`. A marimo server that was already running will not see a variable exported afterwards — restart it |
-| `KeyError: '<YOUR_KEY>'` | `TCB_DEMO_DATASET` is not the stamped key. `list(client)` shows what the server has |
-| Parameters missing from entity metadata | `parameters:` in the YAML did not match the file layout. Check the `tcb generate` output, then delete and re-register |
+| `KeyError: '<YOUR_KEY>'` | `TILEWRIGHT_DEMO_DATASET` is not the stamped key. `list(client)` shows what the server has |
+| Parameters missing from entity metadata | `parameters:` in the YAML did not match the file layout. Check the `tilewright generate` output, then delete and re-register |
 | Array shape not what you expect | For `batched` layouts the manifest records the *per-entity* shape, leading axis dropped |
 
 Registration problems belong to

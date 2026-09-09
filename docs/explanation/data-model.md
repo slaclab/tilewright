@@ -2,7 +2,7 @@
 
 A registered dataset has three levels of nested Tiled containers:
 
-<figure class="tcb-diagram">
+<figure class="tw-diagram">
 --8<-- "diagrams/hierarchy.svg"
 <figcaption>Three levels. Provenance on the dataset, physics parameters on the entity, arrays on the artifact, and a shared axis stored once beside the entities.</figcaption>
 </figure>
@@ -53,7 +53,7 @@ physics parameters.
 
 Tiled stores the containers, answers the metadata queries, and slices the arrays. The
 broker decides what shape to register, and writes it the same way every time:
-`http_register.py` builds each entity's metadata from all the manifest's columns, so no
+`register.py` builds each entity's metadata from all the manifest's columns, so no
 parameter name appears anywhere in the broker's code. That is what makes it
 dataset-agnostic.
 

@@ -1,7 +1,11 @@
 [project]
-name = "tiled-catalog-broker"
+name = "tilewright"
 version = "0.1.0"
-requires-python = ">=3.12"
+description = "Register multi-entity scientific HDF5 datasets into a Tiled catalog from one YAML contract."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
 dependencies = [
     "pandas",
     "pyarrow",
@@ -18,32 +22,24 @@ test = [
 ]
 
 [project.scripts]
-tcb = "tiled_catalog_broker.cli:main"
+tilewright = "tilewright.cli:main"
+
+[project.urls]
+Repository = "https://github.com/slaclab/TileWright"
+Documentation = "https://slaclab.github.io/TileWright/"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.pixi.workspace]
-channels = ["conda-forge"]
-platforms = ["linux-64", "osx-arm64", "osx-64"]
-
-[tool.pixi.dependencies]
-python = ">=3.12"
-
-[tool.pixi.pypi-dependencies]
-tiled-catalog-broker = { path = ".", editable = true }
-
-[tool.pixi.environments]
-default = { features = ["test"], solve-group = "default" }
-
 [tool.hatch.build.targets.wheel]
-packages = ["src/tiled_catalog_broker"]
+packages = ["src/tilewright"]
 
 [tool.pytest.ini_options]
-# Without this, a bare `pytest` also collects the vendored Tiled checkout under
-# amsc-connector/ and dies on its dependencies.
 testpaths = ["tests"]
+# Server-dependent tests are opt-in: `pytest -m integration` with TILED_URL and
+# TILED_API_KEY set. A bare `pytest` runs offline.
+addopts = "-m 'not integration'"
 markers = [
     "integration: needs a running Tiled server with data registered",
 ]

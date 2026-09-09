@@ -34,7 +34,7 @@ import pytest
 from ruamel.yaml import YAML
 
 # Add project root to path for package imports
-from tiled_catalog_broker.tools.generate import generate_manifests, load_yaml, _make_uid
+from tilewright.manifest import generate_manifests, load_yaml, _make_uid
 from pydantic import ValidationError
 
 

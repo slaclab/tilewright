@@ -44,7 +44,7 @@ the same catalog with no shared schema and no nulls.
 
 ## Consequences
 
-- `http_register.py` builds entity metadata from *all* manifest columns dynamically; there is
+- `register.py` builds entity metadata from *all* manifest columns dynamically; there is
   no place in the broker where a parameter name is declared. That is load-bearing, not
   incidental — it is the mechanism this ADR protects.
 - Single-entity artifact retrieval is the one path where the hierarchy costs measurable time.

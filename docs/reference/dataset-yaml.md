@@ -4,8 +4,8 @@ One YAML describes exactly one dataset. This page describes its fields; to autho
 [How to publish a dataset](../ONBOARDING.md), and to copy a working file, see
 `datasets/examples/{per_entity,batched,grouped}.yml`.
 
-Source: `src/tiled_catalog_broker/tools/_models.py`. Every field there carries a
-`description`, and the models are validated on `tcb generate`.
+Source: `src/tilewright/contract.py`. Every field there carries a
+`description`, and the models are validated on `tilewright generate`.
 
 ## Strictness
 
@@ -24,7 +24,7 @@ Required strings use `min_length=1`, so an empty string counts as missing, not a
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `label` | `str` | **yes** | Human-readable dataset name; the basis for the derived UID namespace |
-| `key` | `str` | **yes** | Dataset container key in Tiled, e.g. `BROAD_SIGMA`. Written by [`tcb stamp-key`](cli.md#tcb-stamp-key) as `slug(label)` — not authored by hand |
+| `key` | `str` | **yes** | Dataset container key in Tiled, e.g. `BROAD_SIGMA`. Written by [`tilewright stamp-key`](cli.md#tilewright-stamp-key) as `slug(label)` — not authored by hand |
 | `metadata` | mapping | **yes** | Provenance and discovery facets |
 | `data` | mapping | **yes** | Where the data lives and how entities are packed |
 | `artifacts` | list | **yes** | The arrays each entity exposes; at least one |
@@ -32,7 +32,7 @@ Required strings use `min_length=1`, so an empty string counts as missing, not a
 | `shared` | list | no | Axis arrays shared across all entities (default: empty) |
 
 `key` is declared optional in the model and then enforced by a validator, so the error you
-get for omitting it names `tcb stamp-key` rather than reading as a missing-field error.
+get for omitting it names `tilewright stamp-key` rather than reading as a missing-field error.
 
 ---
 
@@ -61,7 +61,7 @@ soft.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `directory` | `str` | **yes** | | Path to the data root, as **you** see it. `tcb generate` globs this |
+| `directory` | `str` | **yes** | | Path to the data root, as **you** see it. `tilewright generate` globs this |
 | `layout` | enum | **yes** | | `per_entity`, `batched`, or `grouped` (see [the three layouts](../explanation/layouts.md)) |
 | `file_pattern` | `str` | no | `**/*.h5` | Glob for HDF5 files under `directory` |
 | `server_base_dir` | `str` | no | `None` | Path to the same data root as **the server** sees it. Stamped into each `data_uri`; falls back to `directory` when unset |

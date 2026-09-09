@@ -10,7 +10,7 @@ Everything you interact with at read time is Tiled. The broker is not running.
 
 Tiled is a data access service: the server, the catalog database and its metadata search,
 the HTTP API, the chunked array transport, the Python client, authentication, and storage
-for arrays written into it. `http_register.py` adds nothing on top — it calls
+for arrays written into it. `register.py` adds nothing on top — it calls
 `create_container`, `.new()`, and `write_array` with Tiled's own `DataSource`, `Asset`, and
 `ArrayStructure` objects.
 
@@ -55,8 +55,8 @@ data, and the broker answers them for this kind of data.
 - **A soft vocabulary.** Canonical ids for `material`, `method`, `producer` and friends, so
   cross-dataset facets stay honest when six groups onboard independently (see
   [the soft vocabulary](vocabulary.md)).
-- **A scan/register split.** `tcb generate` records each artifact's shape and dtype into
-  [a Parquet manifest](../reference/manifest.md); `tcb register` opens no HDF5 at all. That
+- **A scan/register split.** `tilewright generate` records each artifact's shape and dtype into
+  [a Parquet manifest](../reference/manifest.md); `tilewright register` opens no HDF5 at all. That
   is what makes 10,000 entities cheap, and what lets a server that cannot see your
   filesystem be handed pointers to it anyway.
 - **One server-side adapter.** The only broker code that runs inside the server. Tiled's

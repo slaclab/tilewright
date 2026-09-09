@@ -3,7 +3,7 @@
 Do this before the session. It takes about 15–20 minutes. Bring questions if
 anything does not work.
 
-**Before you start:** [install `tcb`](install.md) and confirm that `tcb --help` prints
+**Before you start:** [install `tilewright`](install.md) and confirm that `tilewright --help` prints
 its four commands. Send the organizer any output that does not look right.
 
 ## 1. Optionally, install a coding agent
@@ -22,7 +22,7 @@ This is the part most worth doing carefully in advance.
 | **Where** | On the machine you installed on. The session uploads from your local files. | Data on a cluster: install and run there, or copy a subset down. |
 | **Format** | HDF5, meaning anything `h5py` can open. The extension does not matter (`.h5`, `.hdf5`, `.nxs`, or none) as long as `file_pattern` matches it; the default is `**/*.h5`. NeXus files count, and ship a worked example (`datasets/examples/per_entity_nexus.yml`). | `.npy`, CSV, TIFF and proprietary instrument binaries will not work. If you are unsure, ask before the session rather than assuming. |
 | **Structure** | Many comparable entities that share a structure, each with its own parameters and one or more arrays, in one of the [three layouts](explanation/layouts.md): one file per entity, entities stacked on axis 0 of one file, or one group per entity. | If yours matches none of them, say so beforehand. Mapping is usually possible, but better sorted in advance. |
-| **Size** | About 1 GB. The upload moves the real bytes over the network, and everyone does it at once. | Bring a subset. `tcb register -n 5` registers only the first few entities, and it will be used. |
+| **Size** | About 1 GB. The upload moves the real bytes over the network, and everyone does it at once. | Bring a subset. `tilewright register -n 5` registers only the first few entities, and it will be used. |
 | **Provenance** | Know what produced the data (the instrument, or the code and its version) and the material or system studied. | Anything else you want recorded is welcome too. |
 
 You do **not** need to rename parameters, adopt a shared schema, convert file
@@ -48,7 +48,7 @@ container: not destructive, but confusing to untangle mid-session.
 
 ## Checklist
 
-- [ ] `tcb --help` runs
+- [ ] `tilewright --help` runs
 - [ ] Data is HDF5, on this machine, under ~1 GB, in one of the three layouts
 - [ ] `.env` written and loaded, and the check command lists dataset keys
 - [ ] I have picked a dataset name with my surname in it

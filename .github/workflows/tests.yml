@@ -2,28 +2,21 @@ name: Tests
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v4
 
-      - name: Install package (editable)
-        run: |
-          uv venv --python ${{ matrix.python-version }}
-          uv pip install -e .
-          uv pip install pytest 'tiled[server]' pandas pyarrow h5py 'ruamel.yaml'
-
-      - name: Run unit tests
-        run: |
-          uv run --no-project pytest tests/ -v
+      - name: Run offline tests
+        run: uv run --python ${{ matrix.python-version }} --extra test pytest -v

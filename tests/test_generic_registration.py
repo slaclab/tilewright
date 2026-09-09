@@ -66,7 +66,7 @@ def register_entity(manifests, row=0, dataset_key="TEST_KEY",
     In upload mode ``uploads`` maps artifact keys to ``(array, metadata)`` as
     passed to ``write_array``.
     """
-    from tiled_catalog_broker.http_register import _register_one_entity
+    from tilewright.register import _register_one_entity
 
     ent_df, art_df, base_dir = manifests
     parent = MagicMock()
@@ -159,7 +159,7 @@ class TestVDPRegistration:
 
     def test_existing_entity_is_skipped(self, vdp_manifests):
         """Registration is incremental: an entity already on the server is skipped."""
-        from tiled_catalog_broker.http_register import _register_one_entity
+        from tilewright.register import _register_one_entity
 
         ent_df, art_df, base_dir = vdp_manifests
         parent = MagicMock()
@@ -182,7 +182,7 @@ class TestVDPRegistration:
         """A crashed earlier run left the container with some artifacts missing: the
         re-run registers only those into the existing container (a bare skip would
         report the dataset complete while this entity serves nothing)."""
-        from tiled_catalog_broker.http_register import _register_one_entity
+        from tilewright.register import _register_one_entity
 
         ent_df, art_df, base_dir = vdp_manifests
         mine = list(art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]["type"])
@@ -298,7 +298,7 @@ class TestGenericBehavior:
         """dtype is captured from the file at generate time and carried through.
 
         End-to-end because that is now the whole guarantee: registration never
-        opens HDF5, so if `tcb generate` doesn't record the real dtype nothing
+        opens HDF5, so if `tilewright generate` doesn't record the real dtype nothing
         downstream can recover it. The read adapter re-validates dtype against
         the file and raises on a mismatch, so a wrong value registers cleanly
         and then fails *every* read — a failure mode no float64 fixture catches.
@@ -306,7 +306,7 @@ class TestGenericBehavior:
         import h5py
         import numpy as np
         from ruamel.yaml import YAML
-        from tiled_catalog_broker.tools.generate import generate_manifests
+        from tilewright.manifest import generate_manifests
 
         data_dir = tmp_path / "data"
         data_dir.mkdir()
@@ -344,12 +344,12 @@ class TestGenericBehavior:
 
     def test_manifest_without_shape_dtype_is_rejected(self, vdp_manifests):
         """A manifest predating shape/dtype capture fails loudly, not silently."""
-        from tiled_catalog_broker.http_register import require_shape_dtype
+        from tilewright.register import require_shape_dtype
 
         _, art_df, _ = vdp_manifests
         require_shape_dtype(art_df)                     # current manifests are fine
 
-        with pytest.raises(ValueError, match="tcb generate"):
+        with pytest.raises(ValueError, match="tilewright generate"):
             require_shape_dtype(art_df.drop(columns=["shape", "dtype"]))
 
     def test_server_base_dir_overrides_asset_uri(self, vdp_manifests):
@@ -447,8 +447,8 @@ class TestSharedAxes:
         """A batched file with an `/energy` axis (with a units attr) + its artifact row."""
         import h5py
         import numpy as np
-        from tiled_catalog_broker.tools.generate import _shared_axis_rows
-        from tiled_catalog_broker.tools._models import SharedAxisSpec
+        from tilewright.manifest import _shared_axis_rows
+        from tilewright.contract import SharedAxisSpec
 
         data_dir = tmp_path / "data"
         data_dir.mkdir()
@@ -462,7 +462,7 @@ class TestSharedAxes:
 
     def _drive(self, art_df, base_dir, *, existing=(), upload=False, server_base_dir=None):
         """Run register_dataset_http with no entities; return the dataset container mock."""
-        from tiled_catalog_broker.http_register import register_dataset_http
+        from tilewright.register import register_dataset_http
         client = MagicMock()
         client.__contains__.return_value = False
         parent = client.create_container.return_value
@@ -532,7 +532,7 @@ class TestSharedAxes:
 
     def test_shared_rows_do_not_leak_into_entities(self, shared_setup, vdp_manifests):
         """With entities present, null-uid rows register under the dataset only."""
-        from tiled_catalog_broker.http_register import register_dataset_http
+        from tilewright.register import register_dataset_http
         shared_df, _, _ = shared_setup
         ent_df, art_df, base_dir = vdp_manifests
         shared_df["file"] = art_df.iloc[0]["file"]                # any readable file path
@@ -587,7 +587,7 @@ class TestStorageMarker:
     """The dataset container records whether its bytes are external or uploaded."""
 
     def _drive(self, manifests, *, existing_metadata=None, upload=False):
-        from tiled_catalog_broker.http_register import register_dataset_http
+        from tilewright.register import register_dataset_http
 
         ent_df, art_df, base_dir = manifests
         client = MagicMock()

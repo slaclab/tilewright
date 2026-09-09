@@ -1,7 +1,7 @@
 # Single registration route (HTTP), bulk SQL path removed
 
-Onboarding converges on one registration route: `tcb register` (the HTTP path via
-`http_register.py`). The bulk SQL path (`tcb ingest` / `bulk_register.py`, ~546 lines) is
+Onboarding converges on one registration route: `tilewright register` (the HTTP path via
+`register.py`). The bulk SQL path (`tilewright ingest` / `bulk_register.py`, ~546 lines) is
 removed, and `tests/test_generic_registration.py` is migrated off `prepare_node_data`.
 
 `bulk_register` only ever existed as a performance workaround — its own docstring says it

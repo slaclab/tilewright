@@ -13,7 +13,7 @@
 Integration tests for data registration.
 
 Covers manifest loading (unit) and the registered result on a live server
-(integration) for the single registration route, `tcb register` (ADR-0002).
+(integration) for the single registration route, `tilewright register` (ADR-0002).
 What registration *sends* is covered without a server in
 `tests/test_generic_registration.py`.
 

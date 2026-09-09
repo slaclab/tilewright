@@ -23,7 +23,7 @@ import pytest
 # Add project root to path for package imports
 from pydantic import ValidationError
 
-from tiled_catalog_broker.tools.schema import (
+from tilewright.vocabulary import (
     get_alias_map,
     load_catalog_model,
     resolve_aliases,
@@ -158,7 +158,7 @@ class TestValidate:
 
 
 class TestModelContract:
-    """Tests for the pydantic-backed structural contract (tools/_models.py)."""
+    """Tests for the pydantic-backed structural contract (contract.py)."""
 
     def test_key_required(self, minimal_valid_config):
         """`key` is the sole identity field — absent (even with a label) → error."""
