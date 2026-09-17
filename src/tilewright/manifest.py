@@ -166,7 +166,7 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
         print(f"  {len(files)} files match {body.pattern!r} under {body.directory}")
         ent_rows, art_rows = {"files": walker.files, "batch": walker.batch,
                               "groups": walker.groups}[tag](files)
-        shared_rows = _shared_axis_rows(files, Path(body.directory), cfg.shared)
+        shared_rows = _shared_axis_rows(files, Path(body.directory), cfg.shared, cfg.source)
 
     _check_collisions(ent_rows, key, cfg.source)
     for row in ent_rows:
@@ -1039,37 +1039,66 @@ def _matching_groups(f, pattern):
     return found
 
 
-def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec]):
+def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
     """One artifact row per ``shared:`` axis, uid None: an artifact of the dataset.
 
-    Recorded from the first file that holds it; every other file that holds it must agree
-    (a differing axis varies per entity, so it belongs under ``artifacts:``).
+    Recorded from the path the entry names, in the first file that holds it; **every copy
+    the source holds** must agree with it (a differing copy varies per entity, so it
+    belongs under ``artifacts:``). Which copies the source holds depends on its tag (#37):
+
+    - ``files``, ``batch``, ``table``: the named path, in each file;
+    - ``groups``: the named path lies inside one entity group, so each entity group of
+      each file holds its own copy, at the same path relative to its own group. One file
+      with four entity groups holds four copies, and comparing files alone would compare
+      none of them. A path outside the entity groups (a calibration group beside them) is
+      one copy per file, as under the other tags.
+
+    ``source`` is the YAML's source block; without it every tag reads as ``files``, which
+    is what a caller that hands over a file list and nothing else means.
     """
-    rows, seen = [], {}
+    rows, seen, recorded = [], {}, set()
     if not shared:
         return rows
+    grouped = source is not None and source.tag == "groups"
+    pattern = (source.body.entity_group or "").strip("/") if grouped else ""
+    excluded = source.body.exclude_groups if grouped else ()
     for h5_path in paths:
         rel = h5_path.relative_to(root).as_posix()
         with h5py.File(h5_path, "r") as f:
+            bases = [f"{base}/{n}" if base else n
+                     for base, names in _entity_groups(f, pattern, excluded)
+                     for n in names] if grouped else []
             for ax in shared:
-                p = ax.dataset.lstrip("/")
-                if p not in f or not isinstance(f[p], h5py.Dataset):
-                    continue
-                ds = f[p]
-                if ax.type in seen:
-                    ref_file, ref = seen[ax.type]
-                    equal_nan = bool(np.issubdtype(ref.dtype, np.floating))
-                    if ds.shape != ref.shape or not np.array_equal(ds[()], ref, equal_nan=equal_nan):
-                        raise ValueError(f"shared axis {ax.type!r} ({ax.dataset}) differs between "
-                                         f"{ref_file} and {rel}; a shared axis must be identical "
-                                         f"in every file. If it varies per entity, list it under "
-                                         f"'artifacts:'.")
-                    continue
-                seen[ax.type] = (rel, ds[()])
-                fsize, fmtime = _file_fingerprint(h5_path)
-                rows.append(_artifact_row(None, ax.type, rel, ax.dataset, None, fsize, fmtime,
-                                          ds.shape, str(ds.dtype), labels=_attrs(ds, label_of="")))
-    missing = [ax for ax in shared if ax.type not in seen]
+                named = ax.dataset.lstrip("/")
+                # the entity group the entry names a copy in, and the same path in each of
+                # its siblings; outside them (and under every other tag) the one named path
+                inside = next((b for b in bases if named.startswith(f"{b}/")), None)
+                copies = ([named] + [f"{b}/{named[len(inside) + 1:]}"
+                                     for b in bases if b != inside]) if inside else [named]
+                for p in copies:
+                    if p not in f or not isinstance(f[p], h5py.Dataset):
+                        continue
+                    ds = f[p]
+                    here = f"{rel}:/{p}"
+                    if ax.type in seen:
+                        ref_where, ref = seen[ax.type]
+                        equal_nan = bool(np.issubdtype(ref.dtype, np.floating))
+                        if (ds.shape != ref.shape
+                                or not np.array_equal(ds[()], ref, equal_nan=equal_nan)):
+                            raise ValueError(
+                                f"shared axis {ax.type!r} ({ax.dataset}) differs between "
+                                f"{ref_where} and {here}; a shared axis must be identical in "
+                                f"every copy the source holds. If it varies per entity, list "
+                                f"it under 'artifacts:'.")
+                    else:
+                        seen[ax.type] = (here, ds[()])
+                    if p == named and ax.type not in recorded:
+                        recorded.add(ax.type)
+                        fsize, fmtime = _file_fingerprint(h5_path)
+                        rows.append(_artifact_row(None, ax.type, rel, ax.dataset, None, fsize,
+                                                  fmtime, ds.shape, str(ds.dtype),
+                                                  labels=_attrs(ds, label_of="")))
+    missing = [ax for ax in shared if ax.type not in recorded]
     if missing:
         raise KeyError(f"shared axis {missing[0].type!r}: dataset {missing[0].dataset!r} not "
                        f"found in any of the {len(paths)} files under {root}")
