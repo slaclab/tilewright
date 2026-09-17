@@ -8,7 +8,8 @@ Shape and dtype are captured here so registration never opens a file.
 Also the step that derives the catalog key: if the YAML has no ``key:``, slug(label) is
 written into it. Identity follows ADR-0007: parameter-value hash by default, provenance
 hash on request or when there are no parameters; duplicate uids are a hard error here,
-never a silent merge at registration.
+never a silent merge at registration. Parameters come from inside each container and,
+with ``params.location``, from the entity's path (ADR-0010).
 
     tilewright manifest .tilewright/datasets/<KEY>.yml            # -> .tilewright/manifests/<KEY>/
     tilewright manifest <yaml> --check                             # validate only
@@ -270,7 +271,8 @@ def _check_collisions(ent_rows, key, source):
         lines.append("Fix: these rows are equal in every column; de-duplicate the table.")
     elif by_params:
         lines.append("Fix: add a field that distinguishes them (a run number, a seed) to the "
-                     "parameters, or set 'identity: provenance' under the source.")
+                     "parameters, from inside the container or from its path with "
+                     "'params.location', or set 'identity: provenance' under the source.")
     else:
         lines.append("Fix: these entities have the same provenance; the pattern or "
                      "entity_group is matching the same thing twice.")
@@ -396,6 +398,23 @@ def _read_params(container, spec: ParamsSpec, batch_size=None):
 # rows
 # ---------------------------------------------------------------------------
 
+_INT_TEXT = re.compile(r"[+-]?\d+")
+_FLOAT_TEXT = re.compile(r"[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?")
+
+
+def _from_text(text):
+    """A value captured by ``params.location``, typed by its text (ADR-0010): an integer
+    literal is an int (``'0042'`` -> 42), a decimal or exponent literal a float, anything
+    else the string itself; a group that took no part in the match stays None."""
+    if text is None:
+        return None
+    if _INT_TEXT.fullmatch(text):
+        return int(text)
+    if _FLOAT_TEXT.fullmatch(text):
+        return float(text)
+    return text
+
+
 def _uid(payload):
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
@@ -454,6 +473,29 @@ class _Walker:
         # names (reference/manifest.md). A table declares no artifacts, so none for it.
         self.reserved = {f"{kind}_{art.type}": art.type for art in cfg.artifacts
                          for kind in ("path", "dataset", "index")}
+
+    def located(self, params, labels, location, where):
+        """``params`` with the named groups of ``params.location`` searched in the entity's
+        ``location`` (its provenance string) added in front. Raises when the location does
+        not match, or when a name is also read in the container: as a key, as the parent
+        of a dotted key (registration nests those), or as a ``<field>_<attr>`` label."""
+        spec = self.body.params
+        if spec is None or spec.location is None:
+            return params
+        match = re.search(spec.location, location)
+        if match is None:
+            raise ValueError(f"{where}: its location {location!r} does not match "
+                             f"params.location {spec.location!r}; widen the expression, or "
+                             f"narrow 'pattern' to the entities it describes")
+        found = {name: _from_text(text) for name, text in match.groupdict().items()}
+        for inside in (*params, *labels):
+            name = inside.split(".")[0]
+            if name in found:
+                container = "entity group" if self.cfg.source.tag == "groups" else "file"
+                raise ValueError(f"{where}: params.location names {name!r}, and {inside!r} "
+                                 f"is also read inside the {container}; rename the group "
+                                 f"in 'location', or leave the other out with 'exclude'")
+        return {**found, **params}
 
     def uid(self, params, provenance, where):
         if self.identity == Identity.params:
@@ -516,6 +558,7 @@ class _Walker:
             rel = h5_path.relative_to(self.root).as_posix()
             with h5py.File(h5_path, "r") as f:
                 params, labels = _read_params(f, spec) if spec is not None else ({}, {})
+                params = self.located(params, labels, rel, str(h5_path))
                 uid = self.uid(params, rel, str(h5_path))
                 if uid in self.existing:
                     continue
@@ -561,6 +604,7 @@ class _Walker:
                 for i in range(n):
                     params = {k: _to_python(v[i]) for k, v in columns.items()}
                     prov = f"{rel}:{i}"
+                    params = self.located(params, labels, prov, f"{h5_path} row {i}")
                     uid = self.uid(params, prov, f"{h5_path} row {i}")
                     if uid in self.existing:
                         continue
@@ -595,6 +639,7 @@ class _Walker:
                     g = f[gpath]
                     params, labels = _read_params(g, spec) if spec is not None else ({}, {})
                     prov = f"{rel}:/{gpath}"
+                    params = self.located(params, labels, prov, f"{h5_path}:/{gpath}")
                     uid = self.uid(params, prov, f"{h5_path}:/{gpath}")
                     if uid in self.existing:
                         continue
