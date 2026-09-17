@@ -90,6 +90,8 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
   So does a netCDF-4 dimension of length 1 that has no coordinate variable (a dataset
   whose `NAME` attribute begins `This is a netCDF dimension`, value `0.0`): `exclude` it.
+  Any bigger dataset in a params group, a `(6,)` array say, is skipped without a message
+  under `files` and `groups` (in `batch`, a 1-D one of length N is one value per row).
   `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
   `type` (`docs/reference/manifest.md`, Reserved names): a parameter with such a name goes
   in `exclude`, a `params.location` group gets another name, or pick artifact type names

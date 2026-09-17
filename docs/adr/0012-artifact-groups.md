@@ -94,6 +94,12 @@ registration there with `OSError: [Errno 36] File name too long`, reported as an
 artifact error. Pointer registration serves all of them. The contract cannot tell the
 transport, so the `type` description states the limit instead of refusing the type.
 
+**Non-scalar parameter datasets (#24).** Under `files` and `groups`, a dataset in a params
+group that is not a scalar (0-dim or of size 1) is skipped without a message, as
+`manifest.py` has always done; the `from` description now says so, beside the `batch`
+rule it already stated. No behaviour changes; tests pin it for a params group, a
+`params.groups` entry and a `groups` source.
+
 **Documented limit.** Each member becomes an array node of its own, registered with one
 request and read back one step at a time. The `group` description says that thousands of
 per-step datasets register slowly and are better stacked into one array, or into a

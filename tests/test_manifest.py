@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 from ruamel.yaml import YAML
 
-from tilewright.contract import ContractError, Source
+from tilewright.contract import ContractError, ParamsSpec, Source
 from tilewright.manifest import _check_collisions, _params_uid, generate_manifests, main, manifest_dir
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
@@ -1841,3 +1841,64 @@ class TestArtifactGroups:
         cfg["artifacts"][0]["members"] = "frame_000[0-2]"
         ent, _ = run(tmp_path, cfg, name="ds2")
         assert "dataset_frame_0003" in ent.columns
+
+
+# ---------------------------------------------------------------------------
+# under files and groups, only scalars are parameters; the rest is skipped quietly (#24)
+# ---------------------------------------------------------------------------
+
+NON_SCALARS = {"positions": np.arange(6.0), "matrix": np.zeros((2, 3)),
+               "column": np.zeros((3, 1)), "nothing": np.zeros(0)}
+
+
+class TestNonScalarParameters:
+
+    def test_the_from_description_says_so(self):
+        doc = " ".join(ParamsSpec.model_fields["from_"].description.split())
+        assert ("Under 'files' and 'groups' every other dataset, a (6,) array or a (2, 3) "
+                "matrix say, is skipped without a message") in doc
+
+    def test_files_skips_a_non_scalar_dataset_without_a_message(self, tmp_path, capsys):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                for name, value in NON_SCALARS.items():
+                    f[name] = value + i
+                    f[name].attrs["units"] = "mm"
+                f["gain"] = [1.5 + i]           # size 1: a scalar
+                f["flag"] = [[i]]               # size 1 as well
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        # the root's (4, 2) spectrum and (4,) energy were never parameters either
+        assert set(ent.columns) == {"uid", "temperature", "temperature_units", "run", "gain",
+                                    "flag"}
+        assert sorted(ent["gain"]) == [1.5, 2.5, 3.5]
+        out = capsys.readouterr().out
+        assert not any(name in out for name in NON_SCALARS), out
+
+    def test_a_params_groups_entry_skips_them_too(self, tmp_path, capsys):
+        cfg = files_dataset(tmp_path)
+        cfg["source"]["files"]["params"] = {"groups": {"sample": "/sample"}}
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["sample/mass"] = 2.0 + i
+                for name, value in NON_SCALARS.items():
+                    f[f"sample/{name}"] = value
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "sample.mass"}
+        assert not any(name in capsys.readouterr().out for name in NON_SCALARS)
+
+    def test_groups_skips_a_non_scalar_dataset_without_a_message(self, tmp_path, capsys):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                g = f[f"samples/sample_{i}/params"]
+                for name, value in NON_SCALARS.items():
+                    g[name] = value
+                    g[name].attrs["units"] = "mm"
+                g["offset"] = [0.25 * i]
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "source_group", "tenDq", "offset"}
+        assert not any(name in capsys.readouterr().out for name in NON_SCALARS)
