@@ -42,8 +42,8 @@ of its `id` column(s); it has no `identity` key. Duplicate identities fail the m
 **Key**: the dataset container key, `slug(label)`, written by `tilewright manifest`.
 
 **Fingerprint**: a hash of which data a YAML describes (tag, server-visible directory,
-pattern, params, identity), stamped on the container; `register` refuses a different
-fingerprint under the same key.
+pattern, params, identity, and a table's `id` when it is a list), stamped on the
+container; `register` refuses a different fingerprint under the same key.
 
 **Vocabulary**: canonical ids and aliases for the facets, in `vocabulary.yml`. Soft:
 unknown values warn (ADR-0003). Grows by pull request. _Avoid_: schema, semantic model.

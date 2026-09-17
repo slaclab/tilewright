@@ -204,7 +204,7 @@ Three kinds of change, three procedures:
 |---|---|
 | Dataset metadata in the YAML (description, contact, a facet) | `tilewright register --update`. One node is patched; Tiled keeps the previous metadata as a revision |
 | Nothing, but more entities exist (an interrupted run, new files) | `tilewright manifest --append`, then `register`. Existing entities are skipped |
-| The files, a path, a shape or dtype | `tilewright manifest`, `tilewright delete MY_DATASET`, `register`. Existing artifacts are never rewritten in place, and a rerun that finds a registered artifact's source file changed on disk stops and prints these three commands |
+| The files, a path, a shape or dtype, a table's `id` | `tilewright manifest`, `tilewright delete MY_DATASET`, `register`. Existing artifacts are never rewritten in place, and a rerun that finds a registered artifact's source file changed on disk stops and prints these three commands |
 
 ## 5. Read it back
 
@@ -251,7 +251,7 @@ stored, since the catalog is their only home. Your HDF5 files are never touched.
 | `contract error: ...` | Each line names the field and the fix; the [YAML reference](reference/dataset-yaml.md) has every field |
 | `has no 'key:' yet` | Run `tilewright manifest` first |
 | `N entities share K uids` | The report shows what differs and a fix for your source: a distinguishing parameter or `identity: provenance`; for a table, another column in `id` |
-| `already holds different data` | Another dataset owns that label; choose a different one |
+| `already holds different data` | Another dataset owns that label; choose a different one. If it is your table and you changed its `id`, delete it and register again (step 4) |
 | `no manifests for '<KEY>'` | Run `tilewright manifest` on this YAML |
 | Entity or artifact counts are wrong | Check `pattern`, the batch leading axis, or `entity_group` |
 | Registration succeeds but every read returns HTTP 500 | The server is missing the adapter, or `server_base_dir` / `readable_storage` / a symlinked path is wrong (step 3). Fix, then regenerate, delete, register again |
