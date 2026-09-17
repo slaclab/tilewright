@@ -458,10 +458,11 @@ class TestKeyStamp:
         generate_manifests(str(yaml_path))
         assert yaml_path.read_text() == after
 
-    def test_crlf_line_endings_are_kept(self, tmp_path):
-        before = ("label: Crlf Test\n" + CONTRACT_TAIL).replace("\n", "\r\n")
+    @pytest.mark.parametrize("eol", ["\r\n", "\r"])
+    def test_line_endings_are_kept(self, tmp_path, eol):
+        before = ("# header\nlabel: Eol Test\n" + CONTRACT_TAIL).replace("\n", eol)
         assert _stamped(tmp_path, before) == before.replace(
-            "label: Crlf Test\r\n", "label: Crlf Test\r\nkey: CRLF_TEST\r\n")
+            f"label: Eol Test{eol}", f"label: Eol Test{eol}key: EOL_TEST{eol}")
 
     def test_label_on_the_last_line_without_a_newline(self, tmp_path):
         before = CONTRACT_TAIL + "label: Last Line  # the label comes last"
