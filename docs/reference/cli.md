@@ -37,13 +37,13 @@ tilewright manifest YAML_PATH [-o OUTPUT_DIR] [--append] [--check]
 | | |
 |---|---|
 | Reads | the YAML, and every file matched by the source's `directory` + `pattern` (or the table) |
-| Writes | `key:` into the YAML if absent, as one new line after the `label:` line (before it when the label spans several lines); the rest of the YAML is left as written. `entities.parquet` and `artifacts.parquet` in `<root>/manifests/<KEY>/`, where `<root>` is the YAML's directory, or its parent when the YAML sits in a `datasets/` directory (the `.tilewright/datasets/<KEY>.yml` → `.tilewright/manifests/<KEY>/` layout) |
+| Writes | `key:` into the YAML if absent, as one new line after the `label:` line (before it when the label spans several lines); the rest of the YAML is left as written. When no such line gives the same YAML plus the key (an empty `key:`, a top-level flow mapping), the whole YAML is written out again: comments stay, but the layout does not, and a vocabulary alias is written as its canonical id. `entities.parquet` and `artifacts.parquet` in `<root>/manifests/<KEY>/`, where `<root>` is the YAML's directory, or its parent when the YAML sits in a `datasets/` directory (the `.tilewright/datasets/<KEY>.yml` → `.tilewright/manifests/<KEY>/` layout) |
 | Server | not required |
 
 Prints `dataset=<KEY> entities=N artifacts=M shared=S` on success. Contract problems are
 printed as one `contract error:` line each, all of them, then exit `1`; a data problem
-(file not found, array missing, shared axis differing, duplicate identities) names the
-file and the path and exits `1`.
+(file not found, array missing, shared axis differing, duplicate identities, a
+parameter named like a locator) names the file and the path and exits `1`.
 
 Each artifact's `shape` and `dtype` are captured here, which is what lets registration run
 without opening a single HDF5 file, and why the manifest must be regenerated when the data
