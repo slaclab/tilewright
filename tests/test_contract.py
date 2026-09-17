@@ -396,6 +396,16 @@ class TestVocabulary:
         for facet in FACETS.values():
             assert facet in vocab, facet
 
+    def test_the_data_type_description_lists_the_vocabulary_ids(self):
+        """The description names every data_type id and no other value, so an author who
+        reads only the field reference writes an id (the vocabulary had 'optimization',
+        the description did not)."""
+        from tilewright.contract import DatasetMetadata
+
+        doc = DatasetMetadata.model_fields["data_type"].description
+        ids = [entry["id"] for entry in load_vocabulary()["data_types"]]
+        assert re.findall(r"'([^']+)'", doc) == ids
+
     def test_alias_rewrites_spelling_only(self):
         raw = files_cfg(metadata={"method": ["EDRIXS"], "material": "NIPS", "data_type": "simulation"})
         cfg, notes = load_dataset(raw)

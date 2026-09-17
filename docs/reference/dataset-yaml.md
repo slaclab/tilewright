@@ -45,7 +45,7 @@ to its id, an unknown value warns and registers as written
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `method` | list of str | **yes** |  | Scientific methods, e.g. ['RIXS']; at least one. Vocabulary facet. |
-| `data_type` | str | **yes** |  | 'simulation', 'experimental' or 'benchmark'. Vocabulary facet. |
+| `data_type` | str | **yes** |  | What kind of data, as one of the data_type ids in the vocabulary: 'simulation', 'experimental', 'benchmark' or 'optimization'. Vocabulary facet. |
 | `material` | str | **yes** |  | Material or system studied, e.g. 'NiPS3'; 'not_applicable' for non-physical data. Vocabulary facet. |
 | `producer` | str | no |  | Code that produced or reduced the data ('sunny_jl', 'mantid'). Vocabulary facet. |
 | `project` | str | no |  | Project or collaboration ('MAIQMag'). Vocabulary facet. |

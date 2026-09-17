@@ -86,7 +86,8 @@ class DatasetMetadata(BaseModel):
     )
     data_type: str = Field(
         min_length=1,
-        description="'simulation', 'experimental' or 'benchmark'. Vocabulary facet.",
+        description="What kind of data, as one of the data_type ids in the vocabulary: "
+        "'simulation', 'experimental', 'benchmark' or 'optimization'. Vocabulary facet.",
     )
     material: str = Field(
         min_length=1,
