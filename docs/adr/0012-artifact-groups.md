@@ -109,7 +109,9 @@ per-step datasets register slowly and are better stacked into one array, or into
 `batch` file, before onboarding. The measured registration rates, and a practical number
 of artifacts per entity, belong to the publishing guide's registration step
 ([`docs/ONBOARDING.md`](../ONBOARDING.md), step 4), which the follow-up for #13 writes;
-the contract and the explanation page carry no rate.
+the contract and the explanation page carry no rate, and `explanation/sources.md` links
+that step (its anchor, `#4-register-the-dataset`), so the follow-up only adds the
+numbers.
 
 ## Why
 

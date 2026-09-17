@@ -186,7 +186,9 @@ empty group does, is in [the `artifacts` fields](../reference/dataset-yaml.md#ar
 
 Each member is still an array of its own: one more node to register, and one read per
 step to get the series back. A few dozen channels are fine. Thousands of per-step
-datasets register slowly and read slowly: stack them into one array, a
+datasets register slowly (that time is spent when you
+[register the dataset](../ONBOARDING.md#4-register-the-dataset)) and read slowly: stack
+them into one array, a
 `(steps, ny, nx)` dataset, or into a `batch` file, before onboarding, and the series
 becomes one artifact that slices like any other.
 
