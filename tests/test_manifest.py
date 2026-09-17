@@ -392,3 +392,104 @@ class TestCli:
         assert main([str(yaml_path), "--append"]) == 0
         ent = pd.read_parquet(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet")
         assert len(ent) == 4 and "merged: 3 existing + 1 new" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# key stamping leaves the author's YAML as written (#14)
+# ---------------------------------------------------------------------------
+
+HAND_WRITTEN = """\
+# A hand-written header comment.
+label: Files Test
+
+metadata:
+  method: [INS]            # a flow list
+  data_type: experimental
+  material: NiPS3
+  contact: 'Someone (Somewhere)'
+  description: >-
+    Three synthetic runs written by the test suite for the key-stamping check, with one
+    temperature each; the lines of this folded description are deliberately close to ninety
+    columns wide, as hand-written descriptions often are.
+  sample_length_mm: 1.50
+
+source:
+  files:
+    directory: {directory}
+    pattern: "*.h5"
+
+artifacts:
+  - {{type: spectrum,  dataset: /spectrum}}
+shared:
+- {{type: energy, dataset: /energy}}
+"""
+
+CONTRACT_TAIL = """\
+metadata: {method: [INS], data_type: experimental, material: NiPS3}
+source: {files: {directory: /d}}
+artifacts: [{type: s, dataset: /s}]
+"""
+
+
+def _stamped(tmp_path, text):
+    from tilewright.manifest import read_yaml, stamp_key
+
+    path = tmp_path / "ds.yml"
+    path.write_bytes(text.encode())
+    cfg, raw, _ = read_yaml(path)
+    assert stamp_key(path, raw, cfg.catalog_key) is True
+    return path.read_bytes().decode()
+
+
+class TestKeyStamp:
+
+    def test_first_run_adds_only_the_key_line(self, tmp_path):
+        files_dataset(tmp_path)
+        directory = tmp_path / ("a_directory_name_long_enough_to_push_the_directory_value_"
+                                "past_eighty_columns")
+        (tmp_path / "runs").rename(directory)
+        before = HAND_WRITTEN.format(directory=directory)
+        yaml_path = tmp_path / "ds.yml"
+        yaml_path.write_text(before)
+        generate_manifests(str(yaml_path))
+        after = yaml_path.read_text()
+        assert after == before.replace("label: Files Test\n",
+                                       "label: Files Test\nkey: FILES_TEST\n", 1)
+        generate_manifests(str(yaml_path))
+        assert yaml_path.read_text() == after
+
+    def test_crlf_line_endings_are_kept(self, tmp_path):
+        before = ("label: Crlf Test\n" + CONTRACT_TAIL).replace("\n", "\r\n")
+        assert _stamped(tmp_path, before) == before.replace(
+            "label: Crlf Test\r\n", "label: Crlf Test\r\nkey: CRLF_TEST\r\n")
+
+    def test_label_on_the_last_line_without_a_newline(self, tmp_path):
+        before = CONTRACT_TAIL + "label: Last Line  # the label comes last"
+        assert _stamped(tmp_path, before) == before + "\nkey: LAST_LINE"
+
+    @pytest.mark.parametrize("label", [
+        "label: >-\n  Folded\n  Label\n",
+        "label: Folded\n  Label\n",
+        "label:\n  Folded Label\n",
+        'label: "Folded\n  Label"\n',
+    ])
+    def test_a_label_on_several_lines_gets_the_key_line_before_it(self, tmp_path, label):
+        before = "# header\n" + label + CONTRACT_TAIL
+        after = _stamped(tmp_path, before)
+        assert after == "# header\nkey: FOLDED_LABEL\n" + label + CONTRACT_TAIL
+        assert YAML(typ="safe").load(after)["label"] == "Folded Label"
+
+    def test_an_empty_key_is_filled_in(self, tmp_path):
+        after = _stamped(tmp_path, "label: Empty Key\nkey:\n" + CONTRACT_TAIL)
+        data = YAML(typ="safe").load(after)
+        assert data["key"] == "EMPTY_KEY" and list(data)[:2] == ["label", "key"]
+
+    def test_an_alias_stays_as_written_and_resolves_on_every_load(self, tmp_path):
+        from tilewright.manifest import read_yaml
+
+        before = "label: Alias Test\n" + CONTRACT_TAIL.replace("[INS]", "[EDRIXS]")
+        after = _stamped(tmp_path, before)
+        assert after == before.replace("\n", "\nkey: ALIAS_TEST\n", 1)
+        cfg, _, notes = read_yaml(tmp_path / "ds.yml")
+        assert cfg.metadata.method == ["RIXS"]
+        assert "metadata.method: alias 'EDRIXS' -> 'RIXS'" in notes

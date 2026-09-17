@@ -37,7 +37,7 @@ tilewright manifest YAML_PATH [-o OUTPUT_DIR] [--append] [--check]
 | | |
 |---|---|
 | Reads | the YAML, and every file matched by the source's `directory` + `pattern` (or the table) |
-| Writes | `key:` into the YAML if absent; `entities.parquet` and `artifacts.parquet` in `<root>/manifests/<KEY>/`, where `<root>` is the YAML's directory, or its parent when the YAML sits in a `datasets/` directory (the `.tilewright/datasets/<KEY>.yml` → `.tilewright/manifests/<KEY>/` layout) |
+| Writes | `key:` into the YAML if absent, as one new line after the `label:` line (before it when the label spans several lines); the rest of the YAML is left as written. `entities.parquet` and `artifacts.parquet` in `<root>/manifests/<KEY>/`, where `<root>` is the YAML's directory, or its parent when the YAML sits in a `datasets/` directory (the `.tilewright/datasets/<KEY>.yml` → `.tilewright/manifests/<KEY>/` layout) |
 | Server | not required |
 
 Prints `dataset=<KEY> entities=N artifacts=M shared=S` on success. Contract problems are
