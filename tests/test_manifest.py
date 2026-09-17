@@ -88,6 +88,30 @@ class TestFiles:
         ent, _ = run(tmp_path, cfg, name="ds2")
         assert set(ent.columns) == {"uid", "root.temperature", "root.run", "entry.title"}
 
+    def test_empty_attribute_is_null(self, tmp_path):
+        # h5py.Empty, a null dataspace (netCDF's `version = ""`), is stored as null (#5)
+        cfg = files_dataset(tmp_path, attrs=True)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.attrs["version"] = h5py.Empty("S1") if i else "1.2"
+        ent, _ = run(tmp_path, cfg)
+        version = ent.sort_values("run")["version"]
+        assert version.iloc[0] == "1.2" and version.iloc[1:].isna().all()
+
+    def test_empty_dataset_is_null_and_empty_labels_are_left_out(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.create_dataset("spare", data=h5py.Empty("f8"))
+                f["temperature"].attrs["comment"] = h5py.Empty("S1")
+                f["spectrum"].attrs["long_name"] = h5py.Empty("S1")
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 3 and ent["spare"].isna().all()
+        # labels and array metadata carry only str, int and float: an empty one is left out
+        assert "temperature_comment" not in ent.columns
+        assert (ent["temperature_units"] == "K").all()
+        assert "long_name" not in art.columns
+
     def test_shared_axis_row_has_no_uid(self, tmp_path):
         _, art = run(tmp_path, files_dataset(tmp_path))
         shared = art[art["uid"].isna()]

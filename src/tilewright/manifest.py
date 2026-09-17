@@ -211,6 +211,8 @@ _reserved_warned = set()
 
 
 def _to_python(val):
+    if isinstance(val, h5py.Empty):  # a null dataspace (netCDF's empty attribute): no value
+        return None
     if isinstance(val, bytes):
         return val.decode("utf-8", errors="replace")
     if isinstance(val, np.generic):
@@ -227,7 +229,9 @@ def _attrs(obj, label_of=None, skip=()):
     field name: scalar attributes as ``<field>_<attr>`` labels of that field. ``label_of``
     ``""``: bare names, for an artifact's own node metadata (manifest column names are
     dropped with a warning). Labels are stored beside a value, never hashed into the uid.
-    Names in ``skip`` (``params.exclude``) are never read.
+    An empty attribute (``h5py.Empty``) is None: kept as a null parameter, and left out of
+    labels, which carry only str, int and float. Names in ``skip`` (``params.exclude``)
+    are never read.
     """
     out = OrderedDict()
     for name in sorted(obj.attrs.keys()):
