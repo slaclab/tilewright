@@ -57,11 +57,12 @@ every hop of a **chain**, and every segment of a path:
   that holds it, so it needs no test. It is the one link that can still put a group that
   is an entity of the dataset inside another one, and object identity is the only way to
   see that: the entity groups and matched groups **of the file being read** are kept by
-  `h5py` object id, and a link to one of them is named and skipped as before
-  (`links into <path>, an entity group of this dataset; skipped`).
+  `h5py` object id, and a member whose own name resolves to one of them is named and
+  skipped as before (`links into <path>, an entity group of this dataset; skipped`); a
+  target path that merely runs *through* such a name is not, see the residual below.
 
-**What the rule leaves standing, said plainly.** Two cases are in rule and silent, and an
-author reading a layout should know both:
+**What the rule leaves standing, said plainly.** Three cases are in rule and silent, and
+an author reading a layout should know all three:
 
 - a **member of the params group itself** is read whatever it links to, a dataset in
   another entity's group or in a file the `pattern` does not match included. The author
@@ -74,6 +75,12 @@ author reading a layout should know both:
   A hard link is genuinely a member of the group that holds it, so this stays in rule; the
   rule that would catch it (reference count > 1) lost for the reason in "the arguments
   that lost".
+- a **soft link whose target path runs through a hard link to a sibling entity group**.
+  `closed` decides a member's own name, not the components of a target path inside
+  `_outside`'s walk, so with `hardsib` a hard link to the sibling entity group,
+  `sub/hop -> .../hardsib/readout/temperature` reads the sibling's value into this
+  entity's parameters and uid although `hardsib` itself was named and skipped. Byte for
+  byte the behaviour `main` already had.
 
 **The rule holds for every source tag.** `files` and `batch` read their params group in
 the file, and a link out of that group — into another file of the dataset, or to a group
@@ -204,9 +211,11 @@ compared uids and `source_fingerprint` against the registered Parquet files.
 ## Consequences
 
 - `ParamsSpec.recursive`'s description carries the rule, both halves, and
-  `GroupsSource.params` states the corollary for a `groups` source (no sibling entity
-  group and no matched group is read through a link, and the hard-link case that leaves
-  standing) instead of the rule of ADR-0011. `docs/reference/dataset-yaml.md` is
+  `GroupsSource.params` states the corollary for a `groups` source (a member whose own
+  name resolves to a sibling entity group or a matched group is skipped, and the two
+  cases that leaves standing: a hard link to a subgroup of one, and a target path that
+  runs through a skipped name) instead of the rule of ADR-0011.
+  `docs/reference/dataset-yaml.md` is
   regenerated; no field is added, so `tests/test_contract.py::test_concept_budget` is
   unchanged.
 - `reference/errors.md` gains the warning row for a link out of the subtree, beside the

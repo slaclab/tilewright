@@ -1524,6 +1524,45 @@ class TestRecursionStaysInTheSubtree:
         row = ent[ent["source_group"] == "siteA/det1"].iloc[0]
         assert row["readout.hardpeek.own"] == 41.0 and row["readout.own"] == 40.0
 
+    def test_a_target_path_running_through_a_skipped_hard_link_is_followed(
+            self, tmp_path, capsys):
+        """The third residual ADR-0013 records. 'closed' decides a member's own name, not
+        the components of a target path inside '_outside's walk. So a name that resolves
+        to the sibling entity group is warned about and skipped whether it is the hard
+        link itself or a soft link to it, while a soft link whose target path merely runs
+        *through* that name reaches the sibling's values and carries them into this
+        entity's parameters, and so into its uid."""
+        d = tmp_path / "sites"
+        d.mkdir()
+        with h5py.File(d / "site_a.h5", "w") as f:
+            for name, temp, own in (("det1", 300.0, 1.0), ("det2", 7.0, 2.0)):
+                g = f.create_group(f"siteA/{name}")
+                g["readout/temperature"] = temp
+                g["readout/sub/own"] = own
+                g["spectrum"] = np.zeros(4)
+            f["siteA/det1/readout/hardsib"] = f["siteA/det2"]
+            f["siteA/det1/readout/sub/hop"] = h5py.SoftLink(
+                "/siteA/det1/readout/hardsib/readout/temperature")
+            f["siteA/det1/readout/sub/hopent"] = h5py.SoftLink(
+                "/siteA/det1/readout/hardsib")
+        cfg = {"label": "Sites", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "site_*.h5",
+                                     "entity_group": "/*",
+                                     "params": {"group": "readout", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        # the two names that resolve to the sibling entity group: both skipped
+        for name in ("hardsib", "sub/hopent"):
+            assert (f"site_a.h5:/siteA/det1/readout/{name} links into /siteA/det2, an "
+                    f"entity group of this dataset; skipped") in out
+        # the path that only runs through one of them: followed, values and all
+        row = ent[ent["source_group"] == "siteA/det1"].iloc[0]
+        assert row["sub.hop"] == 7.0 and row["temperature"] == 300.0
+        assert not [c for c in ent.columns if "hopent" in c]
+
 
 # ---------------------------------------------------------------------------
 

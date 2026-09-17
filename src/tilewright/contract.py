@@ -220,9 +220,13 @@ class ParamsSpec(BaseModel):
         "or a link whose target path is spelled inside the group but runs through a link "
         "that is not) is named in a warning and skipped. So a member of the group itself "
         "is the author's own choice, link and all: write the link out of the group if what "
-        "it names should not be read. Below that group no other entity's values, and "
-        "nothing from another file, is read through a link, whatever its target path "
-        "spells: the object a name resolves to decides, not the text. A group named under "
+        "it names should not be read. Below that group nothing from another file is read "
+        "through a link, whatever its target path spells: the object a name resolves to "
+        "decides, not the text. Under 'groups', where the other entities are sibling "
+        "groups of the same file, what is decided that way is a member's own name: a name "
+        "resolving to a sibling entity group is skipped, and a target path that runs "
+        "through such a name is followed (see 'params' under 'source.groups'). A group "
+        "named under "
         "'group' or 'groups' is likewise read wherever its path leads. It applies to every "
         "path of the block, so under 'groups' a block with 'recursive: true' may hold no "
         "path that starts with '..' (see 'params' under 'source.groups'). The key is the "
@@ -455,11 +459,15 @@ class GroupsSource(_HDF5SourceBase):
         "names is read whatever it is, an entity group included: under a path to one "
         "detector (`../<detector>`), its scalars go to every sibling, and each of its 1-D "
         "datasets whose length is the number of siblings is split among them. Recursion "
-        "inside the entity group stays inside it (see 'recursive'), so no sibling entity "
-        "group, and no group that 'entity_group' matched, is read through a link, whatever "
-        "the text of the link's target path spells; a second "
-        "HDF5 name (a hard link) for a group *inside* one of them names a member of this "
-        "entity group like any other, and is read. 'null' declares none.",
+        "inside the entity group stays inside it (see 'recursive'), so a member whose own "
+        "name resolves to a sibling entity group, or to a group 'entity_group' matched, is "
+        "named in a warning and skipped, whatever the text of its target path spells. A "
+        "second HDF5 name (a hard link) for a group *inside* one of them names a member of "
+        "this entity group like any other, and is read; so is anything reached *through* "
+        "such a name, since a name is skipped but the path through it is not. A soft link "
+        "whose target path runs through a hard link to a sibling entity group is followed, "
+        "and that entity's values enter these parameters and this uid. Write the link out "
+        "of the group if what it names should not be read. 'null' declares none.",
     )
 
     @field_validator("exclude_groups")
