@@ -97,3 +97,23 @@ def test_verify_entity_with_no_artifacts(capsys):
     verify_registration_http(root)
     out = capsys.readouterr().out
     assert "WARNING: no array children" in out
+
+
+def test_verify_entity_without_locators_does_not_warn(capsys):
+    """A table-source entity has no path_* locators and no arrays by contract: no
+    warning that reads through the server will fail (#8)."""
+    ent = MagicMock()
+    ent.metadata = {"sample_id": "s1", "temperature_K": 10.5}
+    ent.keys.return_value = []
+    ds = MagicMock()
+    ds.metadata = {"label": "T"}
+    ds.keys.return_value = ["T_0"]
+    ds.__getitem__.side_effect = lambda k: ent
+    root = MagicMock()
+    root.keys.return_value = ["T"]
+    root.__getitem__.side_effect = lambda k: ds
+    verify_registration_http(root, ["T"])
+    out = capsys.readouterr().out
+    assert "Entity 'T_0'" in out and "(locators: 0)" in out
+    assert "WARNING" not in out and "reads through the server will fail" not in out
+    assert "no artifacts declared" in out
