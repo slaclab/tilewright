@@ -21,6 +21,7 @@ is a hash of its ``id`` column(s). ``key`` is derived from ``label`` by
 import hashlib
 import json
 import re
+import string
 from enum import Enum
 from typing import Literal
 
@@ -500,22 +501,88 @@ class Source(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ArtifactSpec(BaseModel):
+    """One array of every entity (``dataset``), or one per dataset in a group (``group``,
+    ADR-0012), which ``tilewright manifest`` expands, so the manifest rows stay plain."""
+
     model_config = ConfigDict(extra="forbid")
 
     type: str = Field(
         min_length=1,
-        description="Name of the array; becomes its key under the entity.",
+        description="Name of the array; becomes its key under the entity, and names its "
+        "locators (`path_<type>`, `dataset_<type>`, `index_<type>`). With 'group', a "
+        "template in which '{name}' stands for each member's name. Quote the template, "
+        "as in `type: 'trace_{name}'`: YAML reads an unquoted brace as the start of a "
+        "mapping. A literal brace in it is written '{{' or '}}'.",
     )
-    dataset: str = Field(
+    dataset: str | None = Field(
+        default=None,
         min_length=1,
         description="HDF5 path of the array: absolute for 'files' and 'batch', relative to "
-        "each entity group for 'groups'.",
+        "each entity group for 'groups'. Give either 'dataset' or 'group'.",
+    )
+    group: str | None = Field(
+        default=None,
+        min_length=1,
+        description="HDF5 path of a group, instead of 'dataset': the entry becomes one "
+        "artifact per dataset directly in the group, in sorted name order. Scalar (0-dim) "
+        "datasets are included; subgroups, and datasets with no dataspace (h5py.Empty), "
+        "are skipped. Absolute for 'files', relative to "
+        "each entity group for 'groups'; a 'batch' source does not take it, because its "
+        "first artifact sets the batch size. 'type' must hold '{name}', and nothing "
+        "else in braces: `{type: 'trace_{name}', group: /channels}` gives trace_ch_a ... "
+        "trace_ch_d for /channels/ch_a ... /channels/ch_d, and `{type: '{name}', group: "
+        "/frames}` gives frame_0000 ... frame_0099 for /frames/frame_0000 ... "
+        "/frames/frame_0099. The types must stay unique within an entity after this "
+        "expansion, shared types included. A group that is absent, or that holds no "
+        "dataset matching 'members', is an error unless 'optional'. Each member becomes "
+        "an array node of its own, so thousands of per-step datasets register slowly and "
+        "read back one step at a time: stack them into one array, or into a 'batch' file, "
+        "before onboarding.",
+    )
+    members: str = Field(
+        default="*",
+        min_length=1,
+        description="With 'group' only: an fnmatch pattern that a member's name must "
+        "match, case-sensitive. '*' takes every dataset in the group; 'frame_00[0-4]?' "
+        "takes frame_0000 ... frame_0049.",
     )
     optional: bool = Field(
         default=False,
-        description="True if some entities lack this array; it is skipped for them. "
-        "Otherwise a missing array is an error.",
+        description="True if some entities lack this array (with 'group': the group, or "
+        "every member that matches); it is skipped for them. Otherwise a missing array is "
+        "an error.",
     )
+
+    @model_validator(mode="after")
+    def _one_way_to_name_arrays(self):
+        if (self.dataset is None) == (self.group is None):
+            raise ValueError("give exactly one of 'dataset' (one array) or 'group' (one "
+                             "array per dataset in that group)")
+        if self.group is None:
+            if "members" in self.model_fields_set:
+                raise ValueError("'members' picks the datasets of a 'group'; remove it, or "
+                                 "name a 'group' instead of 'dataset'")
+            if "{name}" in self.type:
+                raise ValueError(f"type {self.type!r} holds '{{name}}', which only a 'group' "
+                                 f"entry fills in; write the type out, or name a 'group'")
+        else:
+            try:
+                fields = [(name, spec, conv) for _, name, spec, conv
+                          in string.Formatter().parse(self.type) if name is not None]
+            except ValueError as exc:
+                raise ValueError(f"type {self.type!r} is not a template ({exc}); write a "
+                                 f"literal brace as '{{{{' or '}}}}'") from None
+            other = ["{" + name + (f"!{conv}" if conv else "") + (f":{spec}" if spec else "")
+                     + "}" for name, spec, conv in fields
+                     if (name, spec, conv) != ("name", "", None)]
+            if other:
+                raise ValueError(f"type {self.type!r} holds {', '.join(other)}; '{{name}}' is "
+                                 f"the only placeholder, and a literal brace is written "
+                                 f"'{{{{' or '}}}}'")
+            if not fields:
+                raise ValueError(f"type {self.type!r} has no '{{name}}': with 'group', each "
+                                 f"member's name goes into its type, as in 'trace_{{name}}'")
+        return self
 
 
 class SharedAxisSpec(BaseModel):
@@ -528,7 +595,9 @@ class SharedAxisSpec(BaseModel):
     dataset: str = Field(
         min_length=1,
         description="Absolute HDF5 path (in every source) of an array identical for all "
-        "entities. Read from the first file that holds it; every other file must agree.",
+        "entities. Read from the first file that holds it; every other file must agree. "
+        "A shared entry names one array: the 'group' form of 'artifacts' is not available "
+        "here.",
     )
 
 
@@ -563,7 +632,8 @@ class DatasetConfig(BaseModel):
     source: Source = Field(description="Where the entities come from: one tag.")
     artifacts: list[ArtifactSpec] = Field(
         default_factory=list,
-        description="Arrays each entity exposes; at least one, except for 'table'.",
+        description="Arrays each entity exposes; at least one entry, except for 'table'. "
+        "An entry names one array ('dataset') or every array in a group ('group').",
     )
     shared: list[SharedAxisSpec] = Field(
         default_factory=list,
@@ -591,7 +661,13 @@ class DatasetConfig(BaseModel):
                 raise ValueError("a 'table' source has no readable arrays: remove 'artifacts'")
         elif not self.artifacts:
             raise ValueError("'artifacts' needs at least one entry")
-        types = [a.type for a in self.artifacts] + [s.type for s in self.shared]
+        grouped = [f"artifacts[{i}]" for i, a in enumerate(self.artifacts) if a.group]
+        if grouped and self.source.tag == "batch":
+            raise ValueError(f"{', '.join(grouped)}: a 'batch' source takes 'dataset' "
+                             f"entries only, because its first artifact sets the batch "
+                             f"size; name each array of the group in an entry of its own")
+        # a 'group' entry's types are known only once the manifest expands it (ADR-0012)
+        types = [a.type for a in self.artifacts if a.dataset] + [s.type for s in self.shared]
         dupes = sorted({t for t in types if types.count(t) > 1})
         if dupes:
             raise ValueError(f"artifact types must be unique (they become node keys): "
@@ -696,7 +772,10 @@ def source_fingerprint(cfg: DatasetConfig):
 
     A single-column ``id`` is not hashed, so no table fingerprinted before ADR-0008
     changes; a list is, so switching a table to a composite id (which re-keys every
-    entity) is refused as different data rather than registered beside the old keys."""
+    entity) is refused as different data rather than registered beside the old keys.
+    An ``artifacts`` entry is hashed only in the group form, as its ``group`` and
+    ``members`` (ADR-0012): the spec, which ``register`` can read without opening a file,
+    not the members a manifest found."""
     body = cfg.source.body
     params = getattr(body, "params", None)
     if params is not None:
@@ -718,4 +797,7 @@ def source_fingerprint(cfg: DatasetConfig):
         facts["exclude_groups"] = sorted(set(body.exclude_groups))
     if isinstance(getattr(body, "id", None), list):
         facts["id"] = body.id
+    groups = sorted([a.group, a.members] for a in cfg.artifacts if a.group)
+    if groups:  # a fact only then, so no YAML without a group entry changes
+        facts["artifact_groups"] = groups
     return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]

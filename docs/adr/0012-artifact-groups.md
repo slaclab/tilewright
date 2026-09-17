@@ -1,0 +1,137 @@
+# Artifact groups: one `artifacts` entry for every dataset in a group
+
+**Status:** accepted, 2026-09-17. Extends ADR-0006 (two new keys in an `artifacts`
+entry, and a rule the `batch` tag refuses) and ADR-0007 (a new fingerprint fact, hashed
+only when an entry has the new form). Decided in the public comment on
+[#12](https://github.com/slaclab/TileWright/issues/12#issuecomment-5712628229).
+
+## Decision
+
+**Two ways to name an artifact.** An `artifacts` entry gives exactly one of `dataset` or
+`group`; neither, or both, is a contract error.
+
+- `dataset` is the entry as before: one array per entity.
+- `group` names an HDF5 group (absolute under `files`, relative to each entity group
+  under `groups`). The entry expands to one artifact per dataset *directly* in that
+  group, in sorted name order. Subgroups are skipped; scalar (0-dim) datasets are
+  included; a dataset with no dataspace (`h5py.Empty`) has no array to register and is
+  skipped; a member that is a dangling link is skipped with a warning, as a dangling
+  parameter is.
+- `members` is an fnmatch pattern, matched case-sensitively (`fnmatchcase`) against each
+  member's name, default `*`. It is allowed only with `group`: on a `dataset` entry it
+  is a contract error.
+- With `group`, `type` is a `str.format` template whose only placeholder is `{name}`,
+  which must appear at least once and is replaced by the member's name
+  (`type.format(name=<member>)`). Another placeholder (`{}`, `{0}`, `{run}`), a
+  conversion or format spec (`{name!r}`, `{name:>6}`) and a lone brace are contract
+  errors; a literal brace is written `{{` or `}}`. With `dataset`, a `type` that
+  contains `{name}` is a contract error, and any other brace stays plain text, as before.
+
+**Optional groups.** With `optional: true` an absent group is skipped for that entity.
+Without it, an absent group is an error naming the file (for `groups`, `<file>:/<entity
+group>`) and the group's full path. A present group in which no dataset matches
+`members` is an error naming the group and the pattern, and listing the first names it
+does hold, unless the entry is optional. A `group` that names a dataset is an error
+either way.
+
+**Unique types, per entity, after expansion.** The contract still refuses two `dataset`
+entries (or a `dataset` entry and a `shared` entry) with one `type`. A `group` entry's
+types exist only once the manifest has read the file, so `tilewright manifest` checks
+them per entity: a type given twice, by two entries or by an entry and a shared axis, is
+an error naming both (`artifacts[0] (type '{name}', group '/frames', member
+'frame_0001') and artifacts[1] (dataset '/frames/frame_0001') both give the type
+'frame_0001'`). An expanded type also reserves its locator names (`path_<type>`,
+`dataset_<type>`, `index_<type>`) for that entity, so a parameter with such a name is
+refused as for any other artifact.
+
+**Where it is allowed.** Under `files` and `groups`. A `batch` source rejects the group
+form with a contract error naming each such entry, because its first artifact sets the
+batch size and every artifact's leading axis is the entity axis. A `shared` entry keeps
+the `dataset` form only: `group` there is "not a contract key", and the `dataset`
+description says so.
+
+**Expansion at manifest time only.** `artifacts.parquet` holds one plain row per expanded
+artifact (type filled in, the member's full HDF5 path in `dataset`), with no column that
+records the entry. `register`, the adapter and `tilewright.client` are unchanged.
+
+**The fingerprint hashes the spec.** When at least one entry has the group form,
+`source_fingerprint` adds the fact `artifact_groups`: the sorted list of each such
+entry's `[group, members]`. An entry that names a `dataset` is not hashed, as before
+(ADR-0007 never hashed artifacts), so no YAML without a group entry changes: every
+golden fingerprint of the earlier ADRs still holds, and a test pins that a `dataset`
+entry added to each example leaves its value alone. `optional` and the `type` template
+are not hashed either; the order of the entries is not a fact. Tests pin three
+fingerprints with a group entry (with and without `members`, under `files` and
+`groups`) and that `optional`, the template and the order leave them alone.
+
+**Documented limit.** Each member becomes an array node of its own, registered with one
+request and read back one step at a time. The `group` description says that thousands of
+per-step datasets register slowly and are better stacked into one array, or into a
+`batch` file, before onboarding. The measured registration rates, and a practical number
+of artifacts per entity, belong to the publishing guide's registration step
+([`docs/ONBOARDING.md`](../ONBOARDING.md), step 4), which the follow-up for #13 writes;
+the contract and the explanation page carry no rate.
+
+## Why
+
+A published file in the 32-dataset stress test (#1) keeps a daily series as one dataset
+per day: five groups of 14,965 datasets each, in 9 files (osti/1872248, the ATS DayMet
+forcing files). Each `artifacts` entry named one dataset, so full coverage needed 74,827
+entries per entity and a 5.4 MB YAML, and the campaign registered the first 7 days of each
+variable instead. One `group` entry per variable names them all.
+
+**Expansion in the manifest** keeps the contract between the two commands as it is: the
+Parquet manifest is plain rows, so `register` and both read paths need no change and no
+new test surface.
+
+**Why hash the spec and not its expansion.** `tilewright register` compares the
+fingerprint of the YAML with the one stamped in the manifest before it connects, and it
+never opens an HDF5 file, so the fingerprint has to be computable from the YAML alone:
+the list of members is known only to the command that read the files. The spec is also
+the stable statement: a file that gains a member does not describe other data. The group
+and `members` are hashed because, like `pattern` and `entity_group`, they are a rule
+that selects which parts of the files the dataset is; a changed rule under the same label
+is refused as different data instead of registering a second set of arrays beside the
+first. The `type` template is left out for the same reason a `dataset` entry's type
+always was: renaming the node keys is not a change of data, and hashing it would make the
+two forms disagree.
+
+**The arguments that lost.**
+
+- *A virtual "stack" artifact*, one array whose server-side adapter reads the members one
+  by one (`{type: forcing, stack: /frames}` giving a `(N, ...)` array). It is the right
+  data model for a time series: one node, sliced like any array, and registration costs
+  one request. It lost because it needs a new adapter, a new manifest shape (a list of
+  datasets per row), and new code on both read paths, and it has to decide what a
+  member of another shape or dtype means. It is recorded as the follow-up.
+- *A range form*, `{type: "t_{i}", dataset: "/frames/{i}", range: [0, 100]}`. It needs a
+  second template language and cannot name members whose names are not numbers; the
+  group form lists what the file holds.
+- *Documentation only* (stack the datasets before onboarding). It stays as the advice for
+  thousands of members, but a group of a few dozen arrays (channels, detector panels) is
+  a normal file layout that a contract should be able to name.
+
+## Consequences
+
+- An author quotes the template, `type: "{name}"`: YAML reads an unquoted `{name}` as a
+  mapping (a contract error, "must be a string"), and an unquoted brace inside a flow
+  mapping as a syntax error. The `type` description says so.
+- The `--check` summary counts entries, not expanded artifacts: `artifacts=` there is the
+  number of entries. The count after expansion is the one `tilewright manifest` prints.
+- The artifact count formula gains a term: a group entry adds its matching members per
+  entity (`reference/errors.md`, Expected counts).
+- A member whose name gives a type that another entry also gives stops the manifest
+  rather than dropping one; the fix is a prefix in the template (`dark_{name}`) or a
+  narrower `members`.
+- Changing a group entry's `type` template and registering again adds the renamed arrays
+  beside the old ones, as renaming a `dataset` entry's type always did; the fix is
+  delete, then register.
+- The examples on the pages authors read (the field descriptions, `files.yml`,
+  `explanation/sources.md`, the onboarding skill) are invented (`/frames/frame_0000`,
+  `/channels/ch_a`); the dataset that motivated the change is named only here.
+- `tests/test_contract.py::test_concept_budget` lists `group` and `members` among the
+  keys of an `artifacts` entry, and pins the keys of a `shared` entry.
+- The reference page, `explanation/sources.md` (the "why" for authors),
+  `reference/errors.md`, `reference/manifest.md`, `explanation/identity.md`,
+  `ONBOARDING.md`, the onboarding skill's Step 2 and `examples/datasets/files.yml`
+  describe the form.

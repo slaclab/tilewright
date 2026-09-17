@@ -14,7 +14,7 @@ from ruamel.yaml import YAML
 
 from tilewright.contract import (
     SOURCE_TAGS, TOP_LEVEL_KEYS, ArtifactSpec, ContractError, DatasetConfig, Identity,
-    ParamsSpec, Source, load_dataset, slugify_key, source_fingerprint,
+    ParamsSpec, SharedAxisSpec, Source, load_dataset, slugify_key, source_fingerprint,
 )
 from tilewright.manifest import _from_text
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
@@ -607,6 +607,138 @@ class TestVocabulary:
 
 
 # ---------------------------------------------------------------------------
+# artifacts: one array ('dataset') or one per dataset in a group ('group', ADR-0012)
+# ---------------------------------------------------------------------------
+
+def artifacts_cfg(*artifacts, tag="files", shared=()):
+    return files_cfg(source={tag: {"directory": "/d"}}, artifacts=list(artifacts),
+                     shared=list(shared))
+
+
+class TestArtifactGroups:
+
+    @pytest.mark.parametrize("tag", ["files", "groups"])
+    def test_a_group_entry_is_accepted_by_files_and_groups(self, tag):
+        cfg, warnings = load_dataset(artifacts_cfg(
+            {"type": "{name}", "group": "/frames"},
+            {"type": "trace_{name}", "group": "channels", "members": "ch_[ab]",
+             "optional": True},
+            {"type": "{{{name}}}", "group": "/frames"},
+            {"type": "spectrum", "dataset": "/spectrum"}, tag=tag))
+        assert warnings == []
+        first, second, braces, plain = cfg.artifacts
+        assert (first.group, first.members, first.dataset, first.optional) == (
+            "/frames", "*", None, False)
+        assert (second.members, second.optional) == ("ch_[ab]", True)
+        assert braces.type.format(name="f") == "{f}"
+        assert (plain.dataset, plain.group, plain.members) == ("/spectrum", None, "*")
+
+    def test_group_entries_with_one_template_pass_the_contract(self):
+        # their types are known only once the manifest expands them
+        load_dataset(artifacts_cfg({"type": "{name}", "group": "/a"},
+                                   {"type": "{name}", "group": "/b"}))
+
+    @pytest.mark.parametrize("entry", [{"type": "s"}, {"type": "s", "dataset": "/s",
+                                                       "group": "/g"}])
+    def test_exactly_one_of_dataset_and_group(self, entry):
+        assert errors_of(artifacts_cfg(entry)) == [
+            "artifacts[0]: give exactly one of 'dataset' (one array) or 'group' (one array "
+            "per dataset in that group)"]
+
+    def test_members_needs_a_group(self):
+        assert errors_of(artifacts_cfg({"type": "s", "dataset": "/s", "members": "*"})) == [
+            "artifacts[0]: 'members' picks the datasets of a 'group'; remove it, or name a "
+            "'group' instead of 'dataset'"]
+
+    def test_members_is_a_non_empty_string(self):
+        errs = errors_of(artifacts_cfg({"type": "{name}", "group": "/g", "members": ""},
+                                       {"type": "{name}", "group": "/g", "members": ["a"]}))
+        assert errs == ["artifacts[0].members must be a non-empty string",
+                        "artifacts[1].members must be a string"]
+
+    def test_a_dataset_entry_has_no_name_placeholder(self):
+        assert errors_of(artifacts_cfg({"type": "frame_{name}", "dataset": "/f"})) == [
+            "artifacts[0]: type 'frame_{name}' holds '{name}', which only a 'group' entry "
+            "fills in; write the type out, or name a 'group'"]
+        # other braces are plain text in a dataset entry, as before
+        assert load_dataset(artifacts_cfg({"type": "a{b}", "dataset": "/f"}))[1] == []
+
+    def test_a_group_entry_needs_the_name_placeholder(self):
+        assert errors_of(artifacts_cfg({"type": "frame", "group": "/f"},
+                                       {"type": "{{name}}", "group": "/f"})) == [
+            f"artifacts[{i}]: type {t!r} has no '{{name}}': with 'group', each member's name "
+            f"goes into its type, as in 'trace_{{name}}'" for i, t in ((0, "frame"),
+                                                                     (1, "{{name}}"))]
+
+    @pytest.mark.parametrize("template, other", [
+        ("{}_{name}", "{}"), ("{0}", "{0}"), ("{name:>6}", "{name:>6}"),
+        ("{name!r}", "{name!r}"), ("{run}_{name}_{name.x}", "{run}, {name.x}"),
+    ])
+    def test_name_is_the_only_placeholder(self, template, other):
+        assert errors_of(artifacts_cfg({"type": template, "group": "/f"})) == [
+            f"artifacts[0]: type {template!r} holds {other}; '{{name}}' is the only "
+            f"placeholder, and a literal brace is written '{{{{' or '}}}}'"]
+
+    @pytest.mark.parametrize("template", ["{name", "a}{name}", "{name}}"])
+    def test_a_lone_brace_in_a_group_type(self, template):
+        [err] = errors_of(artifacts_cfg({"type": template, "group": "/f"}))
+        assert err.startswith(f"artifacts[0]: type {template!r} is not a template (")
+        assert err.endswith("); write a literal brace as '{{' or '}}'")
+
+    def test_a_batch_source_takes_dataset_entries_only(self):
+        raw = artifacts_cfg({"type": "spectrum", "dataset": "/spectra"},
+                            {"type": "{name}", "group": "/frames"},
+                            {"type": "t_{name}", "group": "/traces"}, tag="batch")
+        assert errors_of(raw) == [
+            "artifacts[1], artifacts[2]: a 'batch' source takes 'dataset' entries only, "
+            "because its first artifact sets the batch size; name each array of the group "
+            "in an entry of its own"]
+
+    def test_a_shared_entry_takes_no_group(self):
+        raw = artifacts_cfg({"type": "{name}", "group": "/frames"},
+                            shared=[{"type": "axis_{name}", "group": "/axes"}])
+        assert errors_of(raw) == ["shared[0].dataset is required",
+                                  "shared[0].group is not a contract key"]
+
+    # A dataset entry was never a fingerprint fact and still is not; a group entry is, as
+    # its group and members (not its type, not optional): the spec, not its expansion.
+    GOLDEN_GROUPS = [
+        ("files", [{"type": "{name}", "group": "/frames"}], "f3bda6203511bfd2"),
+        ("files", [{"type": "{name}", "group": "/frames", "members": "frame_00[0-4]?"}],
+         "3ad8950d37db30f5"),
+        ("groups", [{"type": "trace_{name}", "group": "channels"}], "2abb181af26a665d"),
+    ]
+
+    @staticmethod
+    def fingerprint(stem, extra):
+        raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
+        raw["artifacts"] += extra
+        return source_fingerprint(load_dataset(raw)[0])
+
+    @pytest.mark.parametrize("stem, extra, expected", GOLDEN_GROUPS,
+                             ids=["files", "files-members", "groups"])
+    def test_fingerprint_with_a_group_entry_is_pinned(self, stem, extra, expected):
+        assert self.fingerprint(stem, extra) == expected
+
+    @pytest.mark.parametrize("stem", ["files", "groups", "batch"])
+    def test_a_dataset_entry_keeps_the_b268731_fingerprint(self, stem):
+        extra = [{"type": "extra", "dataset": "/extra", "optional": True}]
+        assert self.fingerprint(stem, extra) == TestKeyAndFingerprint.GOLDEN[stem]
+
+    @pytest.mark.parametrize("change", [
+        {"optional": True}, {"type": "frame_{name}"}, {"members": "*"}])
+    def test_optional_and_the_type_do_not_change_the_fingerprint(self, change):
+        entry = {"type": "{name}", "group": "/frames", **change}
+        assert self.fingerprint("files", [entry]) == "f3bda6203511bfd2"
+
+    def test_the_order_of_group_entries_does_not_change_the_fingerprint(self):
+        a = {"type": "a_{name}", "group": "/a"}
+        b = {"type": "b_{name}", "group": "/b", "members": "x*"}
+        assert self.fingerprint("files", [a, b]) == self.fingerprint("files", [b, a])
+        assert self.fingerprint("files", [a, b]) != self.fingerprint("files", [a])
+
+
+# ---------------------------------------------------------------------------
 # concept budget: growing the contract is a deliberate act
 # ---------------------------------------------------------------------------
 
@@ -629,4 +761,5 @@ def test_concept_budget():
     }
     assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude",
                                  "location"}
-    assert _keys(ArtifactSpec) == {"type", "dataset", "optional"}
+    assert _keys(ArtifactSpec) == {"type", "dataset", "group", "members", "optional"}
+    assert _keys(SharedAxisSpec) == {"type", "dataset"}
