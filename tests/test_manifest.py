@@ -567,6 +567,33 @@ class TestNestedGroups:
             "site": "north", "detector": "det_b", "top.beamline": 7, "cal.gain": 1.5,
             "cal.offset": 0.5, "own.temperature": 71.0})
 
+    def test_recursion_skips_a_matched_or_entity_group_reached_through_a_link(self,
+                                                                             tmp_path):
+        """The reader tells groups apart by HDF5 object, not by the path it opened them
+        through: a soft link to an entity group or to a matched group, or a second hard
+        link to an entity group, is not read from above either (review 2 of #21)."""
+        d = tmp_path / "sites"
+        d.mkdir()
+        with h5py.File(d / "detectors.h5", "w") as f:
+            for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a"]):
+                f[f"sites/{group}/temperature"] = 70.0 + n
+                f[f"sites/{group}/spectrum"] = np.zeros(4)
+            f["meta/beamline"] = 7
+            f["meta/alias"] = h5py.SoftLink("/sites/north/det_a")
+            f["meta/site"] = h5py.SoftLink("/sites/south")
+            f["meta/copy"] = f["sites/north/det_b"]
+        cfg = {"label": "Detectors", "metadata": dict(META),
+               "source": {"groups": {
+                   "directory": str(d), "entity_group": "/sites/*",
+                   "params": {"groups": {"top": "../../..", "own": "/"},
+                              "recursive": True,
+                              "location": r"/(?P<site>[^/]+)/(?P<detector>[^/]+)$"}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "source_group", "site", "detector",
+                                    "top.meta.beamline", "own.temperature"}
+        assert list(ent["own.temperature"]) == [70.0, 71.0, 72.0]
+
     def test_a_dotdot_path_that_names_an_entity_group_is_read_by_the_sibling_rule(
             self, tmp_path):
         """A path that names a group is read as written, an entity group included, and by
