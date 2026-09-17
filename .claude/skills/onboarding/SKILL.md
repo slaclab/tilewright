@@ -87,6 +87,13 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   parameters would collide — `tilewright manifest` refuses that and names them. Repeated
   measurements (same settings, different runs) are the usual case: put a run number in the
   params, or write `identity: provenance` under the source. Say which and why in a comment.
+  A `batch` file with no per-entity values at all takes `params: null` (identity becomes
+  provenance), as `files` and `groups` do.
+- **A `table` has no `identity` key: its `id` is the identity.** Check that the `id`
+  column is unique (`df[col].is_unique`). If no single column is, list several,
+  `id: [system_id, tilt]`, and say in a comment which rows needed the extra column. If no
+  set of columns is unique (rows equal in every column), the table needs de-duplicating:
+  that is the user's decision, so ask.
 - **If groups carry an `NX_class` attribute, the file is NeXus — map it, don't guess:**
   one `NXentry` per file → `files` (several per file → `groups`); follow `@default` to the
   `NXdata` group — its `@signal` field, the `@axes` fields and any `FIELDNAME_errors` are
@@ -171,8 +178,9 @@ and **tell the user the result — then stop and wait for their go before regist
   didn't see. Go back to Step 2, find the discrepancy, fix the YAML, show the user the
   change, regenerate, compare again. A manifest you cannot account for does not get
   registered.
-- **Collision error** (`N entities share K uids`): the data has repeated parameter sets.
-  Show the user the named pairs and the two fixes; it is their call (Step 4 again).
+- **Collision error** (`N entities share K uids`): the data has repeated parameter sets,
+  or a table repeats its id. Show the user the report (what differs for each uid) and its
+  `Fix:` line; it is their call (Step 4 again).
 
 Before reporting "good to register", two checks:
 

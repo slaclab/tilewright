@@ -15,7 +15,7 @@ One row per entity.
 
 | Column | Required | Description |
 |---|---|---|
-| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values or of the provenance ([identity and keys](../explanation/identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
+| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](../explanation/identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
 | `source_group` | `groups` only | The entity's HDF5 group |
 | *(any others)* | no | Become the entity container's queryable metadata. A dotted column (`instrument.Ei`) is nested on registration; a `<field>_<attr>` column is that field's attribute label |
 

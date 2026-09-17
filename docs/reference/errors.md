@@ -20,6 +20,8 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `contract error: source.<tag>.params: 'group' and 'groups' are mutually exclusive` | Both given | Keep one; to nest a single group, name it under `groups` |
 | `contract error: key '<K>' does not match slug(label)` | `label` changed after the key was written | Restore the label, or delete the `key:` line and rerun. A drifted key is never silently rewritten, because the old key may already hold registered data |
 | `contract error: a 'table' source has no readable arrays: remove 'artifacts'` | `artifacts` on a table source | Remove it |
+| `contract error: source.table.identity is not a contract key` | `identity` under a table. A table's identity is its `id` column(s) ([identity and keys](../explanation/identity.md)) | Remove it. To tell rows with a repeated id apart, list more columns in `id` |
+| `contract error: source.table.id: must be a column name or a list of column names, none of them empty` (or `names a column more than once`) | `id` is empty, not a string, or a list with an empty, non-string or repeated entry | Write one column, `id: run`, or several, `id: [system_id, tilt]` |
 | `contract error: artifact types must be unique` | Two artifacts or shared axes share a `type` | Rename one; types become node keys |
 | `note: metadata.<field> '<v>' is not in the vocabulary` | A facet value with no canonical id | Non-fatal by design ([the soft vocabulary](../explanation/vocabulary.md)). Prefer an id so the dataset lands on the same facet as everyone else's |
 
@@ -27,17 +29,26 @@ Every contract problem is reported at once, one line each, then exit `1`.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `no files match '<pattern>' under <directory>` | Wrong directory or pattern | `ls` the directory; the default pattern is `**/*.h5` |
+| `no files match '<pattern>' under <directory>` | Wrong directory or pattern | `ls` the directory; the default pattern is `**/*.h5`, and the glob rules are in [the `pattern` field](dataset-yaml.md#sourcefiles) |
 | `OSError: Unable to open file ... file signature not found` | The pattern matched a non-HDF5 sibling: a NetCDF twin, a Parquet sidecar, a `.gz` | Tighten `pattern` |
 | `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems(print)`) and correct `dataset`, or add `optional: true` |
 | `<file>: artifact '<t>' has N rows but '<first>' has M; every artifact's leading axis is the entity axis` | A batch file whose arrays disagree on axis 0 | It is not one batch; split the artifact out or fix the file |
-| `<file>: no parameters found, so no identity` | `params` points at a group with no scalars, and identity is `params` | Point `params` at the right group, declare `params: null`, or set `identity: provenance` |
-| `<KEY>: N entities share K uids; every entity must be distinct` | Repeated parameter sets under `identity: params`, or a pattern matching the same thing twice under `provenance` | The message names colliding entities and their shared parameters. Add a distinguishing parameter (run number, seed) or set `identity: provenance` |
+| `<file>: no parameters found, so no identity` | `params` points at a group with no scalars, and identity is `params` | Point `params` at the right group, declare `params: null` (valid for `files`, `batch` and `groups`), or set `identity: provenance` |
+| `<KEY>: N entities share K uids; every entity must be distinct` | Repeated parameter sets under `identity: params`; a pattern or `entity_group` matching the same thing twice under `provenance`; table rows that repeat the `id` value(s) | For every shared uid the report says where each entity came from (for a table, the id values and the row numbers, counted from 0 after the header), then each column or parameter whose values differ, one value per entity, and under `params` the parameters they share. Its `Fix:` line depends on the source: [the fix for each source](#collisions-the-fix-for-each-source) |
+| `<table>: id column '<c>' not among [...]` | An `id` entry names no column of the table | Correct the name; case and spaces count |
 | `shared axis '<t>': dataset '...' not found in any of the N files` | Wrong path for a `shared` entry | Correct the path |
 | `shared axis '<t>' (...) differs between a.h5 and b.h5` | The array is not actually shared; it varies per entity | It is an artifact, not an axis. Move it to `artifacts` |
 | `pyarrow.lib.ArrowInvalid` while writing the manifest | A parameter changes type across files: scalar in one, string or array in another | Dump two files and diff their parameters; fix the inconsistent file |
 | `WARNING: /path@attr is not carried as array metadata` | A dataset attribute is named like a manifest column: `type`, `shape`, `dtype`, `file`, `dataset`, `index`, `uid` | Harmless; the attribute is dropped, not the array. Rename it in the file if you need it carried |
 | Entity or artifact counts differ from what you expected | The glob matched extra or fewer files; a batch leading axis is not what you assumed (it is read from `artifacts[0]`); `entity_group` is wrong | Count the files, dump one file, fix, regenerate. Formulas below |
+
+### Collisions: the fix for each source
+
+| Source | The report's `Fix:` line | What to do |
+|---|---|---|
+| `table` | list one of the columns that differ, per uid, in `id`, with an example list | Make `id` a list, `id: [system_id, tilt]`, so that together the columns are unique. When the rows are equal in every column (`no column differs`), no set of columns is unique: de-duplicate the table. The contract does not number rows ([why](../explanation/identity.md)) |
+| `files`, `batch`, `groups` under `identity: provenance` | the pattern or `entity_group` is matching the same thing twice | Tighten `pattern` or `entity_group` |
+| `files`, `batch`, `groups` under `identity: params` | add a distinguishing parameter, or set `identity: provenance` | Add a run number or seed to the parameters, or write `identity: provenance` under the source |
 
 ### Expected counts
 

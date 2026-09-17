@@ -41,17 +41,31 @@ the source's `identity`:
 entity across re-registration and file moves, which is what a simulation sweep wants and
 what makes re-running `register` safe. The cost is that two entities with identical
 parameters would collide, so `tilewright manifest` refuses that, names the colliding
-entities and the parameters they share, and offers the two fixes: add a distinguishing
-parameter, or switch identity.
+entities, what differs between them and the parameters they share, and offers the two
+fixes: add a distinguishing parameter, or switch identity.
 
 **`provenance`**: a hash of where the entity came from, the file path relative to the
-directory plus its row or group. It never collides. It is forced when a source declares
-`params: null` and for `table` sources, where the `id` column is the identity, and it is
-the right choice for run-oriented experimental data where repeated measurements share
+directory plus its row or group. It never collides unless `pattern` or `entity_group`
+matches the same thing twice. It is forced when a source declares `params: null`, and it
+is the right choice for run-oriented experimental data where repeated measurements share
 every setting. Moving the whole directory changes nothing; renaming a file inside it
 changes that entity's key.
 
-Nothing about identity appears in the YAML unless you write `identity: provenance`.
+These two modes belong to the HDF5 sources (`files`, `batch`, `groups`). Nothing about
+identity appears in their YAML unless you write `identity: provenance`.
+
+**A table's identity is its `id` column(s).** A `table` source has no `identity` key. One
+column, `id: run_number`, hashes that column's value; a list, `id: [system_id, tilt]`,
+hashes the list of values, for a table where no single column is unique. Rows that
+repeat the id values collide like any other entities: the report shows the columns that
+tell them apart, and one of those goes into the list. A table whose rows are equal in
+every column has no identity to find, and has to be de-duplicated.
+
+Why not the row number, which never collides? Because a table gets edited: re-sorting
+it gives every entity a new key, and inserting or removing a row re-keys every row after
+it, so the next registration would add those entities a second time. The id values stay
+with the row wherever it moves. The manifest still records a table's mode as
+`provenance`, so a table's fingerprint is what it was before tables had their own rule.
 
 ## What a rerun can and cannot see
 

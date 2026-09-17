@@ -70,7 +70,8 @@ Then edit:
   dataset, and say what a reader should know before trusting the data.
 - **`source`**: one tag, `files`, `batch`, `groups`, or `table`, with its `directory`
   and where the parameters are. Repeated measurements with identical parameters need a
-  distinguishing parameter or `identity: provenance`
+  distinguishing parameter or `identity: provenance`; a table whose `id` column repeats
+  needs more columns in `id`
   ([identity and keys](explanation/identity.md)).
 - **`artifacts`**: one per array an entity exposes; `optional: true` if some entities
   lack it. Arrays common to *every* entity, like an energy axis, go under `shared`.
@@ -249,7 +250,7 @@ stored, since the catalog is their only home. Your HDF5 files are never touched.
 |---|---|
 | `contract error: ...` | Each line names the field and the fix; the [YAML reference](reference/dataset-yaml.md) has every field |
 | `has no 'key:' yet` | Run `tilewright manifest` first |
-| `N entities share K uids` | Repeated parameter sets: add a distinguishing parameter or `identity: provenance` |
+| `N entities share K uids` | The report shows what differs and a fix for your source: a distinguishing parameter or `identity: provenance`; for a table, another column in `id` |
 | `already holds different data` | Another dataset owns that label; choose a different one |
 | `no manifests for '<KEY>'` | Run `tilewright manifest` on this YAML |
 | Entity or artifact counts are wrong | Check `pattern`, the batch leading axis, or `entity_group` |
