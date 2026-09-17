@@ -187,7 +187,9 @@ class ParamsSpec(BaseModel):
     )
     recursive: bool = Field(
         default=False,
-        description="Descend into subgroups, nesting one level per subgroup.",
+        description="Descend into subgroups, nesting one level per subgroup. It applies to "
+        "every path of the block, so under 'groups' a block with 'recursive: true' may "
+        "hold no path that starts with '..' (see 'params' under 'source.groups').",
     )
     exclude: list[str] = Field(
         default_factory=list,
@@ -296,14 +298,23 @@ class _SourceBase(BaseModel):
         if self.server_base_dir is not None:
             _absolute(self.server_base_dir, "server_base_dir")
         params = getattr(self, "params", None)
-        if params is not None and not isinstance(self, GroupsSource):
-            for name, path in params.paths.items():
-                if climb(path)[0]:
-                    field = f"groups.{name}" if name else "group"
-                    raise ValueError(f"params.{field} {path!r} starts with '..', which "
-                                     f"leaves an entity group, and only a 'groups' source "
-                                     f"has one: here a params path is inside the file, "
-                                     f"from its root")
+        for name, path in params.paths.items() if params is not None else ():
+            if not climb(path)[0]:
+                continue
+            field = f"params.groups.{name}" if name else "params.group"
+            if not isinstance(self, GroupsSource):
+                raise ValueError(f"{field} {path!r} starts with '..', which leaves an "
+                                 f"entity group, and only a 'groups' source has one: here "
+                                 f"a params path is inside the file, from its root")
+            # ADR-0011: from outside the entity group, recursion reaches the groups of
+            # other entities and other sibling sets, whose arrays follow their own names
+            if params.recursive:
+                raise ValueError(f"{field} {path!r} starts with '..', and "
+                                 f"'recursive: true' is for paths inside the entity group "
+                                 f"only: from a group outside it the reader would reach "
+                                 f"values that belong to other entities\n"
+                                 f"Fix: name each group you need under params.groups, "
+                                 f"without recursive")
         return self
 
 
@@ -391,16 +402,17 @@ class GroupsSource(_HDF5SourceBase):
         "(0-dim or of size 1) there are given to every sibling, and any other member, a "
         "1-D dataset of another length included, is skipped without a message, as in "
         "'batch'. Under 'from: attrs' the attributes of such a group are given to every "
-        "sibling. With 'recursive: true' the subgroups of such a group are read too, but "
-        "the reader never goes into a group that 'entity_group' matched or into an entity "
-        "group, whichever sibling set it belongs to and whatever link leads to it: their "
-        "values belong to their own entities, in the order of their own names. So '../..' under '/*' reads what lies "
-        "above the matched groups and nothing inside them, and a group inside a matched "
-        "group is read only through a path that starts at that matched group or inside it "
-        "('..', '../calibration'). The group a path names is read whatever it is, an "
-        "entity group included: under a path to one detector (`../<detector>`), its "
-        "scalars go to every sibling, and each of its 1-D datasets whose length is the "
-        "number of siblings is split among them. 'null' declares none.",
+        "sibling. 'recursive: true' is for paths inside the entity group only: recursion "
+        "inside the entity group and a path that starts with '..' cannot be combined in "
+        "one params block (a contract error), because from outside the entity group the "
+        "reader would reach the groups of other entities, whose arrays follow their own "
+        "names. Name each group you need instead, without 'recursive': "
+        "`{groups: {site: .., calibration: ../calibration, own: /}}`. The group a path "
+        "names is read whatever it is, an entity group included: under a path to one "
+        "detector (`../<detector>`), its scalars go to every sibling, and each of its 1-D "
+        "datasets whose length is the number of siblings is split among them. Recursion "
+        "inside the entity group never goes into an entity group or a group that "
+        "'entity_group' matched, whatever HDF5 link leads to it. 'null' declares none.",
     )
 
     @field_validator("exclude_groups")

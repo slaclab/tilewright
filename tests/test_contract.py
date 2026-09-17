@@ -157,6 +157,15 @@ class TestAccepted:
             cfg, warnings = load_dataset(raw)
             assert warnings == [] and list(cfg.source.body.params.paths.values()) == [path]
 
+    def test_groups_recursion_stays_for_paths_inside_the_entity_group(self):
+        # '..cal' is a group name, not the segment '..'
+        params = {"groups": {"own": "/", "readout": "/readout", "odd": "..cal"},
+                  "recursive": True}
+        raw = files_cfg(source={"groups": {"directory": "/d", "entity_group": "/*",
+                                           "params": params}})
+        cfg, warnings = load_dataset(raw)
+        assert warnings == [] and cfg.source.body.params.recursive
+
     def test_exclude_groups_defaults_to_empty(self):
         raw = files_cfg(source={"groups": {"directory": "/d"}})
         assert load_dataset(raw)[0].source.body.exclude_groups == []
@@ -292,6 +301,8 @@ class TestRejected:
         ({"group": ".."}, "group", ".."),
         ({"group": "/../params"}, "group", "/../params"),
         ({"groups": {"own": "/entry", "cal": "../cal"}}, "groups.cal", "../cal"),
+        # without an entity group, 'recursive' is not what is wrong
+        ({"group": "..", "recursive": True}, "group", ".."),
     ])
     def test_dotdot_needs_an_entity_group(self, tag, params, field, path):
         raw = files_cfg(source={tag: {"directory": "/d", "params": params}})
@@ -299,6 +310,38 @@ class TestRejected:
             f"source.{tag}: params.{field} {path!r} starts with '..', which leaves an entity "
             f"group, and only a 'groups' source has one: here a params path is inside the "
             f"file, from its root"]
+
+    # The YAMLs that recursed from '..' in the tests of rounds 1-3 of #21, and the case of
+    # its third review (a glob segment above the last one): recursion from outside the
+    # entity group read other entities' values, and is refused (ADR-0011).
+    @pytest.mark.parametrize("entity_group, params, field, path", [
+        ("/run", {"groups": {"run": "..", "own": "/"}}, "groups.run", ".."),
+        ("/*", {"groups": {"top": "../..", "own": "/"}}, "groups.top", "../.."),
+        ("/*", {"groups": {"own": "/", "cal": "../calibration", "top": "../.."}},
+         "groups.cal", "../calibration"),
+        ("/*/sites/*", {"groups": {"campaign": "../../..", "own": "/"}},
+         "groups.campaign", "../../.."),
+        ("/*/sites/*", {"groups": {"campaign": "../../../..", "own": "/"}},
+         "groups.campaign", "../../../.."),
+        ("/sites/*", {"groups": {"top": "../../..", "own": "/"}}, "groups.top", "../../.."),
+        ("/run_*/scans", {"groups": {"up": "../../..", "own": "/"}}, "groups.up",
+         "../../.."),
+        (None, {"group": "/.."}, "group", "/.."),
+    ], ids=["dotdot", "above-the-matched-groups", "beside-the-entities", "deeper-glob-run",
+            "deeper-glob-root", "above-a-link", "review-3", "group"])
+    def test_recursive_takes_no_path_that_starts_with_dotdot(self, entity_group, params,
+                                                            field, path):
+        source = {"directory": "/d", "params": {**params, "recursive": True}}
+        if entity_group:
+            source["entity_group"] = entity_group
+        raw = files_cfg(source={"groups": source})
+        assert errors_of(raw) == [
+            f"source.groups: params.{field} {path!r} starts with '..', and 'recursive: "
+            f"true' is for paths inside the entity group only: from a group outside it the "
+            f"reader would reach values that belong to other entities\n"
+            f"Fix: name each group you need under params.groups, without recursive"]
+        del source["params"]["recursive"]
+        assert load_dataset(raw)[1] == []
 
     @pytest.mark.parametrize("tag", ["files", "batch", "groups"])
     @pytest.mark.parametrize("params, field, path", [
