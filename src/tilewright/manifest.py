@@ -194,13 +194,42 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
         b"shared_count": str(len(shared_rows)).encode(),
     }
     for df, path in ((ent_df, ent_path), (art_df, art_path)):
-        table = pa.Table.from_pandas(df, preserve_index=False)
+        table = _arrow_table(df, path.name)
         table = table.replace_schema_metadata({**(table.schema.metadata or {}), **meta})
         pq.write_table(table, path)
 
     print(f"dataset={key} entities={len(ent_df)} artifacts={len(art_rows)} "
           f"shared={len(shared_rows)} -> {output_dir}")
     return str(ent_path), str(art_path)
+
+
+_ARROW_ERRORS = (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError)
+
+
+def _arrow_table(df, name):
+    """``df`` as an Arrow table, with any column Arrow cannot type stored as JSON text.
+
+    One Parquet file holds every artifact type and the shared rows, and every file of a
+    source is read on its own, so one column can hold a list in one row and a scalar in
+    the next (an attribute that is an array for one type only), or two kinds of value
+    (#31). Arrow has no type for such a column: it is written as JSON text, with one note
+    naming it, rather than ending the run after the whole walk. Every other column keeps
+    the type it has today.
+    """
+    try:
+        return pa.Table.from_pandas(df, preserve_index=False)
+    except _ARROW_ERRORS:
+        pass
+    out = df.copy()
+    for column in df.columns:
+        try:
+            pa.Table.from_pandas(df[[column]], preserve_index=False)
+        except _ARROW_ERRORS:
+            out[column] = [None if v is None or (isinstance(v, float) and np.isnan(v))
+                           else json.dumps(v, default=str) for v in df[column]]
+            print(f"  note: column '{column}' of {name} holds values of more than one "
+                  f"kind across rows; stored as JSON text")
+    return pa.Table.from_pandas(out, preserve_index=False)
 
 
 def _find_files(directory, pattern):
@@ -285,13 +314,13 @@ def _check_collisions(ent_rows, key, source):
 # ---------------------------------------------------------------------------
 
 # HDF5's own bookkeeping attributes (dimension-scale machinery). Never carried along.
-_HDF5_INTERNAL_ATTRS = frozenset(
-    {"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST", "DIMENSION_LABELS"}
-)
+# DIMENSION_LABELS is not one of them: it holds the axis names, and is kept (#31).
+_HDF5_INTERNAL_ATTRS = frozenset({"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST"})
 # Artifact-manifest columns the broker writes; a dataset attribute of the same name would
 # overwrite the column, so it is dropped with one warning per (path, attribute).
 _ARTIFACT_RESERVED = ARTIFACT_STANDARD_COLS | {"file_size", "file_mtime"}
 _reserved_warned = set()
+_unstorable_noted = set()
 
 
 def _to_python(val):
@@ -307,16 +336,40 @@ def _to_python(val):
     return val
 
 
+def _as_label(val):
+    """A ``_to_python`` value as a label: ``(value, problem)``, ``problem`` None when it
+    is stored. A label holds what a ``from: attrs`` parameter holds — a str, int, float,
+    bool or None, or a list of them, which is what an array attribute's ``tolist()``
+    gives (#31) — and nothing HDF5 alone can resolve, such as an object or region
+    reference, whose target no catalog can follow."""
+    if isinstance(val, bytes):                      # an '|S' array's elements
+        return val.decode("utf-8", errors="replace"), None
+    if isinstance(val, (h5py.Reference, h5py.RegionReference)):
+        return None, "HDF5 object references cannot be stored"
+    if val is None or isinstance(val, (str, bool, int, float)):
+        return val, None
+    if isinstance(val, (list, tuple)):
+        kept = []
+        for item in val:
+            value, problem = _as_label(item)
+            if problem:
+                return None, problem
+            kept.append(value)
+        return kept, None
+    return None, f"a value of type {type(val).__name__} cannot be stored"
+
+
 def _attrs(obj, label_of=None, skip=()):
     """HDF5 attributes of ``obj`` as native values, sorted by name.
 
     ``label_of`` None: every attribute (the ``from: attrs`` parameters). ``label_of`` a
-    field name: scalar attributes as ``<field>_<attr>`` labels of that field. ``label_of``
+    field name: its attributes as ``<field>_<attr>`` labels of that field. ``label_of``
     ``""``: bare names, for an artifact's own node metadata (manifest column names are
     dropped with a warning). Labels are stored beside a value, never hashed into the uid.
-    An empty attribute (``h5py.Empty``) is None: kept as a null parameter, and left out of
-    labels, which carry only str, int and float. Names in ``skip`` (``params.exclude``)
-    are never read.
+    They carry what a ``from: attrs`` parameter carries (``_as_label``); one that cannot
+    be stored is left out with one note per (object, attribute). An empty attribute
+    (``h5py.Empty``) is None: kept as a null parameter, and left out of labels. Names in
+    ``skip`` (``params.exclude``) are never read.
     """
     out = OrderedDict()
     for name in sorted(obj.attrs.keys()):
@@ -325,15 +378,23 @@ def _attrs(obj, label_of=None, skip=()):
         val = _to_python(obj.attrs[name])
         if label_of is None:
             out[name] = val
-        elif name in _HDF5_INTERNAL_ATTRS:
             continue
-        elif label_of == "" and name in _ARTIFACT_RESERVED:
+        if name in _HDF5_INTERNAL_ATTRS:
+            continue
+        if label_of == "" and name in _ARTIFACT_RESERVED:
             if (obj.name, name) not in _reserved_warned:
                 _reserved_warned.add((obj.name, name))
                 print(f"  WARNING: {obj.name}@{name} is not carried as array metadata: "
                       f"'{name}' is a manifest column. Rename the attribute if you need it.")
-        elif isinstance(val, (str, int, float)) and not isinstance(val, bool):
-            out[f"{label_of}_{name}" if label_of else name] = val
+            continue
+        value, problem = _as_label(val)
+        if problem:
+            if (obj.name, name) not in _unstorable_noted:
+                _unstorable_noted.add((obj.name, name))
+                print(f"  note: {obj.name}@{name} is not carried as "
+                      f"{'array metadata' if label_of == '' else 'a label'}: {problem}")
+        elif value is not None:
+            out[f"{label_of}_{name}" if label_of else name] = value
     return out
 
 

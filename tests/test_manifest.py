@@ -2114,3 +2114,121 @@ class TestNonScalarParameters:
         assert "Fix: narrow 'pattern'" in message
         assert main([str(tmp_path / "ds.yml")]) == 1
         assert "Traceback" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+
+class TestArrayAttributes:
+    """#31: a label and an artifact's node metadata carry what a `from: attrs` parameter
+    carries, an array attribute's list included, and say when they carry nothing."""
+
+    @staticmethod
+    def dataset_with_attrs(tmp_path, attrs):
+        """A one-file `files` dataset whose '/signal' artifact and '/temperature' field
+        both carry ``attrs``."""
+        d = tmp_path / "runs"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            t = f.create_dataset("temperature", data=300.0)
+            s = f.create_dataset("signal", data=np.zeros((4, 2)))
+            for name, value in attrs(f).items():
+                t.attrs[name] = value
+                s.attrs[name] = value
+        return {"label": "Attrs Test", "metadata": dict(META),
+                "source": {"files": {"directory": str(d), "pattern": "*.h5"}},
+                "artifacts": [{"type": "signal", "dataset": "/signal"}]}
+
+    def test_an_array_attribute_is_kept_as_a_list(self, tmp_path):
+        cfg = self.dataset_with_attrs(tmp_path, lambda f: {
+            "axes": np.array(["energy", "time"], dtype=h5py.string_dtype()),
+            "edges": np.array([[0.5, 1.5], [2.5, 3.5]]),
+            "masked": np.array([True, False]),
+            "live": True,
+            "units": "K",
+            "DIMENSION_LABELS": np.array(["t", "x"], dtype=h5py.string_dtype()),
+        })
+        ent, art = run(tmp_path, cfg)
+        art_row = art[art["uid"].notna()].iloc[0]
+        for row, prefix in ((ent.iloc[0], "temperature_"), (art_row, "")):
+            assert list(row[f"{prefix}axes"]) == ["energy", "time"]
+            assert [list(e) for e in row[f"{prefix}edges"]] == [[0.5, 1.5], [2.5, 3.5]]
+            assert list(row[f"{prefix}masked"]) == [True, False]
+            assert row[f"{prefix}live"] is np.True_ or row[f"{prefix}live"] is True
+            assert row[f"{prefix}units"] == "K"
+            # DIMENSION_LABELS holds the axis names, not HDF5's own bookkeeping
+            assert list(row[f"{prefix}DIMENSION_LABELS"]) == ["t", "x"]
+
+    def test_hdf5_bookkeeping_attributes_are_still_left_out(self, tmp_path):
+        cfg = self.dataset_with_attrs(tmp_path, lambda f: {
+            "CLASS": "DIMENSION_SCALE", "NAME": "energy", "units": "K"})
+        ent, art = run(tmp_path, cfg)
+        assert {"CLASS", "NAME"} & set(ent.columns) == set()
+        assert {"CLASS", "NAME"} & set(art.columns) == set()
+        assert art[art["uid"].notna()].iloc[0]["units"] == "K"
+
+    def test_a_reference_attribute_is_noted_and_left_out(self, tmp_path, capsys):
+        cfg = self.dataset_with_attrs(tmp_path, lambda f: {
+            "target": f["/signal"].ref if "signal" in f else h5py.Empty("f8"),
+            "units": "K"})
+        capsys.readouterr()
+        ent, art = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert "target" not in ent.columns and "target" not in art.columns
+        assert ("note: /signal@target is not carried as array metadata: HDF5 object "
+                "references cannot be stored") in out
+        assert ("note: /temperature@target is not carried as a label: HDF5 object "
+                "references cannot be stored") in out
+        assert art[art["uid"].notna()].iloc[0]["units"] == "K"
+
+    def test_a_column_of_more_than_one_kind_is_stored_as_json_text(self, tmp_path, capsys):
+        """artifacts.parquet holds every type in one table, so one attribute name can be
+        a list for one type and a string for another. Arrow has no type for that column;
+        it is stored as JSON text, and the run finishes."""
+        d = tmp_path / "runs"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f.create_dataset("signal", data=np.zeros(4)).attrs["span"] = np.array([0.5, 1.5])
+            f.create_dataset("noise", data=np.zeros(4)).attrs["span"] = "half"
+        cfg = {"label": "Mixed Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "identity": "provenance", "params": None}},
+               "artifacts": [{"type": "signal", "dataset": "/signal"},
+                             {"type": "noise", "dataset": "/noise"}]}
+        capsys.readouterr()
+        _, art = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert ("note: column 'span' of artifacts.parquet holds values of more than one "
+                "kind across rows; stored as JSON text") in out
+        assert sorted(art.set_index("type")["span"]) == ['"half"', "[0.5, 1.5]"]
+
+    def test_from_attrs_parameters_and_uids_are_untouched(self, tmp_path):
+        """The `from: attrs` parameters keep every value they had, and so their uids: only
+        labels and artifact metadata changed."""
+        cfg = files_dataset(tmp_path, attrs=True)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.attrs["bounds"] = np.array([0.5, 1.5])
+        ent, _ = run(tmp_path, cfg)
+        row = ent.sort_values("run").iloc[0]
+        assert list(row["bounds"]) == [0.5, 1.5] and row["temperature"] == 300.0
+        assert row["uid"] == "40ed9463f21966f0"   # what main gave these attributes
+
+    def test_a_parameter_that_changes_type_between_files_no_longer_ends_the_run(
+            self, tmp_path, capsys):
+        """The same guard: a parameter that is an int in one file and a string in another
+        ended the run with pyarrow's own error after the whole walk. The column is stored
+        as JSON text instead, with one note, so the author sees which parameter it is."""
+        d = tmp_path / "runs"
+        d.mkdir()
+        for i, gain in enumerate([1, "high"]):
+            with h5py.File(d / f"run_{i}.h5", "w") as f:
+                f["gain"] = gain
+                f["signal"] = np.zeros(4)
+        cfg = {"label": "Drift Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5"}},
+               "artifacts": [{"type": "signal", "dataset": "/signal"}]}
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        assert ("note: column 'gain' of entities.parquet holds values of more than one "
+                "kind across rows; stored as JSON text") in capsys.readouterr().out
+        assert sorted(ent["gain"]) == ['"high"', "1"]
