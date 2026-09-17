@@ -185,12 +185,14 @@ class ParamsSpec(BaseModel):
         "length N is one value per entity, and so it is under 'groups' in a group reached "
         "through '..', with N the number of sibling entity groups. Under 'files' and "
         "'groups' every other dataset, a (7,) array or a (3, 4) matrix say, is skipped "
-        "without a message, attributes and all. Each file is read on its own, so two more "
-        "cases pass without a message: a dataset of size 1 in some files and an array in "
-        "others is a parameter only where it has size 1, and a group that some files lack "
-        "(one of 'groups', say) gives their entities none of its parameters. Those "
-        "entities hold null in the columns they miss. 'attrs': the group's HDF5 "
-        "attributes are the parameters, and a group that a file lacks is an error.",
+        "without a message, attributes and all. Every container is read on its own, each "
+        "file and under 'groups' each entity group, so two more cases pass without a "
+        "message: a dataset of size 1 in some of them and a bigger one in others is a "
+        "parameter only where one of the rules above makes it one, and a group that some "
+        "files or entity groups lack (one of 'groups', say) gives their entities none of "
+        "its parameters. Those entities hold null in the columns they miss. 'attrs': the "
+        "group's HDF5 attributes are the parameters, and a group that a file or an entity "
+        "group lacks is an error naming it.",
     )
     recursive: bool = Field(
         default=False,

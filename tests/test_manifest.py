@@ -1986,13 +1986,14 @@ class TestNonScalarParameters:
 
     def test_the_from_description_says_what_differs_between_files(self):
         doc = self.from_doc()
-        assert ("Each file is read on its own, so two more cases pass without a message: a "
-                "dataset of size 1 in some files and an array in others is a parameter only "
-                "where it has size 1, and a group that some files lack (one of 'groups', "
-                "say) gives their entities none of its parameters. Those entities hold null "
-                "in the columns they miss.") in doc
+        assert ("Every container is read on its own, each file and under 'groups' each "
+                "entity group, so two more cases pass without a message: a dataset of size 1 "
+                "in some of them and a bigger one in others is a parameter only where one of "
+                "the rules above makes it one, and a group that some files or entity groups "
+                "lack (one of 'groups', say) gives their entities none of its parameters. "
+                "Those entities hold null in the columns they miss.") in doc
         assert "'attrs': the group's HDF5 attributes are the parameters, and a group that " \
-               "a file lacks is an error." in doc
+               "a file or an entity group lacks is an error naming it." in doc
 
     def test_files_skips_a_non_scalar_dataset_without_a_message(self, tmp_path, capsys):
         cfg = files_dataset(tmp_path)
