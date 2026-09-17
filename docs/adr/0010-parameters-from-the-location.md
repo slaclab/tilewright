@@ -110,6 +110,14 @@ queryable as a number without a type table in the YAML.
   manifest. No such name was seen; the rule was kept simple rather than typed by size.
 - Under `params`, renaming a file changes a location parameter and so the entity's key,
   as `provenance` does. Moving the whole directory changes nothing.
+- A group path or a batch row number alone can repeat from file to file: every batch
+  file's rows start again at 0. With several files and nothing else that differs, the
+  expression has to capture part of the file path too, or the rows collide; the field
+  description says so and shows `'part_(?P<part>\d+)\.h5:(?P<shot>\d+)$'`.
+- The examples on the pages authors read (the field description, the explanation page,
+  the onboarding skill) are invented. The dataset expressions in the table above stay
+  here: the pages that onboard a dataset must not hand its answer to the person
+  onboarding it.
 - `tests/test_contract.py::test_concept_budget` lists `location` among the keys of
   `params`.
 - The reference page, the onboarding skill's Step 2, `ONBOARDING.md`,
