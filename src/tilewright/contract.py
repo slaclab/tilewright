@@ -146,7 +146,10 @@ class ParamsSpec(BaseModel):
     group: str | None = Field(
         default=None,
         description="One HDF5 group whose fields become flat metadata keys. '/' is the "
-        "container itself. Default '/' when neither 'group' nor 'groups' is given. With "
+        "container itself: the file for 'files' and 'batch', and for 'groups' the entity "
+        "group, not the file root, since every 'groups' path is relative to the entity "
+        "group ('params' and '/params' name the same group). Default '/' when neither "
+        "'group' nor 'groups' is given. With "
         "'from: attrs' it may also name a dataset: that dataset's attributes are then the "
         "parameters. An attribute name with a dot in it ('run.number') is a dotted key, "
         "nested on registration like the keys 'groups' makes (metadata.run.number).",
