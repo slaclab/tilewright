@@ -16,7 +16,8 @@ import pytest
 from ruamel.yaml import YAML
 
 from tilewright.contract import ContractError, ParamsSpec, Source
-from tilewright.manifest import _check_collisions, _params_uid, generate_manifests, main, manifest_dir
+from tilewright.manifest import (_check_collisions, _outside, _params_uid, generate_manifests,
+                                 main, manifest_dir)
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
 
@@ -1258,6 +1259,158 @@ class TestRecursionStaysInTheSubtree:
         assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
         assert out.count("sim.h5:/outside, outside the group being read (/params); "
                          "skipped") == 2
+
+    def test_a_link_in_the_middle_of_the_target_path_is_named_and_skipped(
+            self, tmp_path, capsys):
+        """A target path is not evidence that a member is inside: any component of it can
+        be a link. '/entry/sub/hop -> /entry/out/gain' starts with '/entry', but 'out' is
+        itself a link to '/elsewhere', so resolving the target's parent in one step lands
+        outside without the link that led there ever being tested. Dataset and subgroup
+        alike, and the group skipped under one name must not be read under another."""
+        d = tmp_path / "through"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/temperature"] = 300.0
+            f["elsewhere/gain"] = 99.0
+            f["elsewhere/box/deep"] = 88.0
+            f["entry/out"] = h5py.SoftLink("/elsewhere")            # direct member
+            f["entry/sub/own"] = 1.0
+            f["entry/sub/hop"] = h5py.SoftLink("/entry/out/gain")   # a dataset, through it
+            f["entry/sub/hopg"] = h5py.SoftLink("/entry/out/box")   # a group, through it
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Through", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "temperature", "sub.own"}
+        for name in ("out", "sub/hop", "sub/hopg"):
+            assert f"run_0.h5:/entry/{name} links to" in out
+        assert out.count("run_0.h5:/elsewhere, outside the group being read (/entry); "
+                         "skipped") == 3
+
+    def test_a_link_in_the_middle_is_skipped_under_a_globbed_entity_group(
+            self, tmp_path, capsys):
+        """The same shape under 'groups' with a globbed 'entity_group', where the path
+        runs through a link into a *sibling entity's* own params group: 'det1' took
+        'det2''s value, under a key of its own, with no message."""
+        d = tmp_path / "sites"
+        d.mkdir()
+        with h5py.File(d / "site_a.h5", "w") as f:
+            for name, own in (("det1", 1.0), ("det2", 7.0)):
+                g = f.create_group(f"siteA/{name}")
+                g["readout/own"] = own
+                g["spectrum"] = np.zeros(4)
+            f["siteA/det1/readout/out"] = h5py.SoftLink("/siteA/det2/readout")
+            f["siteA/det1/readout/sub/hop"] = h5py.SoftLink("/siteA/det1/readout/out/own")
+        cfg = {"label": "Sites", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "site_*.h5",
+                                     "entity_group": "/*",
+                                     "params": {"group": "readout", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "source_group", "own"}
+        assert sorted(ent["own"]) == [1.0, 7.0]
+        assert out.count("site_a.h5:/siteA/det2/readout, outside the group being read "
+                         "(/siteA/det1/readout); skipped") == 2
+
+    def test_a_link_in_the_middle_of_the_target_path_is_skipped_under_batch(
+            self, tmp_path, capsys):
+        """And under 'batch', where it reached every row of the file."""
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"]["recursive"] = True
+        with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
+            f["outside/v"] = 9.0
+            f["params/out"] = h5py.SoftLink("/outside")
+            f["params/sub/hop"] = h5py.SoftLink("/params/out/v")
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
+        assert out.count("sim.h5:/outside, outside the group being read (/params); "
+                         "skipped") == 2
+
+    def test_an_external_link_in_the_middle_of_the_target_path_is_named_and_skipped(
+            self, tmp_path, capsys):
+        """The cross-file half of the same case: '/entry/ext' is an external link, so
+        '/entry/sub/thru -> /entry/ext/inner' names a path that leaves the file although
+        its text does not. The object HDF5 resolves it to lives in a file the 'pattern'
+        does not match, which the file of the resolved object settles whatever the path
+        text says."""
+        d = tmp_path / "vault"
+        d.mkdir()
+        with h5py.File(d / "other.h5", "w") as o:     # 'pattern' does not match it
+            o["vault/inner"] = 55.0
+            o["vault/box/deep"] = 66.0
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/temperature"] = 300.0
+            f["entry/sub/own"] = 1.0
+            f["entry/ext"] = h5py.ExternalLink("other.h5", "/vault")
+            f["entry/sub/thru"] = h5py.SoftLink("/entry/ext/inner")
+            f["entry/sub/thrug"] = h5py.SoftLink("/entry/ext/box")
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Vault", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "run_*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "temperature", "sub.own"}
+        for name in ("ext", "sub/thru", "sub/thrug"):
+            assert f"run_0.h5:/entry/{name} links to" in out
+        assert out.count("other.h5:/vault, outside the group being read (/entry); "
+                         "skipped") == 3
+        assert "other.h5:/entry" not in out       # never the target file with a local path
+
+    def test_a_deep_path_inside_the_subtree_is_still_read(self, tmp_path, capsys):
+        """The guard on the other side: walking the target component by component must not
+        turn a legitimate path inside the subtree into a skip, however deep it is and
+        however many links inside the subtree it goes through."""
+        d = tmp_path / "deep"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/temperature"] = 300.0
+            f["entry/a/b/c/d/e/deep"] = 5.0
+            f["entry/mid"] = h5py.SoftLink("/entry/a/b")                  # inside
+            f["entry/sub/far"] = h5py.SoftLink("/entry/mid/c/d/e/deep")   # through it
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Deep", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert ent.loc[0, "sub.far"] == 5.0 and ent.loc[0, "a.b.c.d.e.deep"] == 5.0
+        assert ent.loc[0, "mid.c.d.e.deep"] == 5.0
+        assert "outside the group being read" not in out
+
+    def test_the_file_of_the_resolved_object_settles_it_whatever_the_path_says(
+            self, tmp_path):
+        """The second guard, on its own. It stands behind the walk -- an external link is
+        the only way to an object in another file, and the walk names that link first and
+        more precisely -- so it is tested here directly: an object in another file is
+        outside however its own name reads, and its file is what is reported."""
+        d = tmp_path / "guard"
+        d.mkdir()
+        with h5py.File(d / "other.h5", "w") as o:
+            o["vault/inner"] = 55.0
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/own"] = 1.0
+        with h5py.File(d / "run_0.h5", "r") as f, h5py.File(d / "other.h5", "r") as o:
+            g = f["/entry"]
+            assert _outside(g, "own", g["own"], (g, "/entry")) is None
+            assert _outside(g, "own", o["vault/inner"], (g, "/entry")) == str(d / "other.h5")
 
     def test_a_linked_dataset_below_the_group_is_named_and_skipped(self, tmp_path, capsys):
         """Recursion holds for datasets as well as subgroups. Below the group the author

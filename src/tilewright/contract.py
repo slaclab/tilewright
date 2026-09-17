@@ -201,20 +201,25 @@ class ParamsSpec(BaseModel):
         "without 'recursive', so an HDF5 link written there is followed wherever it leads, "
         "and the descent below it follows only what lies inside that group -- a subgroup "
         "or a dataset an HDF5 link leads out of it (a soft link elsewhere in the file, an "
-        "external link, which resolves in another file, or a chain of links ending "
-        "outside) is named in a warning and skipped. So a member of the group itself is "
-        "the author's own choice, link and all: write the link out of the group if what it "
-        "names should not be read. Below that group no other entity's values, and nothing "
-        "from another file, is read through a link. A group named under 'group' or "
-        "'groups' is likewise read wherever its path leads. It applies to every path of "
-        "the block, so under 'groups' a block with 'recursive: true' may hold no path that "
-        "starts with '..' (see 'params' under 'source.groups').",
+        "external link, which resolves in another file, a chain of links ending outside, "
+        "or a link whose target path is spelled inside the group but runs through a link "
+        "that is not) is named in a warning and skipped. So a member of the group itself "
+        "is the author's own choice, link and all: write the link out of the group if what "
+        "it names should not be read. Below that group no other entity's values, and "
+        "nothing from another file, is read through a link, whatever its target path "
+        "spells: the object a name resolves to decides, not the text. A group named under "
+        "'group' or 'groups' is likewise read wherever its path leads. It applies to every "
+        "path of the block, so under 'groups' a block with 'recursive: true' may hold no "
+        "path that starts with '..' (see 'params' under 'source.groups').",
     )
     exclude: list[str] = Field(
         default_factory=list,
         description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. "
         "Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: "
-        "`/operator_note` skips the root's attribute 'operator_note'.",
+        "`/operator_note` skips the root's attribute 'operator_note'. It skips paths, not "
+        "values: under 'recursive', an HDF5 link elsewhere in the group whose target is an "
+        "excluded path is inside the group like any other member, so what it names is read "
+        "again under the link's own key. Name the link in 'exclude' as well.",
     )
     location: str | None = Field(
         default=None,
@@ -431,7 +436,8 @@ class GroupsSource(_HDF5SourceBase):
         "detector (`../<detector>`), its scalars go to every sibling, and each of its 1-D "
         "datasets whose length is the number of siblings is split among them. Recursion "
         "inside the entity group stays inside it (see 'recursive'), so no sibling entity "
-        "group, and no group that 'entity_group' matched, is read through a link; a second "
+        "group, and no group that 'entity_group' matched, is read through a link, whatever "
+        "the text of the link's target path spells; a second "
         "HDF5 name (a hard link) for a group *inside* one of them names a member of this "
         "entity group like any other, and is read. 'null' declares none.",
     )
