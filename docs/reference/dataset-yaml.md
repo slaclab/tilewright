@@ -68,7 +68,7 @@ One HDF5 file per entity.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
+| `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the entity files under 'directory'. |
 | `params` | mapping or `null` | no |  | Where the parameters live in each file; default: 0-dim datasets at the root. 'null' declares that entities have no parameters (identity becomes provenance). |
 
@@ -80,7 +80,7 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
+| `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the batch files under 'directory'. |
 | `params` | mapping | no |  | Group holding one 1-D dataset of length N per parameter (0-dim datasets are broadcast to every entity in the file). |
 
@@ -92,7 +92,7 @@ One HDF5 group per entity inside each file.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
+| `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the files under 'directory'. |
 | `entity_group` | str | no |  | Group whose subgroups are the entities ('/samples'). Default: the file's top-level groups. |
 | `params` | mapping or `null` | no |  | Where the parameters live, relative to each entity group; default: the entity group's own 0-dim datasets. 'null' declares none. |
@@ -105,7 +105,7 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
+| `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `path` | str | **yes** |  | Parquet or CSV file, relative to 'directory'. Every column becomes entity metadata. |
 | `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity. |
 | `locator` | mapping | no |  | Extra metadata rendered per row from '{column}' templates, e.g. {globus_url: 'https://.../{filename}'}. |
@@ -120,7 +120,7 @@ labels, stored beside the value and never part of the identity.
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `group` | str | no |  | One HDF5 group whose fields become flat metadata keys. '/' is the container itself. Default '/' when neither 'group' nor 'groups' is given. |
-| `groups` | dict[str, str] | None | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
+| `groups` | mapping | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
 | `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': 0-dim datasets in the group are parameters (in 'batch', a 1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 attributes are the parameters. |
 | `recursive` | bool | no | `False` | Descend into subgroups, nesting one level per subgroup. |
 | `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. |
@@ -132,11 +132,11 @@ queryable as `Key("instrument.Ei") > 50`.
 
 How an entity's uid is computed (``source.<tag>.identity``).
 
-    - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
-      entity across re-registration and file moves; two entities with identical
-      parameters are a contract error (``tilewright manifest`` names them).
-    - ``provenance`` — sha256 of where the entity came from (file path relative to the
-      directory, plus row or group). Never collides; forced when ``params: null``.
+- ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
+  entity across re-registration and file moves; two entities with identical
+  parameters are a contract error (``tilewright manifest`` names them).
+- ``provenance`` — sha256 of where the entity came from (file path relative to the
+  directory, plus row or group). Never collides; forced when ``params: null``.
 
 ## `artifacts`
 

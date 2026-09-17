@@ -10,6 +10,7 @@ result; the docs workflow runs it and fails if the committed page is stale.
 """
 
 import argparse
+import inspect
 import sys
 from pathlib import Path
 
@@ -22,8 +23,9 @@ OUT = Path(__file__).resolve().parent.parent / "docs" / "reference" / "dataset-y
 
 def _type(annotation):
     text = str(annotation).replace("typing.", "").replace("tilewright.contract.", "")
-    text = text.replace("<class '", "").replace("'>", "")
+    text = text.replace("<class '", "").replace("<enum '", "").replace("'>", "")
     return {"str | None": "str", "list[str]": "list of str", "dict[str, str]": "mapping",
+            "dict[str, str] | None": "mapping",
             "Literal['datasets', 'attrs']": "`datasets` \\| `attrs`",
             "list[ArtifactSpec]": "list", "list[SharedAxisSpec]": "list",
             "ParamsSpec | None": "mapping or `null`", "ParamsSpec": "mapping",
@@ -52,7 +54,7 @@ def table(model, required_note=True):
     for name, field in model.model_fields.items():
         key = field.alias or name
         req = "**yes**" if field.is_required() else "no"
-        desc = (field.description or "").replace("\n", " ").replace("|", "\\|")
+        desc = (field.description or "").replace("\n", " ").replace("|", "\\|").replace("*", "\\*")
         lines.append(f"| `{key}` | {_type(field.annotation)} | {req} | {_default(field)} | {desc} |")
     return "\n".join(lines)
 
@@ -121,7 +123,7 @@ queryable as `Key("instrument.Ei") > 50`.
 
 ### `identity`
 
-{contract.Identity.__doc__.strip()}
+{inspect.cleandoc(contract.Identity.__doc__)}
 
 ## `artifacts`
 
