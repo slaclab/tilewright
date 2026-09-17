@@ -25,7 +25,7 @@ def _type(annotation):
     text = str(annotation).replace("typing.", "").replace("tilewright.contract.", "")
     text = text.replace("<class '", "").replace("<enum '", "").replace("'>", "")
     return {"str | None": "str", "list[str]": "list of str", "dict[str, str]": "mapping",
-            "dict[str, str] | None": "mapping",
+            "str | list[str]": "str or list of str", "dict[str, str] | None": "mapping",
             "Literal['datasets', 'attrs']": "`datasets` \\| `attrs`",
             "list[ArtifactSpec]": "list", "list[SharedAxisSpec]": "list",
             "ParamsSpec | None": "mapping or `null`", "ParamsSpec": "mapping",
@@ -104,7 +104,8 @@ to its id, an unknown value warns and registers as written
 ## `source`
 
 Exactly one of the four tags. Each owns only the keys below, so an illegal combination
-cannot be written ([sources](../explanation/sources.md)).
+cannot be written ([sources](../explanation/sources.md)). `identity` and `pattern` belong
+to the three HDF5 tags; a `table` has neither.
 
 """]
     for tag, model in tag_models.items():

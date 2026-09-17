@@ -93,6 +93,13 @@ class TestAccepted:
         assert warnings == [] and cfg.source.body.params is None
         assert cfg.source.identity == Identity.provenance
 
+    def test_table_id_is_one_column_or_several(self):
+        for id_ in ("system_id", ["system_id", "tilt"]):
+            raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": id_}},
+                            artifacts=[])
+            cfg, warnings = load_dataset(raw)
+            assert warnings == [] and cfg.source.body.id == id_
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -143,6 +150,25 @@ class TestRejected:
         raw = files_cfg()
         raw["source"]["files"]["params"] = {"group": "/p", "groups": {"a": "/a"}}
         assert any("mutually exclusive" in e for e in errors_of(raw))
+
+    def test_table_has_no_identity_or_pattern(self):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": "run",
+                                          "identity": "provenance", "pattern": "*.csv"}},
+                        artifacts=[])
+        assert errors_of(raw) == ["source.table.identity is not a contract key",
+                                  "source.table.pattern is not a contract key"]
+
+    @pytest.mark.parametrize("id_", ["", [], ["run", ""], ["run", 3], 3, None])
+    def test_table_id_must_name_columns(self, id_):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": id_}},
+                        artifacts=[])
+        assert errors_of(raw) == ["source.table.id: must be a column name or a list of "
+                                  "column names, none of them empty"]
+
+    def test_table_id_names_a_column_once(self):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv",
+                                          "id": ["run", "run"]}}, artifacts=[])
+        assert errors_of(raw) == ["source.table.id: names a column more than once"]
 
     def test_drifted_key(self):
         errs = errors_of(files_cfg(key="OLD_NAME"))
@@ -293,11 +319,11 @@ def test_concept_budget():
     assert SOURCE_TAGS == ("files", "batch", "groups", "table")
     tags = {tag: next(a for a in get_args(Source.model_fields[tag].annotation)
                       if a is not type(None)) for tag in SOURCE_TAGS}
-    common = {"directory", "server_base_dir", "identity"}
+    common, hdf5 = {"directory", "server_base_dir"}, {"identity", "pattern"}
     assert {tag: _keys(model) for tag, model in tags.items()} == {
-        "files": common | {"pattern", "params"},
-        "batch": common | {"pattern", "params"},
-        "groups": common | {"pattern", "entity_group", "params"},
+        "files": common | hdf5 | {"params"},
+        "batch": common | hdf5 | {"params"},
+        "groups": common | hdf5 | {"entity_group", "params"},
         "table": common | {"path", "id", "locator"},
     }
     assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude"}

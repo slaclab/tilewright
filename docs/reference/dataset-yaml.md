@@ -58,7 +58,8 @@ to its id, an unknown value warns and registers as written
 ## `source`
 
 Exactly one of the four tags. Each owns only the keys below, so an illegal combination
-cannot be written ([sources](../explanation/sources.md)).
+cannot be written ([sources](../explanation/sources.md)). `identity` and `pattern` belong
+to the three HDF5 tags; a `table` has neither.
 
 ### `source.files`
 
@@ -69,7 +70,7 @@ One HDF5 file per entity.
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
-| `pattern` | str | no | `**/*.h5` | Glob for the entity files under 'directory'. |
+| `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
 | `params` | mapping or `null` | no |  | Where the parameters live in each file; default: 0-dim datasets at the root. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.batch`
@@ -81,7 +82,7 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
-| `pattern` | str | no | `**/*.h5` | Glob for the batch files under 'directory'. |
+| `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
 | `params` | mapping or `null` | no |  | Where the parameters live in each file; default: the root. N is the file's leading axis (that of the first artifact). Only 1-D datasets of length N are per-entity values, one per row; 0-dim datasets are broadcast to every entity in the file; any other member, (N, 1) included, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.groups`
@@ -93,7 +94,7 @@ One HDF5 group per entity inside each file.
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
-| `pattern` | str | no | `**/*.h5` | Glob for the files under 'directory'. |
+| `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
 | `entity_group` | str | no |  | Group whose subgroups are the entities ('/samples'). Default: the file's top-level groups. |
 | `params` | mapping or `null` | no |  | Where the parameters live, relative to each entity group; default: the entity group's own 0-dim datasets. 'null' declares none. |
 
@@ -105,9 +106,8 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `path` | str | **yes** |  | Parquet or CSV file, relative to 'directory'. Every column becomes entity metadata. |
-| `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity. |
+| `id` | str or list of str | **yes** |  | The entity's identity: one column, or a list of columns when no single column is unique ('id: [system_id, tilt]'); together their values must be unique across rows. Changing it re-keys every entity. |
 | `locator` | mapping | no |  | Extra metadata rendered per row from '{column}' templates, e.g. {globus_url: 'https://.../{filename}'}. |
 
 ### `params`
@@ -130,13 +130,20 @@ queryable as `Key("instrument.Ei") > 50`.
 
 ### `identity`
 
-How an entity's uid is computed (``source.<tag>.identity``).
+How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+``batch`` and ``groups``).
 
 - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
   entity across re-registration and file moves; two entities with identical
   parameters are a contract error (``tilewright manifest`` names them).
 - ``provenance`` — sha256 of where the entity came from (file path relative to the
-  directory, plus row or group). Never collides; forced when ``params: null``.
+  directory, plus row or group). Never collides unless ``pattern`` or
+  ``entity_group`` matches the same thing twice; forced when ``params: null``.
+
+A ``table`` has no ``identity`` key: its identity is its ``id`` column(s), the sha256
+of their values. Rows that repeat those values are a contract error; list a further
+column in ``id``, or de-duplicate the table. The manifest records a table's mode as
+``provenance``.
 
 ## `artifacts`
 
