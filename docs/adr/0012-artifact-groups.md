@@ -59,13 +59,16 @@ records the entry. `register`, the adapter and `tilewright.client` are unchanged
 
 **The fingerprint hashes the spec.** When at least one entry has the group form,
 `source_fingerprint` adds the fact `artifact_groups`: the sorted list of each such
-entry's `[group, members]`. An entry that names a `dataset` is not hashed, as before
-(ADR-0007 never hashed artifacts), so no YAML without a group entry changes: every
-golden fingerprint of the earlier ADRs still holds, and a test pins that a `dataset`
-entry added to each example leaves its value alone. `optional` and the `type` template
-are not hashed either; the order of the entries is not a fact. Tests pin three
-fingerprints with a group entry (with and without `members`, under `files` and
-`groups`) and that `optional`, the template and the order leave them alone.
+entry's `[group, members]`, the group with any `/` at either end removed, because the
+manifest reads `frames`, `/frames` and `/frames/` as the same group and an author who
+edits one into another has not changed the data. An entry that names a `dataset` is not
+hashed, as before (ADR-0007 never hashed artifacts), so no YAML without a group entry
+changes: every golden fingerprint of the earlier ADRs still holds, and a test pins that a
+`dataset` entry added to each example leaves its value alone. `optional` and the `type`
+template are not hashed either; the order of the entries is not a fact. Tests pin three
+fingerprints with a group entry (with and without `members`, under `files` and `groups`)
+and that `optional`, the template, the order and the slashes around `group` leave them
+alone.
 
 **The characters of a type (#23).** A `type`, of an artifact or of a shared axis, is a
 node key, and the Tiled client puts a key into a URL path as written. The contract now

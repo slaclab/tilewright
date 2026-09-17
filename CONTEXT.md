@@ -17,8 +17,8 @@ selects. _Avoid_: sample, record, row.
 
 **Artifact**: an array child of an entity (a spectrum, an image). The thing arrays load
 from. An `artifacts` entry names one (`dataset`), or one per dataset in a group
-(`group`), which `tilewright manifest` expands; a group entry's `group` and `members` are
-part of the fingerprint (ADR-0012). _Avoid_: observable (the physics word), output.
+(`group`), which `tilewright manifest` expands (ADR-0012). _Avoid_: observable (the
+physics word), output.
 
 **Shared axis**: an array identical for every entity, registered once as an array child of
 the dataset and announced as `shared_dataset_<type>`.
@@ -49,8 +49,9 @@ of its `id` column(s); it has no `identity` key. Duplicate identities fail the m
 
 **Fingerprint**: a hash of which data a YAML describes (tag, server-visible directory,
 pattern, entity group, params, identity, a groups source's `exclude_groups` when it names
-any, and a table's `id` when it is a list), stamped on the container; `register` refuses a
-different fingerprint under the same key.
+any, a table's `id` when it is a list, and the `group` and `members` of each `artifacts`
+entry that names a group), stamped on the container; `register` refuses a different
+fingerprint under the same key.
 
 **Vocabulary**: canonical ids and aliases for the facets, in `vocabulary.yml`. Soft:
 unknown values warn (ADR-0003). Grows by pull request. _Avoid_: schema, semantic model.
