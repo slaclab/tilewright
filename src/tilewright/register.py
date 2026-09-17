@@ -270,8 +270,9 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
         # existing container. (A *changed* path is not detected here: an
         # existing artifact is never rewritten — delete and re-register.)
         ent_container = parent_client[ent_key]
-        # The listing carries each child's data sources, so what a node would read costs
-        # no request of its own; a key's presence is not proof that it reads (#38).
+        # The listing carries each child's data sources, so what every node would read
+        # costs one request for the whole entity rather than one per artifact; a key's
+        # presence is not proof that it reads (#38).
         present = {key: node for key, node in ent_container.include_data_sources().items()}
         stale = broken = 0
         missing = []
@@ -297,9 +298,12 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
         art_rows = missing
         if not art_rows:
             return (0, 0, 1, 0, stale, broken)
-        print(f"  WARNING ent={ent_key} half-registered: {len(present)} of "
-              f"{len(present) + len(art_rows)} artifacts on the server; "
-              f"registering the {len(art_rows)} missing")
+        # the count is of artifacts that serve their row: a broken node is on the server
+        # but is not one of them, and this run does not repair it (#38)
+        print(f"  WARNING ent={ent_key} half-registered: {len(present) - broken} of "
+              f"{len(present) + len(art_rows)} artifacts on the server"
+              + (f" ({broken} more serve nothing)" if broken else "")
+              + f"; registering the {len(art_rows)} missing")
         ent_added = 0
     else:
         # Build metadata dynamically from ALL manifest columns. A dotted column
@@ -374,7 +378,8 @@ def _unserved(node, art_row, base_dir, server_base_dir, upload):
     key is not proof (#38): a POST that fails partway can leave a node that is listed but
     that no read opens, and a later run then reports the dataset complete while that
     artifact serves nothing. What a pointer node will read is in the listing that lists
-    the keys — each child's data sources come with it — so it is compared with what the
+    the keys — each child's data sources come with it, for the cost of one request per
+    entity container rather than one per artifact — so it is compared with what the
     manifest names: the file, through the same ``path_from_uri`` the adapter opens an
     asset with, and the HDF5 path inside it. Uploaded artifacts hold the server's own
     bytes rather than a pointer at the manifest's file, so for those only the presence of
