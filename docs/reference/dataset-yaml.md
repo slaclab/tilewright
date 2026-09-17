@@ -82,7 +82,7 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the batch files under 'directory'. |
-| `params` | mapping | no |  | Group holding one 1-D dataset of length N per parameter (0-dim datasets are broadcast to every entity in the file). |
+| `params` | mapping or `null` | no |  | Where the parameters live in each file; default: the root. N is the file's leading axis (that of the first artifact). Only 1-D datasets of length N are per-entity values, one per row; 0-dim datasets are broadcast to every entity in the file; any other member, (N, 1) included, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.groups`
 
