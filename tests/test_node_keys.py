@@ -106,10 +106,12 @@ def test_a_group_template_is_checked_on_its_own_text():
 
 def test_the_type_description_states_the_rule():
     doc = ArtifactSpec.model_fields["type"].description
-    for text in ("'/', '?', '#', a control character (tab, newline) and a '%' followed by "
-                 "two hex digits ('%20')", "may not be '.' or '..'", "a leading '_' or '.'",
-                 "a dot does not nest the locators", "255 bytes"):
+    for text in ("'/', '?', '#', an ASCII control character (tab, newline) and a '%' "
+                 "followed by two hex digits ('%20')", "may not be '.' or '..'",
+                 "so the server would not serve such an array back",
+                 "a leading '_' or '.'", "a dot does not nest the locators", "255 bytes"):
         assert text in doc
+    assert "never serve it back" not in doc  # with --upload, registration fails instead
 
 
 # ---------------------------------------------------------------------------
