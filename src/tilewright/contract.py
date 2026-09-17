@@ -183,8 +183,10 @@ class ParamsSpec(BaseModel):
         description="'datasets': scalar datasets in the group are parameters, 0-dim or of "
         "size 1 (NeXus writes scalars with shape (1,)); in 'batch', a 1-D dataset of "
         "length N is one value per entity, and so it is under 'groups' in a group reached "
-        "through '..', with N the number of sibling entity groups. 'attrs': the group's "
-        "HDF5 attributes are the parameters.",
+        "through '..', with N the number of sibling entity groups. Under 'files' and "
+        "'groups' every other dataset, a (6,) array or a (2, 3) matrix say, is skipped "
+        "without a message, attributes and all. 'attrs': the group's HDF5 attributes are "
+        "the parameters.",
     )
     recursive: bool = Field(
         default=False,
