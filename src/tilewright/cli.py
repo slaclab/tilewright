@@ -152,6 +152,7 @@ def register_main():
     print(f"Connected to {tiled_url} ({len(client)} existing containers)")
 
     stale_datasets = []
+    artifact_rows = {}  # entity artifacts each manifest declares, for the verify step
     for config_path, cfg in datasets:
         label, dataset_key = cfg.label, cfg.catalog_key
         body = cfg.source.body
@@ -177,6 +178,7 @@ def register_main():
 
         ent_df = pd.read_parquet(ent_path)
         art_df = pd.read_parquet(art_path)
+        artifact_rows[dataset_key] = int(art_df["uid"].notna().sum())
         fingerprint = source_fingerprint(cfg)
         stamped = (pq.read_schema(ent_path).metadata or {}).get(b"fingerprint", b"").decode()
         if stamped and stamped != fingerprint:
@@ -230,7 +232,8 @@ def register_main():
                   f"    tilewright register {config_path}", file=sys.stderr)
             stale_datasets.append(dataset_key)
 
-    verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets])
+    verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets],
+                             artifact_rows=artifact_rows)
     if stale_datasets:
         sys.exit(1)
 

@@ -9,6 +9,8 @@ Run with: uv run --with pytest pytest tests/test_registration_helpers.py -v
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from tilewright.register import verify_registration_http
 
 
@@ -99,21 +101,44 @@ def test_verify_entity_with_no_artifacts(capsys):
     assert "WARNING: no array children" in out
 
 
-def test_verify_entity_without_locators_does_not_warn(capsys):
-    """A table-source entity has no path_* locators and no arrays by contract: no
-    warning that reads through the server will fail (#8)."""
+def _root_with_one_entity(ent_metadata, ds_key="T"):
     ent = MagicMock()
-    ent.metadata = {"sample_id": "s1", "temperature_K": 10.5}
+    ent.metadata = ent_metadata
     ent.keys.return_value = []
     ds = MagicMock()
-    ds.metadata = {"label": "T"}
-    ds.keys.return_value = ["T_0"]
+    ds.metadata = {"label": ds_key}
+    ds.keys.return_value = [f"{ds_key}_0"]
     ds.__getitem__.side_effect = lambda k: ent
     root = MagicMock()
-    root.keys.return_value = ["T"]
+    root.keys.return_value = [ds_key]
     root.__getitem__.side_effect = lambda k: ds
-    verify_registration_http(root, ["T"])
+    return root
+
+
+@pytest.mark.parametrize("ent_metadata", [
+    {"sample_id": "s1", "temperature_K": 10.5},
+    # SeisBench columns of the PickBlue table (zenodo/10277799): metadata, not locators
+    {"trace_name": "ev1", "path_p_travel_s": 3.5, "path_s_travel_s": 6.0},
+    # even a column pair that reads like a locator: the manifest declares no artifacts
+    {"trace_name": "ev1", "path_x": "a.h5", "dataset_x": "/x"},
+], ids=["plain", "path_columns", "locator_like_pair"])
+def test_verify_entity_of_a_dataset_without_artifacts_does_not_warn(capsys, ent_metadata):
+    """A table-source entity has no arrays by contract: no warning that reads through the
+    server will fail, whatever its columns are called (#8). The decision comes from the
+    manifest the dataset was registered from, not from metadata key names."""
+    verify_registration_http(_root_with_one_entity(ent_metadata), ["T"],
+                             artifact_rows={"T": 0})
     out = capsys.readouterr().out
-    assert "Entity 'T_0'" in out and "(locators: 0)" in out
+    assert "Entity 'T_0'" in out
     assert "WARNING" not in out and "reads through the server will fail" not in out
     assert "no artifacts declared" in out
+
+
+def test_verify_entity_of_a_dataset_with_artifacts_and_no_children_warns(capsys):
+    """The manifest declares artifacts but the entity has no array children: warn, even
+    though no metadata key looks like a locator."""
+    verify_registration_http(_root_with_one_entity({"sample_id": "s1"}), ["T"],
+                             artifact_rows={"T": 4})
+    out = capsys.readouterr().out
+    assert "WARNING: no array children" in out
+    assert "no artifacts declared" not in out
