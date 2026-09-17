@@ -33,7 +33,7 @@ META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
 
 # Served back by a local server, through both transports and both read paths.
 SERVED = [
-    "spectrum", "a.b", "cell.0.x", "a-b", "-lead", "a|b", "_lead", "__lead", ".lead", "a.",
+    "spectrum", "a.b", "stage.x.y", "a-b", "-lead", "a|b", "_lead", "__lead", ".lead", "a.",
     "...", "a..b", "a b", " lead", "trail ", "  ", "a[0]", "len [mm]", "énergie", "µ", "温度",
     "e\u0301", "a\u00a0b", "a\u200bb", "a\x9fb", "a%", "%zz", "a%2", "a%2g", "a&b", "a=b",
     "a+b", "a:b", "a;b", "a,b", "a\\b", "a'b", 'a"b', "a*b", "a~b", "a!b", "a@b", "a$b",
