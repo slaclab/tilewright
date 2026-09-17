@@ -38,7 +38,7 @@ and the dataset's full path in `dataset`; no column records the entry itself.
 | `file_size`, `file_mtime` | no | Size and modification time of the source file when scanned |
 | `shape` | **yes** | JSON-encoded shape **as registered**: for `batch`, the leading axis is already dropped |
 | `dtype` | **yes** | numpy dtype string, e.g. `float32` |
-| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, ...); become the artifact node's metadata. Each holds a string, a number, a boolean or a list of them, so an array attribute (bin edges, `DIMENSION_LABELS`) is its list. HDF5's dimension-scale bookkeeping (`CLASS`, `NAME`, `DIMENSION_LIST`, `REFERENCE_LIST`) is left out, and so is an attribute that is or holds an HDF5 object or region reference, which points inside one file and which no catalog can follow — that one with a note |
+| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, ...); become the artifact node's metadata. Each holds a string, a number, a boolean or a list of them, so an array attribute (bin edges, `DIMENSION_LABELS`) is its list. HDF5's dimension-scale bookkeeping (`CLASS`, `NAME`, `DIMENSION_LIST`, `REFERENCE_LIST`) and netCDF-4's own two attributes (`_Netcdf4Coordinates`, `_Netcdf4Dimid`), which tie a variable to its dimensions and mean nothing outside the file that holds them, are left out, here and from a label; and so is an attribute that is or holds an HDF5 object or region reference, which points inside one file and which no catalog can follow — that one with a note. Under `params: {from: attrs}` every attribute is a parameter, those names included |
 
 ### Columns of more than one kind
 

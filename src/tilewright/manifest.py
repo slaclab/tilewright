@@ -314,9 +314,11 @@ def _check_collisions(ent_rows, key, source):
 # reading parameters and attributes
 # ---------------------------------------------------------------------------
 
-# HDF5's own bookkeeping attributes (dimension-scale machinery). Never carried along.
-# DIMENSION_LABELS is not one of them: it holds the axis names, and is kept (#31).
-_HDF5_INTERNAL_ATTRS = frozenset({"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST"})
+# HDF5's own bookkeeping attributes (the dimension-scale machinery, and the two netCDF-4
+# writes to tie a variable to its dimensions). Never carried along. DIMENSION_LABELS is
+# not one of them: it holds the axis names, and is kept (#31).
+_HDF5_INTERNAL_ATTRS = frozenset({"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST",
+                                  "_Netcdf4Coordinates", "_Netcdf4Dimid"})
 # Artifact-manifest columns the broker writes; a dataset attribute of the same name would
 # overwrite the column, so it is dropped with one warning per (path, attribute).
 _ARTIFACT_RESERVED = ARTIFACT_STANDARD_COLS | {"file_size", "file_mtime"}
