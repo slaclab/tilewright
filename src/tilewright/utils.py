@@ -5,6 +5,7 @@ Common functions used across registration scripts.
 """
 
 import datetime
+import math
 import os
 import re
 from collections.abc import Mapping
@@ -64,30 +65,42 @@ FINGERPRINT_KEY = "fingerprint"
 ARTIFACT_STANDARD_COLS = {"uid", "type", "file", "dataset", "index", "shape", "dtype"}
 
 
-def to_json_safe(value):
+def to_json_safe(value, nonfinite=None, _key=""):
     """Convert a value to plain JSON types: dict, list, str, int, float, bool or None.
 
     Recurses into mappings, lists, tuples and arrays. A subclass of a builtin scalar
     becomes the builtin: ruamel's round-trip loader returns ``ScalarFloat`` for every
     float in a YAML, and the Tiled client's serializer (orjson) refuses float
     subclasses. Dates and times become ISO 8601 strings; None, NaN and NaT become None.
+
+    ``inf`` and ``-inf`` are no more JSON numbers than NaN is, and the client's
+    serializer writes any of them as null whatever is sent, so they become None here too
+    (reference/manifest.md). ``nonfinite``, when given, is called with the key and the
+    value before an infinity is dropped — with the path inside a mapping, ``limits.upper``
+    — so that a caller can say once per key that the value was not stored. NaN is left to
+    it silently: it is also what a row holds where it has no value for a column.
     """
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.bool_):
         return bool(value)
     if isinstance(value, np.floating):
-        return float(value)
+        value = float(value)
     if isinstance(value, np.ndarray):
         value = value.tolist()
     if isinstance(value, Mapping):
-        return {str(k): to_json_safe(v) for k, v in value.items()}
+        return {str(k): to_json_safe(v, nonfinite, ".".join(p for p in (_key, str(k)) if p))
+                for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [to_json_safe(v) for v in value]
+        return [to_json_safe(v, nonfinite, _key) for v in value]
     if pd.isna(value):
         return None
     if isinstance(value, (bool, ScalarBoolean)):  # ScalarBoolean is an int subclass
         return bool(value)
+    if isinstance(value, float) and not math.isfinite(value):   # ScalarFloat is one too
+        if nonfinite is not None:
+            nonfinite(_key, float(value))
+        return None
     for plain in (str, int, float):
         if isinstance(value, plain):
             return plain(value)

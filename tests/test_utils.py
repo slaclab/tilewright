@@ -132,6 +132,23 @@ class TestToJsonSafe:
         assert set(types(out)) <= {dict, list, str, int, float, bool, type(None)}
         assert orjson.loads(orjson.dumps(out)) == out
 
+    def test_infinite_floats_become_null_and_are_reported(self):
+        """#33: inf and -inf are no more JSON numbers than NaN, and the Tiled client's
+        serializer writes any of them as null; the caller is told which key held one, with
+        the path inside a nested value. NaN is dropped silently: it is also what a row
+        holds where it has no value for a column."""
+        seen = []
+        assert to_json_safe(float("inf"), lambda k, v: seen.append((k, v))) is None
+        assert to_json_safe(np.float64("-inf"), lambda k, v: seen.append((k, v))) is None
+        assert to_json_safe(float("nan"), lambda k, v: seen.append((k, v))) is None
+        assert seen == [("", float("inf")), ("", float("-inf"))]
+
+        seen.clear()
+        out = to_json_safe({"limits": {"upper": float("inf")}, "bounds": [1.0, float("inf")]},
+                           lambda k, v: seen.append((k, v)))
+        assert out == {"limits": {"upper": None}, "bounds": [1.0, None]}
+        assert seen == [("limits.upper", float("inf")), ("bounds", float("inf"))]
+
     def test_tuples_and_arrays_recurse(self):
         out = to_json_safe((np.float32(1.5), np.array([np.int64(2)]), {"k": np.bool_(True)}))
         assert out == [1.5, [2], {"k": True}]

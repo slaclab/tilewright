@@ -626,6 +626,49 @@ class TestSharedAxes:
         assert "energy" not in {c.kwargs["key"] for c in ent_container.new.call_args_list}
 
 
+# ─── Non-finite floats: what the transport cannot carry ─────────────────────
+
+
+class TestNonFiniteMetadata:
+    """#33: inf and -inf are not JSON numbers. They are sent as null, the run says so
+    once per key, and the manifest — and so the uid — is untouched."""
+
+    def test_an_infinite_parameter_is_sent_as_null_with_the_uid_unchanged(self, vdp_manifests):
+        ent_df, art_df, base_dir = vdp_manifests
+        ent_df = ent_df.copy()
+        ent_df["n_effective"] = float("inf")
+        ent_df["Ja_meV"] = -float("inf")
+        reg = register_entity((ent_df, art_df, base_dir))
+        assert reg.metadata["n_effective"] is None and reg.metadata["Ja_meV"] is None
+        assert reg.metadata["Jb_meV"] == ent_df.iloc[0]["Jb_meV"]      # the finite ones stay
+        assert reg.metadata["uid"] == ent_df.iloc[0]["uid"]            # identity untouched
+        assert reg.key == f"TEST_KEY_{str(ent_df.iloc[0]['uid'])[:13]}"
+        json.dumps(reg.metadata)
+
+    def test_one_note_per_key_names_it_once_with_a_count(self, vdp_manifests, capsys):
+        """Two entities hold the same infinite parameter: one line, with the count. The
+        dataset's own metadata is a line of its own."""
+        from tilewright.register import register_dataset_http
+
+        ent_df, art_df, base_dir = vdp_manifests
+        ent_df = ent_df.head(2).copy()
+        ent_df["n_effective"] = float("inf")
+        client = MagicMock()
+        client.__contains__.return_value = False
+        parent = client.create_container.return_value
+        parent.__contains__.return_value = False
+        capsys.readouterr()
+        register_dataset_http(client, ent_df, art_df, base_dir, "T", dataset_key="T",
+                              dataset_metadata={"max_rate": float("inf")}, max_workers=1)
+        notes = [line.strip() for line in capsys.readouterr().out.splitlines()
+                 if "is not a JSON number" in line]
+        assert notes[0] == ("note: T/metadata max_rate = inf is not a JSON number; "
+                            "stored as null")
+        assert notes[1] == (f"note: T/T_{str(ent_df.iloc[0]['uid'])[:13]} n_effective = inf "
+                            f"is not a JSON number; stored as null (2 entities)")
+        assert len(notes) == 2
+
+
 # ─── Nested metadata: dotted manifest columns → nested entity metadata ───────
 
 

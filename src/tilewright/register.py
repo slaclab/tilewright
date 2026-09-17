@@ -39,6 +39,7 @@ Per-entity work runs on a ThreadPoolExecutor (see _DEFAULT_MAX_WORKERS).
 import datetime
 import json
 import os
+import threading
 import time
 from collections import namedtuple
 from collections.abc import Mapping
@@ -78,6 +79,39 @@ _DEFAULT_MAX_WORKERS = 8
 # walking the hierarchy. Manifest columns of the same name win via
 # setdefault.
 INHERITED_KEYS = ("amsc_public",)
+
+
+class NonFiniteNotes:
+    """The infinite floats one ``register`` run could not store, one line per key.
+
+    ``inf`` and ``-inf`` are not JSON numbers, so a metadata value that is one is stored
+    as null (``utils.to_json_safe``); the manifest keeps the value it read, so identity
+    is unchanged. A run says so once per key, naming where it first met it and how many
+    nodes held it, rather than once per entity. Entities are registered from a thread
+    pool, hence the lock.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._seen = {}
+
+    def at(self, scope, where, key=""):
+        """The ``nonfinite`` callback for one column (or mapping) of one node."""
+        def note(inside, value):
+            name = ".".join(p for p in (key, inside) if p)
+            with self._lock:
+                seen = self._seen.setdefault((scope, name), [where, set(), 0])
+                seen[1].add(repr(value))
+                seen[2] += 1
+        return note
+
+    def lines(self):
+        """One line per key, in the order the keys were first met."""
+        for (scope, name), (where, values, count) in self._seen.items():
+            many = {"entity": "entities", "artifact": "artifacts"}.get(scope)
+            yield (f"note: {where} {name} = {', '.join(sorted(values))} is not a JSON "
+                   f"number; stored as null"
+                   + (f" ({count} {many})" if many and count > 1 else ""))
 
 
 def require_shape_dtype(art_df):
@@ -196,7 +230,7 @@ def read_artifact_array(art_row, base_dir):
 
 def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
                          parent_client, base_dir, server_base_dir,
-                         dataset_key, inherited=None, upload=False):
+                         dataset_key, inherited=None, upload=False, notes=None):
     """Register a single entity container and its artifact children.
 
     Designed to be called from worker threads. Returns counter deltas so
@@ -212,6 +246,7 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
     """
     if inherited is None:
         inherited = {}
+    notes = notes if notes is not None else NonFiniteNotes()
 
     uid = str(ent_row["uid"])
     ent_key = make_entity_key(ent_row, dataset_key)
@@ -250,7 +285,8 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
             node = metadata
             for p in parents:
                 node = node.setdefault(p, {})
-            node[leaf] = to_json_safe(ent_row[col])
+            node[leaf] = to_json_safe(ent_row[col],
+                                      notes.at("entity", f"{dataset_key}/{ent_key}", col))
 
         # Attach artifact locators to metadata (the direct-file read path)
         for art_row in art_rows:
@@ -275,7 +311,8 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
     for art_row in art_rows:
         try:
             _register_artifact(ent_container, art_row, art_columns, base_dir,
-                               server_base_dir, inherited, upload)
+                               server_base_dir, inherited, upload, notes=notes,
+                               parent=f"{dataset_key}/{ent_key}")
             art_added += 1
         except Exception as e:
             art_failed += 1
@@ -303,7 +340,7 @@ def _changed_on_disk(node_metadata, art_row):
 
 
 def _register_artifact(container, art_row, art_columns, base_dir, server_base_dir,
-                       inherited, upload, extra=None):
+                       inherited, upload, extra=None, notes=None, parent=""):
     """Register one artifact-manifest row as an array child of ``container``.
 
     The one place an array node is created: under an entity container for a
@@ -326,7 +363,8 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
     }
     for col in art_columns:
         if col not in ARTIFACT_STANDARD_COLS:
-            val = to_json_safe(art_row[col])
+            val = to_json_safe(art_row[col], notes and notes.at(
+                "artifact", "/".join(p for p in (parent, art_key) if p), col))
             if val is not None:
                 art_metadata[col] = val
     art_metadata.update(extra or {})
@@ -482,7 +520,9 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
 
     # Values loaded from a YAML are ruamel subclasses (ScalarFloat, ...), which the
     # Tiled client cannot serialize; everything below sends plain JSON types.
-    dataset_metadata = to_json_safe(dataset_metadata)
+    notes = NonFiniteNotes()
+    dataset_metadata = to_json_safe(dataset_metadata,
+                                    notes.at("metadata", f"{dataset_key}/metadata"))
     storage = STORAGE_UPLOADED if upload else STORAGE_EXTERNAL
     parent_client = dataset_container(client, dataset_key, dataset_metadata, storage,
                                       fingerprint, update=update, adopt=adopt)
@@ -511,6 +551,7 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
                 parent_client, row, art_columns, base_dir, server_base_dir,
                 inherited, upload,
                 extra={"shared_axis": True, "path": row["file"], "dataset": row["dataset"]},
+                notes=notes, parent=dataset_key,
             )
             shared_added += 1
             print(f"  Registered shared axis '{key}' shape={row['shape']} dtype={row['dtype']}")
@@ -534,7 +575,7 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
                 _register_one_entity,
                 ent_row, ent_columns, art_grouped, art_columns,
                 parent_client, base_dir, server_base_dir, dataset_key,
-                inherited, upload,
+                inherited, upload, notes,
             )
             for _, ent_row in ent_df.iterrows()
         ]
@@ -553,6 +594,9 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
                 # futures finish in microseconds and would inflate it.
                 rate = ent_count / elapsed if elapsed > 0 else 0
                 print(f"  Progress: {i+1}/{n} entities ({rate:.1f}/sec)")
+
+    for line in notes.lines():
+        print(f"  {line}")
 
     elapsed_total = time.time() - start_time
     print(f"\nRegistration complete:")
