@@ -625,6 +625,11 @@ def _verify_dataset(client, ds_key):
     path_keys = [k for k in ent_meta if k.startswith("path_")]
     print(f"\nEntity '{ent_key}':")
     print(f"  metadata keys: {len(ent_meta)} (locators: {len(path_keys)})")
+    if not path_keys:
+        # No path_* locator: the entity declares no artifacts (a table source, by
+        # contract), so there are no array children to probe.
+        print("  no artifacts declared: the entity is its metadata")
+        return
 
     art_keys = list(ent.keys()) if hasattr(ent, "keys") else []
     print(f"  artifact children: {len(art_keys)}")
