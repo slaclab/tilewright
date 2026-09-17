@@ -360,8 +360,9 @@ class GroupsSource(_HDF5SourceBase):
         description="Group whose subgroups are the entities ('/samples'). Default: the "
         "file's top-level groups. Any segment may be a glob, matched with fnmatch against "
         "the names of the groups at that level: '*' and '?' match within the name, '[...]' "
-        "one character of a set, and case matters. '/*' takes every top-level group, so that each "
-        "subgroup of each of them is an entity (/<site>/<detector>); '/run_*/scans' takes "
+        "one character of a set, and case matters. '/*' takes every top-level group, so "
+        "that each subgroup of each of them is an entity (/<site>/<detector>); "
+        "'/run_*/scans' takes "
         "the 'scans' group of every run_ group. The matching groups are taken in sorted "
         "order, and the entities are the subgroups of every one of them. A file in which "
         "no group matches is an error, and so is one in which the matching groups have no "
@@ -372,8 +373,8 @@ class GroupsSource(_HDF5SourceBase):
         description="Subgroups that are not entities: fnmatch patterns matched against the "
         "name of each subgroup of the entity group(s), not against its path. "
         "[calibration] leaves out a group that holds values for the entities beside it; "
-        "['tmp*'] every group whose name starts with 'tmp'. Excluded groups are not counted as "
-        "siblings (see 'params').",
+        "['tmp*'] every group whose name starts with 'tmp'. Excluded groups are not "
+        "counted as siblings (see 'params').",
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
@@ -670,8 +671,8 @@ def source_fingerprint(cfg: DatasetConfig):
     or metadata: the source tag, the directory as the server sees it, the file pattern
     or table path, the params spec (its ``location`` only when set), the entity group,
     ``exclude_groups`` when it names any (ADR-0011), the identity mode, and a table's
-    ``id`` when it is a list. Two YAMLs for the same files share it; the
-    same label over different files does not (``tilewright register`` refuses that).
+    ``id`` when it is a list. Two YAMLs for the same files share it; the same label over
+    different files does not (``tilewright register`` refuses that).
 
     A single-column ``id`` is not hashed, so no table fingerprinted before ADR-0008
     changes; a list is, so switching a table to a composite id (which re-keys every
