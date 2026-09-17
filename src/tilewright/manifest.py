@@ -418,7 +418,8 @@ class _Walker:
                                          f"rows but {self.artifacts[0].type!r} has {n}; every "
                                          f"artifact's leading axis is the entity axis")
                     art_info[art.type] = (ds.shape[1:], str(ds.dtype), _attrs(ds, label_of=""))
-                columns, labels = _read_params(f, spec, batch_size=n)
+                columns, labels = (_read_params(f, spec, batch_size=n)
+                                   if spec is not None else ({}, {}))
                 for i in range(n):
                     params = {k: _to_python(v[i]) for k, v in columns.items()}
                     prov = f"{rel}:{i}"

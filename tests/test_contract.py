@@ -87,6 +87,12 @@ class TestAccepted:
         t = load_dataset(table)[0]
         assert t.source.tag == "table" and t.source.identity == Identity.provenance
 
+    def test_batch_params_null_forces_provenance(self):
+        raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
+        cfg, warnings = load_dataset(raw)
+        assert warnings == [] and cfg.source.body.params is None
+        assert cfg.source.identity == Identity.provenance
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -137,10 +143,6 @@ class TestRejected:
         raw = files_cfg()
         raw["source"]["files"]["params"] = {"group": "/p", "groups": {"a": "/a"}}
         assert any("mutually exclusive" in e for e in errors_of(raw))
-
-    def test_batch_params_cannot_be_null(self):
-        raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
-        assert any("source.batch.params" in e for e in errors_of(raw))
 
     def test_drifted_key(self):
         errs = errors_of(files_cfg(key="OLD_NAME"))

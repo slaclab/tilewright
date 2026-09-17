@@ -1,6 +1,7 @@
 """``tilewright manifest`` against synthetic HDF5: every source tag, parameter reading,
 labels, shared axes, identity, collisions, key stamping and where the output lands."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from tilewright.contract import ContractError
 from tilewright.manifest import generate_manifests, main, manifest_dir
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
+
+
+def sha16(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def write_yaml(path, cfg):
@@ -151,6 +156,25 @@ class TestBatch:
         cfg["shared"] = [{"type": "nope", "dataset": "/nope"}]
         with pytest.raises(KeyError, match="shared axis 'nope'"):
             run(tmp_path, cfg)
+
+    def test_params_null_gives_provenance_uids(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"] = None
+        ent, art = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid"]
+        assert set(ent["uid"]) == {sha16(f"BATCH_TEST:batch_{b}/sim.h5:{i}")
+                                   for b in range(2) for i in range(3)}
+        assert len(art[art["uid"].notna()]) == 6
+
+    def test_only_1d_members_of_length_n_are_parameters(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params/column"] = np.zeros((3, 1))
+                f["params/bounds"] = np.zeros((3, 2))
+                f["params/axis"] = np.zeros(4)
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
 
     def test_artifact_row_mismatch(self, tmp_path):
         cfg = batch_dataset(tmp_path)

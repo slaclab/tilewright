@@ -222,10 +222,13 @@ class BatchSource(_SourceBase):
         default="**/*.h5",
         description="Glob for the batch files under 'directory'.",
     )
-    params: ParamsSpec = Field(
+    params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Group holding one 1-D dataset of length N per parameter (0-dim "
-        "datasets are broadcast to every entity in the file).",
+        description="Where the parameters live in each file; default: the root. N is the "
+        "file's leading axis (that of the first artifact). Only 1-D datasets of length N "
+        "are per-entity values, one per row; 0-dim datasets are broadcast to every entity "
+        "in the file; any other member, (N, 1) included, is skipped without a message. "
+        "'null' declares that entities have no parameters (identity becomes provenance).",
     )
 
 
