@@ -1,8 +1,9 @@
 # Clarifications from the blind onboarding runs: field descriptions only
 
 **Status:** accepted, 2026-09-17. Changes no field, no validator and no default of
-ADR-0006's contract: every edit is to a `description` (or to a docs page), and the
-regenerated `docs/reference/dataset-yaml.md` is the only generated file that moves.
+ADR-0006's contract: every edit is to a `description` (or to a docs page), the one added
+test pins behaviour rather than changing it, and the regenerated
+`docs/reference/dataset-yaml.md` is the only generated file that moves.
 Closes the documentation issues
 [#13](https://github.com/slaclab/TileWright/issues/13),
 [#25](https://github.com/slaclab/TileWright/issues/25),
@@ -32,14 +33,18 @@ before it was documented; the pull request carries the command and its output.
 | `shared` | 'axis' is the common case, not the rule: any array belonging to the dataset rather than to an entity goes here, a normalization or lookup table included, and nothing of an axis is required of it | #26 item 7 |
 | `shared[].dataset` | a file that lacks the path is passed over, so per-entity group names cannot be shared; nothing is claimed about the values | #26 comment 2 item 1, #27 item 6 |
 | `params.from` | attribute values are read whatever they hold; one block reads one way, and a source has one block | #26 items 1 and 3 |
-| `params.recursive` | the key is the path, so a field kept as a group gives `<field>.data`, and nothing renames it | #26 comment 2 item 2 |
+| `params.recursive` | the key is the path, so a field kept as a group gives `<field>.data`, and nothing renames it; and the guarantee below the group is the cross-file one, the sibling-entity half being about names (see the last row) | #26 comment 2 item 2, this PR's review |
 | `params.location` | a block holding only `location` is complete | #26 item 5 |
 | `table.path` | every column is kept, an empty header cell included (`Unnamed: 4`); there is no filter | #32 item 2 |
 | `table.id` | a null cell is allowed and hashed, and cannot be found by an equality search | #32 item 3 |
+| `source.groups.params` | what the closed-group set closes is a member's own **name**: a name that resolves to a sibling entity group, or to a group `entity_group` matched, is warned about and skipped, and a target path that runs *through* such a name is followed, the sibling's values entering these parameters and this uid | this PR's review |
 
 **Pages:** `reference/manifest.md` (what an attribute describes, types and nulls,
-`config_hash`, the reserved-name list, what `file_size`/`file_mtime` describe),
-`reference/errors.md` (dumping a file that uses hard links, the HDF5 signature check),
+`config_hash`, the reserved-name list, what `file_size`/`file_mtime` describe, and what a
+`uid` or `source_group` field read out of a file does to its column),
+`reference/errors.md` (dumping a file that uses hard links, the HDF5 signature check, the
+reserved artifact-attribute names, which now link to `manifest.md` instead of being listed
+a second time, and what the entity-group warning row's cause really is),
 `reference/cli.md` (what `--max-workers` counts),
 `explanation/sources.md` (what a `table` can and cannot express, writing the table
 yourself), `explanation/nexus.md` (files with no `@default`, one entity over several
@@ -71,9 +76,11 @@ Three items are not written down as their issue states them:
   put them in `params.group`, `params.exclude`, `pattern` and `batch.params`, after the
   surface revisions the issues quote. They were re-verified rather than re-stated.
 - A parameter *dataset* named `uid` takes the manifest's own column rather than being
-  refused as a `params.location` group of that name is. `manifest.md` now tells authors to
-  rename it, but making it an error would be a validator change, so it is left to its own
-  issue.
+  refused as a `params.location` group of that name is, and a `source_group` dataset
+  overwrites that column the same way; both run silently to exit 0. `manifest.md` now
+  states that and tells authors to rename the field or `exclude` it, but making either an
+  error would be a validator change, so what to do about it is
+  [#41](https://github.com/slaclab/TileWright/issues/41) and not this PR.
 
 ## Consequences
 
@@ -88,3 +95,11 @@ Three items are not written down as their issue states them:
   keeps its shape and its adapter line in step with `config.yml`.
 - The onboarding skill grew; it is the home for decisions an author makes, and the facts
   themselves stay in the pages, linked.
+- [ADR-0013](0013-recursion-stays-in-the-subtree.md) is amended rather than superseded: its
+  hard-link bullet said "a link to one of them is named and skipped", which is a notch
+  stronger than the code, and its residual list grows from two cases to three. The rule and
+  the code are unchanged; only the description of what the rule leaves standing moves. The
+  same over-claim had three other homes on the surface, all corrected here and all pinned
+  by `TestRecursionStaysInTheSubtree::test_a_target_path_running_through_a_skipped_hard_link_is_followed`:
+  `GroupsSource.params` and `ParamsSpec.recursive` (the two table rows above) and the
+  entity-group warning row of `reference/errors.md`.
