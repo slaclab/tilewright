@@ -29,6 +29,7 @@ before it was documented; the pull request carries the command and its output.
 | `label` | `slug()` keeps A-Z and 0-9, so a non-ASCII letter becomes `_`; a label with none at all is an error | #27 item 3 |
 | `artifacts` | the list is what the dataset serves, not an inventory of the file | #27 item 7 |
 | `artifacts[].type` | types are compared exactly: `gain_a` and `Gain_A` are two arrays | #27 item 5 |
+| `shared` | 'axis' is the common case, not the rule: any array belonging to the dataset rather than to an entity goes here, a normalization or lookup table included, and nothing of an axis is required of it | #26 item 7 |
 | `shared[].dataset` | a file that lacks the path is passed over, so per-entity group names cannot be shared; nothing is claimed about the values | #26 comment 2 item 1, #27 item 6 |
 | `params.from` | attribute values are read whatever they hold; one block reads one way, and a source has one block | #26 items 1 and 3 |
 | `params.recursive` | the key is the path, so a field kept as a group gives `<field>.data`, and nothing renames it | #26 comment 2 item 2 |
@@ -36,9 +37,10 @@ before it was documented; the pull request carries the command and its output.
 | `table.path` | every column is kept, an empty header cell included (`Unnamed: 4`); there is no filter | #32 item 2 |
 | `table.id` | a null cell is allowed and hashed, and cannot be found by an equality search | #32 item 3 |
 
-**Pages:** `reference/manifest.md` (which attribute values are carried, types and nulls,
+**Pages:** `reference/manifest.md` (what an attribute describes, types and nulls,
 `config_hash`, the reserved-name list, what `file_size`/`file_mtime` describe),
 `reference/errors.md` (dumping a file that uses hard links, the HDF5 signature check),
+`reference/cli.md` (what `--max-workers` counts),
 `explanation/sources.md` (what a `table` can and cannot express, writing the table
 yourself), `explanation/nexus.md` (files with no `@default`, one entity over several
 files, a virtual dataset's dtype), `host-a-server.md` (a whole pointer-serving config,
@@ -57,9 +59,14 @@ change; stating it costs a description.
 Three items are not written down as their issue states them:
 
 - #26 item 1's example of a `batch` artifact row carrying `_ARRAY_DIMENSIONS
-  ["water_year", "y", "x"]`: an array-valued attribute never reaches an artifact node. The
-  true statement (labels and artifact metadata keep text and numbers only, and under
-  `batch` they are the stacked dataset's) is what `manifest.md` now carries.
+  ["water_year", "y", "x"]`. At the head this branch was first written against, an
+  array-valued attribute never reached an artifact node, so the example could not happen.
+  ADR-0013's PR (#31) then made a label and an artifact node's metadata carry what
+  `from: attrs` carries, an array attribute as its list, and the example became true. The
+  `manifest.md` table row that decision wrote is the home for *which values* are carried;
+  what this PR keeps there is the half that decision does not state — that under `batch`
+  the attributes are the stacked dataset's, so an attribute describing the stack's shape
+  does not describe the row beside it, and that nothing interprets a value.
 - #13 items 1-3 and #26 item 6 needed nothing: commits `74b3334` and `dc75d1c` had already
   put them in `params.group`, `params.exclude`, `pattern` and `batch.params`, after the
   surface revisions the issues quote. They were re-verified rather than re-stated.
