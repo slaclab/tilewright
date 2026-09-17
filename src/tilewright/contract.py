@@ -196,9 +196,15 @@ class ParamsSpec(BaseModel):
     )
     recursive: bool = Field(
         default=False,
-        description="Descend into subgroups, nesting one level per subgroup. It applies to "
-        "every path of the block, so under 'groups' a block with 'recursive: true' may "
-        "hold no path that starts with '..' (see 'params' under 'source.groups').",
+        description="Descend into subgroups, nesting one level per subgroup. It follows "
+        "only what lies inside the group it reads: a subgroup an HDF5 link leads to "
+        "outside that group (a soft link to a group elsewhere in the file, or an external "
+        "link, which resolves in another file) is named in a warning and skipped, so no "
+        "other entity's values, and nothing from another file, is read through a link; a "
+        "group named under 'group' or 'groups' is still read wherever its path leads. It "
+        "applies to every path of the block, so under 'groups' a block with 'recursive: "
+        "true' may hold no path that starts with '..' (see 'params' under "
+        "'source.groups').",
     )
     exclude: list[str] = Field(
         default_factory=list,
@@ -420,8 +426,9 @@ class GroupsSource(_HDF5SourceBase):
         "names is read whatever it is, an entity group included: under a path to one "
         "detector (`../<detector>`), its scalars go to every sibling, and each of its 1-D "
         "datasets whose length is the number of siblings is split among them. Recursion "
-        "inside the entity group never goes into an entity group or a group that "
-        "'entity_group' matched, whatever HDF5 link leads to it. 'null' declares none.",
+        "inside the entity group stays inside it (see 'recursive'), so no sibling entity "
+        "group, and no group that 'entity_group' matched, is read through a link. 'null' "
+        "declares none.",
     )
 
     @field_validator("exclude_groups")
