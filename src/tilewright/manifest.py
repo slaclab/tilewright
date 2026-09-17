@@ -387,7 +387,10 @@ def _uid(payload):
 
 
 def _params_uid(key, params):
-    canonical = {k: round(v, 12) if isinstance(v, float) else v
+    # Floats are hashed at 12 significant digits: noise past that is not a new entity, and
+    # the rule is scale-free, so SI-unit values (1e-13 s) stay apart. (Rounding to 12
+    # decimal places turned every |v| < 5e-13 into 0.0.)
+    canonical = {k: float(f"{v:.12g}") if isinstance(v, float) else v
                  for k, v in sorted(params.items())}
     return _uid(json.dumps({"ns": key, "params": canonical}, sort_keys=True, default=str))
 

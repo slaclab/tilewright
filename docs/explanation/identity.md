@@ -39,10 +39,12 @@ the source's `identity`:
 
 **`params`** (the default): a hash of the parameter *values*. The same physics is the same
 entity across re-registration and file moves, which is what a simulation sweep wants and
-what makes re-running `register` safe. The cost is that two entities with identical
-parameters would collide, so `tilewright manifest` refuses that, names the colliding
-entities, what differs between them and the parameters they share, and offers the two
-fixes: add a distinguishing parameter, or switch identity.
+what makes re-running `register` safe. A float is hashed at 12 significant digits, so
+noise past the twelfth digit is not a new entity, and values at any scale stay apart:
+times of 1e-13 s are as distinct as temperatures of 300 K. The cost is that two entities
+with identical parameters would collide, so `tilewright manifest` refuses that, names the
+colliding entities, what differs between them and the parameters they share, and offers
+the two fixes: add a distinguishing parameter, or switch identity.
 
 **`provenance`**: a hash of where the entity came from, the file path relative to the
 directory plus its row or group. It never collides unless `pattern` or `entity_group`
