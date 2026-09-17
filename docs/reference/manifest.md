@@ -170,10 +170,18 @@ its first part, so that part counts), and the message names it
 
 Two more names belong to the manifest itself, in every dataset: **`uid` and
 `source_group`**, the columns of `entities.parquet` that are not parameters. The contract
-refuses them as a named group of `params.location`, and so a name that starts with `_`,
-which the manifest keeps for its own bookkeeping. A field of that name read out of a file
-takes the column rather than sitting beside it, so rename it in the file or leave it out
-with `params.exclude`.
+refuses each as a named group of `params.location`, and refuses a `location` group whose
+name starts with `_`, which the manifest keeps for its own bookkeeping. That second rule
+is about `location` group names only: a field read out of a file under a name that starts
+with `_` is an ordinary column, warned about by nothing.
+
+A field named `uid` or `source_group` read out of a file is the case to watch, because it
+takes that column rather than sitting beside it and the run says nothing. A scalar `uid`
+under the params group becomes the entity's uid, in place of the identifier the manifest
+computed from the parameters; a scalar `source_group` replaces the group each entity was
+read from with its own value, so two entities can end up claiming the same one. Rename the
+field in the file, or leave it out with `params.exclude`. Whether either should instead be
+refused is [issue #41](https://github.com/slaclab/TileWright/issues/41).
 
 Nothing else is reserved for an entity parameter. A parameter called `index`, `size`,
 `type`, `shape`, `dtype`, `file`, `dataset` or `event` is an ordinary column of
