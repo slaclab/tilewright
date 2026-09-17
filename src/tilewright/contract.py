@@ -500,6 +500,42 @@ class Source(BaseModel):
 # artifacts and the whole dataset
 # ---------------------------------------------------------------------------
 
+# A type is a Tiled node key. The Tiled client (0.2.18) splits a key on '/' and puts it
+# into a URL path as written (tiled/client/container.py, Container.__getitem__); what a
+# local server did with each kind of character is in ADR-0012.
+_URL_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+TYPE_RULE = ("a type is a node key that travels in a URL, so the server would not serve "
+             "that array back")
+
+
+def key_problem(key):
+    """Why ``key``, an artifact or shared ``type``, cannot be a node key that the server
+    serves back, as a phrase (``"contains '/', which ..."``); None when it can be."""
+    for char, why in (("/", "separates the keys of a path"),
+                      ("?", "starts the query of a URL"),
+                      ("#", "starts the fragment of a URL")):
+        if char in key:
+            return f"contains {char!r}, which {why}"
+    control = next((c for c in key if ord(c) < 32 or ord(c) == 127), None)
+    if control is not None:
+        return f"contains the control character {control!r}, which a URL cannot hold"
+    escape = _URL_ESCAPE.search(key)
+    if escape:
+        return f"contains {escape.group()!r}, which a URL reads as an escaped character"
+    if key in (".", ".."):
+        return "is a dot segment, which a URL reads as a node or its parent"
+    return None
+
+
+def _checked_type(key, example):
+    """``key`` when ``example`` (the key, or a template filled in) is a servable node key."""
+    problem = key_problem(example)
+    if problem:
+        raise ValueError(f"type {key!r} {problem}; {TYPE_RULE}. Change the type (a '_' "
+                         f"instead, say)")
+    return key
+
+
 class ArtifactSpec(BaseModel):
     """One array of every entity (``dataset``), or one per dataset in a group (``group``,
     ADR-0012), which ``tilewright manifest`` expands, so the manifest rows stay plain."""
@@ -512,7 +548,15 @@ class ArtifactSpec(BaseModel):
         "locators (`path_<type>`, `dataset_<type>`, `index_<type>`). With 'group', a "
         "template in which '{name}' stands for each member's name. Quote the template, "
         "as in `type: 'trace_{name}'`: YAML reads an unquoted brace as the start of a "
-        "mapping. A literal brace in it is written '{{' or '}}'.",
+        "mapping. A literal brace in it is written '{{' or '}}'. Any character may "
+        "appear except '/', '?', '#', a control character (tab, newline) and a '%' "
+        "followed by two hex digits ('%20'), and the type may not be '.' or '..': it "
+        "travels in a URL, so the server would register such an array but never serve "
+        "it back. Dots, spaces, brackets, '-', '|', a leading '_' or '.', and non-ASCII "
+        "letters all work, and a dot does not nest the locators. With --upload, a "
+        "server that keeps arrays as files names a directory after the type, "
+        "URL-escaped as Python's urllib.parse.quote_plus does it, so that must also fit "
+        "in one file name, 255 bytes on most filesystems.",
     )
     dataset: str | None = Field(
         default=None,
@@ -526,14 +570,16 @@ class ArtifactSpec(BaseModel):
         description="HDF5 path of a group, instead of 'dataset': the entry becomes one "
         "artifact per dataset directly in the group, in sorted name order. Scalar (0-dim) "
         "datasets are included; subgroups, and datasets with no dataspace (h5py.Empty), "
-        "are skipped. Absolute for 'files', relative to "
-        "each entity group for 'groups'; a 'batch' source does not take it, because its "
-        "first artifact sets the batch size. 'type' must hold '{name}', and nothing "
+        "are skipped. Absolute for 'files', relative to each entity group for 'groups'; "
+        "a 'batch' source does not take it, because its first artifact sets the batch "
+        "size. 'type' must hold '{name}', and nothing "
         "else in braces: `{type: 'trace_{name}', group: /channels}` gives trace_ch_a ... "
         "trace_ch_d for /channels/ch_a ... /channels/ch_d, and `{type: '{name}', group: "
         "/frames}` gives frame_0000 ... frame_0099 for /frames/frame_0000 ... "
         "/frames/frame_0099. The types must stay unique within an entity after this "
-        "expansion, shared types included. A group that is absent, or that holds no "
+        "expansion, shared types included, and a member whose name makes a type that "
+        "breaks the 'type' rule is an error that names it. A group that is absent, or "
+        "that holds no "
         "dataset matching 'members', is an error unless 'optional'. Each member becomes "
         "an array node of its own, so thousands of per-step datasets register slowly and "
         "read back one step at a time: stack them into one array, or into a 'batch' file, "
@@ -582,6 +628,7 @@ class ArtifactSpec(BaseModel):
             if not fields:
                 raise ValueError(f"type {self.type!r} has no '{{name}}': with 'group', each "
                                  f"member's name goes into its type, as in 'trace_{{name}}'")
+        _checked_type(self.type, self.type.format(name="_") if self.group else self.type)
         return self
 
 
@@ -590,7 +637,8 @@ class SharedAxisSpec(BaseModel):
 
     type: str = Field(
         min_length=1,
-        description="Name of the array; becomes its key under the dataset container.",
+        description="Name of the array; becomes its key under the dataset container. The "
+        "characters allowed are those of an artifact 'type'.",
     )
     dataset: str = Field(
         min_length=1,
@@ -599,6 +647,11 @@ class SharedAxisSpec(BaseModel):
         "A shared entry names one array: the 'group' form of 'artifacts' is not available "
         "here.",
     )
+
+    @model_validator(mode="after")
+    def _servable(self):
+        _checked_type(self.type, self.type)
+        return self
 
 
 _MIGRATION = {
