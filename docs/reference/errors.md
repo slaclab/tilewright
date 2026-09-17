@@ -31,6 +31,13 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `contract error: source.<tag>.params.location: may not name a group uid` (or `source_group`) | A named group is called like a column of `entities.parquet` that is not a parameter | Choose another name |
 | `contract error: source.<tag>.params.location: may not name a group _<name>: a name that starts with '_' is kept for the manifest's own use` | A named group starts with `_`. The manifest keeps its own bookkeeping under such names and leaves it out of `entities.parquet` | Choose a name that starts with a letter |
 | `contract error: artifact types must be unique` | Two artifacts or shared axes share a `type` | Rename one; types become node keys |
+| `contract error: artifacts[<i>]: give exactly one of 'dataset' (one array) or 'group' (one array per dataset in that group)` | An `artifacts` entry with neither, or with both | Keep one ([the `artifacts` fields](dataset-yaml.md#artifacts)) |
+| `contract error: artifacts[<i>]: 'members' picks the datasets of a 'group'` | `members` on an entry that names a `dataset` | Remove it, or name a `group` |
+| `contract error: artifacts[<i>]: type '<t>' has no '{name}'` (or `holds '{name}', which only a 'group' entry fills in`) | A `group` entry whose `type` lacks `{name}`, or a `dataset` entry whose `type` has it | Put `{name}` in a group entry's type, `'trace_{name}'`, in quotes; write a dataset entry's type out |
+| `contract error: artifacts[<i>]: type '<t>' holds {...}; '{name}' is the only placeholder` (or `is not a template (...)`) | A `group` entry's `type` with another placeholder, a format such as `{name:>6}`, or a lone brace | Keep `{name}` alone; write a literal brace as `{{` or `}}` |
+| `contract error: artifacts[<i>].type must be a string` | An unquoted template, `type: {name}`, which YAML reads as a mapping | Quote it: `type: "{name}"` |
+| `contract error: artifacts[<i>]: a 'batch' source takes 'dataset' entries only` | A `group` entry under `batch`, whose first artifact sets the batch size | Name each array of the group in an entry of its own |
+| `contract error: shared[<i>].group is not a contract key` | A `group` under `shared` | A shared entry names one array, with `dataset` |
 | `note: metadata.<field> '<v>' is not in the vocabulary` | A facet value with no canonical id | Non-fatal by design ([the soft vocabulary](../explanation/vocabulary.md)). Prefer an id so the dataset lands on the same facet as everyone else's |
 
 ## `tilewright manifest`: the data
@@ -40,6 +47,11 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `no files match '<pattern>' under <directory>` | Wrong directory or pattern | `ls` the directory; the default pattern is `**/*.h5`, and the glob rules are in [the `pattern` field](dataset-yaml.md#sourcefiles) |
 | `OSError: Unable to open file ... file signature not found` | The pattern matched a non-HDF5 sibling: a NetCDF twin, a Parquet sidecar, a `.gz` | Tighten `pattern` |
 | `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems(print)`) and correct `dataset`, or add `optional: true` |
+| `<file>: artifact type='<t>' group '<g>' not found (mark it 'optional: true' if some entities lack it)` (the entity is named `<file>:/<group>` for `groups`) | The `group` of an entry names nothing in that file. Under `groups` it is relative to each entity group, and the message shows the full path | List the file's groups (`h5py.File(p).visit(print)`) and correct `group`, or add `optional: true` |
+| `<file>: artifact type='<t>' group '<g>' is a dataset: name it with 'dataset'` | The `group` of an entry names a dataset | Write it as a `dataset` entry, with a `type` without `{name}` |
+| `<file>: artifact type='<t>' group '<g>' has no dataset whose name matches members '<m>'; it holds N datasets (...)` | No dataset directly in the group matches `members` (case matters), or the group holds only subgroups, which are never members | Compare `members` with the names the message lists and correct it or `group`, or add `optional: true` if only some entities have them |
+| `<file>: artifacts[<i>] (...) and artifacts[<j>] (...) both give the type '<t>'` (or `shared[<k>] (...) and ...`) | Once the `group` entries are expanded, two entries, or an entry and a shared axis, give one entity the same `type` | Change a `type`, for example a prefix in the template (`dark_{name}`), or narrow `members` |
+| `WARNING: <file>: <group>/<name> unreadable (...); skipped` | A member of a `group` entry is a link that leads nowhere | The other members are registered. Repair the link in the file if you want that array |
 | `<file>: artifact '<t>' has N rows but '<first>' has M; every artifact's leading axis is the entity axis` | A batch file whose arrays disagree on axis 0 | It is not one batch; split the artifact out or fix the file |
 | `<file>: entity_group '<pattern>' matches no group` | The path or glob names no group in that file: a typo, a different case (case matters), a dataset where a group was meant, or a file unlike the others | List the file's groups (`h5py.File(p).visit(print)`) and correct `entity_group`, or narrow `pattern` to the files that have it |
 | `<file>: no groups under entity_group '<pattern>' to treat as entities` (with `(after exclude_groups)` when it is set) | The matching groups hold datasets only, or `exclude_groups` leaves out every subgroup | Point `entity_group` one level higher, or loosen `exclude_groups` |
@@ -74,7 +86,10 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `groups` | subgroups of every group `entity_group` matches (or of the root), less those `exclude_groups` names, summed over files | entities × `artifacts` entries |
 | `table` | rows of the table | 0 |
 
-Plus one artifact row per `shared` axis, reported separately as `shared=S`.
+Plus one artifact row per `shared` axis, reported separately as `shared=S`. A `group` entry
+counts, for each entity, the datasets directly in its group whose names match `members`
+(none where an optional group is absent). `tilewright manifest --check` prints the number
+of entries, not this count.
 
 ---
 

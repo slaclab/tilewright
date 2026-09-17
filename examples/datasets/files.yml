@@ -10,6 +10,7 @@
 #   └── ...
 #
 # Expected from `tilewright manifest`: entities = files matched, artifacts = entities × 1.
+# A group entry (commented out under artifacts) adds, per entity, one artifact per member.
 
 label: Example Files
 key: EXAMPLE_FILES                 # written by `tilewright manifest`; shown so the example is complete
@@ -35,6 +36,12 @@ source:
 
 artifacts:
   - {type: spectrum, dataset: /spectrum}
+  # A group of many arrays takes one entry, with '{name}' in its type:
+  #   /frames/frame_0000 ... /frames/frame_0099  (64, 64)  → artifacts frame_0000 ... frame_0099
+  #   /channels/ch_a ... /channels/ch_d          (600,)    → artifacts trace_ch_a ... trace_ch_d
+  # - {type: "{name}", group: /frames, members: "frame_*"}        # members: a glob, default "*"
+  # - {type: "trace_{name}", group: /channels, optional: true}   # skipped where a file lacks it
+  # Thousands of per-step datasets register slowly: stack them into one array beforehand.
 
 shared:
   - {type: energy, dataset: /energy}

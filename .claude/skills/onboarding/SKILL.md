@@ -91,6 +91,14 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `type` (`docs/reference/manifest.md`, Reserved names): a parameter with such a name goes
   in `exclude`, a `params.location` group gets another name, or pick artifact type names
   that do not clash.
+- **Many arrays side by side in one group (one dataset per channel or per step) → one
+  `group` entry.** `{type: "trace_{name}", group: /channels}` gives one artifact per
+  dataset directly in the group (subgroups are not members), typed with `{name}` filled
+  in; quote the template. `members: "ch_*"` picks some, `optional: true` skips an entity
+  without the group. Not under `batch` or `shared`. The types must stay unique after
+  expansion. Count = matching members per entity. Thousands of per-step datasets
+  register slowly: tell the user, and suggest stacking them into one array (or a `batch`
+  file) before onboarding.
 - **Decide identity.** The default hashes parameter values, so two entities with identical
   parameters would collide — `tilewright manifest` refuses that and names them. Repeated
   measurements (same settings, different runs) are the usual case: put a run number in the

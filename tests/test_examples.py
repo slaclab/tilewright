@@ -31,6 +31,40 @@ def test_example_validates_with_no_warnings(path):
     assert raw.get("key") == cfg.catalog_key, "examples carry the key manifest would write"
 
 
+def test_commented_group_entries_in_the_files_example_do_what_they_say(tmp_path):
+    """Each '# - {type: ...}' line under artifacts in files.yml is an entry an author
+    uncomments. On the layout its comments draw, the two give the artifacts they name, and
+    the optional one is skipped for a file without its group."""
+    path = next(p for p in EXAMPLES if p.stem == "files")
+    lines = re.findall(r"^  # (- \{type: .*?\})(?:\s+#.*)?$", path.read_text(), flags=re.M)
+    assert len(lines) == 2
+    raw = YAML(typ="safe").load(path.read_text())
+    raw["artifacts"] += [YAML(typ="safe").load(line)[0] for line in lines]
+    data = tmp_path / "runs"
+    data.mkdir()
+    for run, channels in ((1, True), (2, False)):
+        with h5py.File(data / f"run_{run:04d}.h5", "w") as f:
+            f["tenDq"], f["sigma"] = 1.0 * run, 0.1
+            f["spectrum"], f["energy"] = np.zeros((151, 40)), np.arange(151.0)
+            for k in range(100):
+                f[f"frames/frame_{k:04d}"] = np.zeros((64, 64), dtype="uint8")
+            f["frames/dark"] = np.zeros((64, 64), dtype="uint8")  # not a frame_*
+            for c in "abcd" if channels else "":
+                f[f"channels/ch_{c}"] = np.zeros(600)
+    raw["source"]["files"]["directory"] = str(data)
+    assert load_dataset(raw)[1] == []
+    yaml_path = tmp_path / "files.yml"
+    with open(yaml_path, "w") as f:
+        YAML().dump(raw, f)
+    _, art_path = generate_manifests(str(yaml_path), tmp_path / "m")
+    art = pd.read_parquet(art_path)
+    frames = [f"frame_{k:04d}" for k in range(100)]
+    traces = [f"trace_ch_{c}" for c in "abcd"]
+    assert list(art.loc[art["file"] == "run_0001.h5", "type"]) == ["spectrum", *frames,
+                                                                   *traces, "energy"]
+    assert list(art.loc[art["file"] == "run_0002.h5", "type"]) == ["spectrum", *frames]
+
+
 def test_commented_params_in_the_files_example_validate():
     """Each '# params: ...' line in files.yml is an alternative an author uncomments."""
     path = next(p for p in EXAMPLES if p.stem == "files")

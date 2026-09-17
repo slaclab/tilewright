@@ -166,6 +166,35 @@ jobs that concatenate their output, collections organized by sample, and run tab
 data that is not HDF5. A fifth would need real data none of these can describe, and an
 ADR.
 
+## Many arrays in one group
+
+Some files keep a series as one dataset per step, or one per channel:
+`/frames/frame_0000` to `/frames/frame_0099`. One `artifacts` entry names them all:
+
+```yaml
+artifacts:
+  - {type: "{name}", group: /frames, members: "frame_*"}
+```
+
+`tilewright manifest` expands the entry into one artifact per dataset in the group whose
+name matches `members`, `frame_0000` to `frame_0099`, and writes each to the manifest as
+if it had an entry of its own, so registration and both read paths see nothing new.
+`{name}` in `type` is the member's name, so `trace_{name}` over `/channels/ch_a` gives
+`trace_ch_a`. A `batch` source does not take this form, because its first artifact sets
+the batch size, and neither does `shared`. What counts as a member, and what an absent or
+empty group does, is in [the `artifacts` fields](../reference/dataset-yaml.md#artifacts).
+
+Each member is still an array of its own: one more node to register, and one read per
+step to get the series back. A few dozen channels are fine. Thousands of per-step
+datasets register slowly and read slowly: stack them into one array, a
+`(steps, ny, nx)` dataset, or into a `batch` file, before onboarding, and the series
+becomes one artifact that slices like any other.
+
+Why expand the entry in the manifest rather than register one stacked array that the
+server reads member by member: a stacked array is the better model for a series, but it
+needs a new server adapter and new code on both read paths, while the expansion needs
+neither.
+
 ## Where the source matters later
 
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
