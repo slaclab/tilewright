@@ -355,7 +355,7 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
         if not ups:
             found = _read_group(container, rest, gname, gpath, spec, batch_size)
         else:
-            i, entities, memo = siblings
+            i, paths, memo = siblings
             above = [p for p in container.name.split("/") if p]
             if ups > len(above):
                 field = f"groups.{gname}" if gname else "group"
@@ -366,8 +366,8 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
             if gname not in memo:
                 where = "/".join(above[:len(above) - ups] + [rest]).strip("/")
                 memo[gname] = _read_group(container.file, where, gname, gpath, spec,
-                                          None if spec.from_ == "attrs" else len(entities),
-                                          skip=entities)
+                                          None if spec.from_ == "attrs" else len(paths),
+                                          skip=paths)
             found = memo[gname]
             if spec.from_ == "datasets":
                 found = ({k: _to_python(v[i]) for k, v in found[0].items()}, found[1])
@@ -682,9 +682,9 @@ class _Walker:
                                      + (" (after exclude_groups)" if excluded else ""))
                 for base, names in parents:
                     memo = {}  # a group reached through '..' is read once per sibling set
-                    entities = [f"{base}/{n}" if base else n for n in names]
-                    siblings = {f"/{gpath}" for gpath in entities}
-                    for i, gpath in enumerate(entities):
+                    gpaths = [f"{base}/{n}" if base else n for n in names]
+                    siblings = {f"/{gpath}" for gpath in gpaths}  # as h5py names them
+                    for i, gpath in enumerate(gpaths):
                         g = f[gpath]
                         params, labels = (_read_params(g, spec, siblings=(i, siblings, memo))
                                           if spec is not None else ({}, {}))
