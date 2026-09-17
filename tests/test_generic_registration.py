@@ -56,15 +56,37 @@ def nips3_manifests():
     return ent_df, art_df, str(nips3_dir)
 
 
-def on_server(art_rows):
-    """What ``ent_container.items()`` returns for artifacts already registered from these
-    manifest rows: (key, node) pairs whose metadata carries the file stamps."""
+def on_server(art_rows, base_dir=None, reads=None):
+    """What the entity container's listing returns for artifacts already registered from
+    these manifest rows: (key, node) pairs whose metadata carries the file stamps and
+    whose ``item`` carries the data source each node reads, as the listing does.
+
+    ``base_dir`` is where the nodes point (the same directory the manifest rows name, so
+    each node serves its row); ``reads`` maps an artifact type to the file its node points
+    at instead, for a node that serves nothing."""
     nodes = []
     for _, row in art_rows.iterrows():
         node = MagicMock()
         node.metadata = {"file_mtime": row.get("file_mtime"), "file_size": row.get("file_size")}
+        node.item = {"attributes": {"data_sources": None}}
+        if base_dir is not None:
+            points_at = (reads or {}).get(row["type"], row["file"])
+            node.item = {"attributes": {"data_sources": [{
+                "assets": [{"data_uri":
+                            f"file://localhost{Path(base_dir) / points_at}"}],
+                "parameters": {"dataset": row["dataset"]},
+            }]}}
         nodes.append((row["type"], node))
     return nodes
+
+
+def already_on(parent, nodes):
+    """Wire a mock parent so its entity container lists ``nodes`` as its children, by
+    either listing call, and return the container."""
+    container = parent.__getitem__.return_value
+    container.items.return_value = nodes
+    container.include_data_sources.return_value.items.return_value = nodes
+    return container
 
 
 def register_entity(manifests, row=0, dataset_key="TEST_KEY",
@@ -112,7 +134,7 @@ class TestVDPRegistration:
 
     def test_registers_entity_and_all_its_artifacts(self, vdp_manifests):
         reg = register_entity(vdp_manifests)
-        assert reg.result == (1, 3, 0, 0, 0)          # 1 entity, 3 artifacts, 0 skipped, 0 failed
+        assert reg.result == (1, 3, 0, 0, 0, 0)          # 1 entity, 3 artifacts, 0 skipped, 0 failed
         assert len(reg.artifacts) == 3
 
     def test_entity_key_derived_from_uid(self, vdp_manifests):
@@ -176,7 +198,7 @@ class TestVDPRegistration:
         mine = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
         parent = MagicMock()
         parent.__contains__.return_value = True    # already registered, complete:
-        parent.__getitem__.return_value.items.return_value = on_server(mine)
+        already_on(parent, on_server(mine, base_dir))
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
@@ -185,7 +207,7 @@ class TestVDPRegistration:
             dataset_key="TEST_KEY",
         )
 
-        assert result == (0, 0, 1, 0, 0)           # counted as skipped, nothing stale
+        assert result == (0, 0, 1, 0, 0, 0)        # counted as skipped, nothing stale
         parent.create_container.assert_not_called()
         parent.__getitem__.return_value.new.assert_not_called()
 
@@ -200,9 +222,9 @@ class TestVDPRegistration:
         assert len(mine) >= 2
         parent = MagicMock()
         parent.__contains__.return_value = True
-        existing = parent.__getitem__.return_value
         rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
-        existing.items.return_value = on_server(rows.iloc[:1])  # only the first attached
+        # only the first attached
+        existing = already_on(parent, on_server(rows.iloc[:1], base_dir))
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
@@ -211,7 +233,7 @@ class TestVDPRegistration:
             dataset_key="TEST_KEY",
         )
 
-        assert result == (0, len(mine) - 1, 1, 0, 0)           # skipped entity, added the rest
+        assert result == (0, len(mine) - 1, 1, 0, 0, 0)        # skipped entity, added the rest
         parent.create_container.assert_not_called()            # the container is reused
         assert [c.kwargs["key"] for c in existing.new.call_args_list] == mine[1:]
         assert "half-registered" in capsys.readouterr().out
@@ -227,9 +249,9 @@ class TestVDPRegistration:
         rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
         parent = MagicMock()
         parent.__contains__.return_value = True
-        nodes = on_server(rows)
+        nodes = on_server(rows, base_dir)
         nodes[0][1].metadata["file_mtime"] = "2020-01-01T00:00:00+00:00"   # older on the server
-        parent.__getitem__.return_value.items.return_value = nodes
+        already_on(parent, nodes)
 
         result = _register_one_entity(
             ent_df.iloc[0], list(ent_df.columns),
@@ -238,9 +260,76 @@ class TestVDPRegistration:
             dataset_key="TEST_KEY",
         )
 
-        assert result == (0, 0, 1, 0, 1)
+        assert result == (0, 0, 1, 0, 1, 0)
         parent.__getitem__.return_value.new.assert_not_called()
         assert "changed on disk since registration" in capsys.readouterr().out
+
+    def test_a_node_that_serves_nothing_is_named_not_skipped(self, vdp_manifests, capsys):
+        """#38: a key's presence was the whole test, so a node a failed POST left behind —
+        listed among the children, but reading a file the manifest never named — was
+        skipped by every later run, which then reported the dataset complete while that
+        artifact served nothing. It is counted apart from the artifacts that failed, and
+        named with its key and what it reads."""
+        from tilewright.register import _register_one_entity
+
+        ent_df, art_df, base_dir = vdp_manifests
+        rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
+        wreck = rows.iloc[0]["type"]
+        parent = MagicMock()
+        parent.__contains__.return_value = True
+        already_on(parent, on_server(rows, base_dir, reads={wreck: "gone.h5"}))
+
+        result = _register_one_entity(
+            ent_df.iloc[0], list(ent_df.columns),
+            art_df.groupby("uid"), list(art_df.columns),
+            parent, base_dir=base_dir, server_base_dir=None,
+            dataset_key="TEST_KEY",
+        )
+
+        assert result == (0, 0, 1, 0, 0, 1)        # skipped, nothing stale, one broken
+        parent.__getitem__.return_value.new.assert_not_called()   # never rewritten
+        out = capsys.readouterr().out
+        assert f"art={wreck}" in out and "cannot serve this artifact" in out, out
+        assert "gone.h5" in out and "tilewright delete" in out, out
+
+    def test_a_failed_registration_leaves_no_node_behind(self, vdp_manifests):
+        """#38: a creation that fails partway can leave the node half-created, and the key
+        would then be skipped for ever. What the server kept is dropped before the
+        exception goes up, so the next run registers it cleanly."""
+        from tilewright.register import _register_artifact
+
+        _, art_df, base_dir = vdp_manifests
+        row = art_df.iloc[0]
+        container = MagicMock()
+        container.new.side_effect = RuntimeError("409: Conflict")
+        container.__contains__.return_value = True       # the server kept the node
+
+        with pytest.raises(RuntimeError, match="409: Conflict"):
+            _register_artifact(container, row, list(art_df.columns), base_dir,
+                               None, {}, False)
+
+        container.__getitem__.assert_called_once_with(row["type"])
+        container.__getitem__.return_value.delete.assert_called_once_with(
+            recursive=True, external_only=True)
+
+    def test_a_node_that_cannot_be_dropped_is_named_in_the_error(self, vdp_manifests):
+        """#38: when the removal itself fails the node is still there, so the exception
+        says so and what to do about it, instead of the bare cause."""
+        from tilewright.register import _register_artifact
+
+        _, art_df, base_dir = vdp_manifests
+        row = art_df.iloc[0]
+        container = MagicMock()
+        container.new.side_effect = RuntimeError("409: Conflict")
+        container.__contains__.return_value = True
+        container.__getitem__.return_value.delete.side_effect = RuntimeError("403")
+
+        with pytest.raises(RuntimeError, match="could not be removed") as caught:
+            _register_artifact(container, row, list(art_df.columns), base_dir,
+                               None, {}, False, parent="TEST_KEY/TEST_KEY_aaaa0000")
+        assert "409: Conflict" in str(caught.value)
+        assert f"TEST_KEY/TEST_KEY_aaaa0000/{row['type']}" in str(caught.value)
+        assert "tilewright delete" in str(caught.value)
 
 
 # ─── NiPS3-style: batched files ──────────────────────────────────────────────
@@ -251,7 +340,7 @@ class TestNiPS3Registration:
 
     def test_registers_entity_and_all_its_artifacts(self, nips3_manifests):
         reg = register_entity(nips3_manifests)
-        assert reg.result == (1, 2, 0, 0, 0)
+        assert reg.result == (1, 2, 0, 0, 0, 0)
         assert set(reg.artifacts) == {"rixs", "mag"}
 
     def test_entity_metadata_has_nips3_params(self, nips3_manifests):
@@ -408,7 +497,7 @@ class TestGenericBehavior:
         reg = register_entity((pd.read_parquet(ent_path), pd.read_parquet(art_path),
                                str(data_dir)), upload=upload)
         types = [f"trace_ch_{c}" for c in "abc"]
-        assert reg.result == (1, 3, 0, 0, 0)
+        assert reg.result == (1, 3, 0, 0, 0, 0)
         sent = reg.uploads if upload else reg.artifacts
         assert sorted(sent) == types
         for t, c in zip(types, "abc"):
@@ -472,7 +561,7 @@ class TestUploadMode:
 
         reg = register_entity(vdp_manifests, upload=True)
         assert not reg.artifacts                    # the DataSource route is idle
-        assert reg.result == (1, 3, 0, 0, 0)
+        assert reg.result == (1, 3, 0, 0, 0, 0)
 
         ent_df, art_df, base_dir = vdp_manifests
         uid = str(ent_df.iloc[0]["uid"])
@@ -510,7 +599,7 @@ class TestUploadMode:
         reg = register_entity((ent_df, art_df, base_dir), upload=True)
         assert not reg.uploads
         n_arts = (art_df["uid"] == str(ent_df.iloc[0]["uid"])).sum()
-        assert reg.result == (1, 0, 0, n_arts, 0)
+        assert reg.result == (1, 0, 0, n_arts, 0, 0)
 
 
 # ─── Shared axes: artifact rows with no uid, registered under the dataset ─────

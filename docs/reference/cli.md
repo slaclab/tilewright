@@ -89,6 +89,12 @@ tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-
   was registered (modification time or size, stamped at registration) is reported as
   `Changed on disk` and the command exits `1` with the rebuild steps; nothing is
   rewritten in place.
+- **A key's presence is not proof that it reads.** Each artifact already on the server is
+  checked against the source its manifest row names — the file, and the path inside it.
+  One that holds another source, or none, is reported as `Broken nodes`, named with its
+  key, and the command exits `1`; nothing is rewritten in place, so the fix is to delete
+  those nodes and register again. An artifact whose creation fails leaves nothing behind:
+  what the server kept for that key is removed before the error is counted.
 - **Shared axes go first**: the manifest's `uid`-less rows, one array child of the dataset
   container each, over the same transport as entity artifacts. Independent of `-n`; an
   existing axis is skipped.

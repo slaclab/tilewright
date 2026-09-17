@@ -316,9 +316,12 @@ tilewright register .tilewright/datasets/<KEY>.yml --url <URL> --api-key <KEY>
 thousand entities, tell the user how long the run will take *before* starting it: time
 `-n 100` and multiply out (`docs/ONBOARDING.md` step 4, "How long a pointer run takes").
 Read the summary
-block, not the exit code: `Artifact errors` must be 0, and `Entities` + `Skipped` should
-equal the entity count from Step 5. Any `WARNING ... half-registered` lines mean a
-previous run died mid-entity and this run attached the rest — fine.
+block, not the exit code: `Artifact errors` must be 0, `Broken nodes` must be absent, and
+`Entities` + `Skipped` should equal the entity count from Step 5. Any
+`WARNING ... half-registered` lines mean a previous run died mid-entity and this run
+attached the rest — fine. A `Broken nodes` count means artifacts that are on the server
+but serve nothing: each is named with its key, and the fix is `tilewright delete <KEY>
+<ENTITY> <ARTIFACT>` for each, then register again.
 
 ## Step 7 — Verify: read it back (the gate that actually proves it)
 
