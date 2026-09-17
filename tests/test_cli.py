@@ -241,5 +241,6 @@ def test_register_a_table_with_path_columns_verifies_without_a_warning(tmp_path,
     assert len(entities) == 2
     assert sorted(e.metadata["path_p_travel_s"] for e in entities.values()) == [3.5, 4.25]
     assert "Entity 'PICKS_TABLE_" in out and "no artifacts declared" in out
+    assert "(locators: 0)" in out  # a lone path_* key is not a locator
     assert "WARNING" not in out and "reads through the server will fail" not in out
     assert "Done!" in out
