@@ -1,9 +1,12 @@
 # Identity follows the source: a table is identified by its id columns
 
 **Status:** accepted, 2026-09-17. Amends ADR-0006 (`identity` is no longer common to every
-tag) and ADR-0007 (a table's identity is not provenance). Decided in the public comments
-on [#6](https://github.com/slaclab/TileWright/issues/6#issuecomment-5710338438) and
-[#9](https://github.com/slaclab/TileWright/issues/9#issuecomment-5710338651).
+tag) and ADR-0007 (a table's identity is not provenance, and a list `id` is one of the
+fingerprint's facts). Decided in the public comments on
+[#6](https://github.com/slaclab/TileWright/issues/6#issuecomment-5710338438) and
+[#9](https://github.com/slaclab/TileWright/issues/9#issuecomment-5710338651). The
+fingerprint rule was added in the second round of
+[#17](https://github.com/slaclab/TileWright/pull/17), which had left it open.
 
 ## Decision
 
@@ -52,10 +55,21 @@ identity becomes `provenance`.
   length N are per-entity values, 0-dim members are broadcast, and anything else, `(N, 1)`
   included, is skipped without a message.
 
-**The fingerprint does not move.** `source_fingerprint` hashes the same facts as before;
-for a table the identity mode it hashes is still `provenance`, which is also what the
-manifest's `identity` metadata records. A test pins the fingerprint of every example YAML,
-and of six identity and params variants, to the values computed before this change.
+**The fingerprint includes a table's `id` only when it is a list.** `source_fingerprint`
+hashes the same facts as before, plus `id` when `id` is a list. A single column adds
+nothing, so no YAML written before this change gets a new fingerprint. For a table the
+identity mode it hashes is still `provenance`, which is also what the manifest's
+`identity` metadata records. The list is hashed as written, order included, because the
+uids depend on the order. So a table switched from `id: run_number` to
+`id: [run_number, Ei]` (or to `[run_number]`) gets a new fingerprint.
+`tilewright register` then refuses its old key ("already holds different data") instead
+of registering the re-keyed entities beside the old ones. The way through is to delete the
+dataset and register again. Tests pin:
+
+- the fingerprint of every example YAML, and of six identity and params variants, at the
+  values computed before this change (`b268731`);
+- the fingerprint of the table example with three list ids;
+- the refusal, through `register.dataset_container`.
 
 ## Why
 
@@ -81,13 +95,26 @@ entity, and inserting or removing a row re-keys every row after it, so a re-regi
 under the same fingerprint would add those entities a second time. An id column moves
 with its row.
 
+**Two arguments that lost on the fingerprint.**
+
+- *Leave `id` out of the fingerprint.* This was the first version of this decision. It
+  lost because the fix the collision report offers, a composite id, re-keys every entity.
+  Under an unchanged fingerprint, the next `register` would add the new keys beside the
+  old ones without a message.
+- *Hash `id` always.* This would also catch a change from one column to another. It lost
+  because it gives every table registered so far a new fingerprint, and `register` would
+  then refuse those tables.
+
 ## Consequences
 
 - A YAML with `identity:` under `table` no longer validates. It never had an effect.
 - Existing single-column tables keep their uids and fingerprints; no dataset is re-keyed.
-- Changing `id` re-keys every entity of the table. The fingerprint does not include `id`
-  (it did not before), so re-registering under the same label after such a change adds
-  the entities again: delete the dataset first.
+- Changing `id` re-keys every entity of the table: delete the dataset, then register
+  again.
+  - A change to, from or between lists changes the fingerprint. `register` refuses the
+    old key until the dataset is deleted.
+  - A change from one single column to another keeps the fingerprint, so nothing stops
+    it. `register` would add the re-keyed entities beside the old ones.
 - `tests/test_contract.py::test_concept_budget` now pins each tag's keys and the keys of
   `params` and of an artifact entry; every later contract change edits that one test.
 - `tests/test_contract.py::test_batch_params_cannot_be_null` asserted the behaviour this

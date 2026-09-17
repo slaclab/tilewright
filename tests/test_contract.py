@@ -258,6 +258,28 @@ class TestKeyAndFingerprint:
         raw["source"][stem].update(override)
         assert source_fingerprint(load_dataset(raw)[0]) == expected
 
+    # A table's id is a fact only as a list (ADR-0008): a single column leaves the
+    # b268731 value alone, and a list re-keys every entity, so it is different data.
+    GOLDEN_TABLE_IDS = [
+        (["run_number", "Ei"], "1f158c1accc9890f"),
+        (["Ei", "run_number"], "f4a58535f478d8bb"),
+        (["run_number"], "b0caa823904594f8"),
+    ]
+
+    @staticmethod
+    def table_fingerprint(table_id):
+        raw = YAML(typ="safe").load((EXAMPLES / "table.yml").read_text())
+        raw["source"]["table"]["id"] = table_id
+        return source_fingerprint(load_dataset(raw)[0])
+
+    def test_single_column_id_keeps_the_b268731_fingerprint(self):
+        assert self.table_fingerprint("run_number") == "fb36ed8c86a417f5"
+
+    @pytest.mark.parametrize("table_id, expected", GOLDEN_TABLE_IDS,
+                             ids=["run_number,Ei", "Ei,run_number", "one-element"])
+    def test_fingerprint_of_a_list_id_is_pinned(self, table_id, expected):
+        assert self.table_fingerprint(table_id) == expected
+
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()
         raw["source"]["files"]["server_base_dir"] = "/mnt/runs"
