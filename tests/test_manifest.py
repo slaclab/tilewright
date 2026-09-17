@@ -561,6 +561,57 @@ class TestNestedGroups:
         assert reads.count("south/calibration") == 1
         assert len(reads) == 2 + 4  # and each detector's own group once
 
+    # The two layouts of #11, in miniature, with the YAML of the decision comment
+    # (https://github.com/slaclab/TileWright/issues/11#issuecomment-5712627796).
+
+    def test_the_decision_for_osti_1972213(self, tmp_path):
+        d = tmp_path / "geo"
+        d.mkdir()
+        fixed = {"coaxial": ["Pinj", "Tamb", "Tsurf", "cp_rock", "pipe_roughness", "rho_rock",
+                             "area_ratio", "pipe_k", "pipe_thickness"],
+                 "utube": ["Pinj", "Tamb", "Tsurf", "cp_rock", "pipe_roughness", "rho_rock"]}
+        with h5py.File(d / "clgs_results_final.h5", "w") as f:
+            for design, names in fixed.items():
+                for k, name in enumerate(names):
+                    f[f"{design}/fixed_params/{name}"] = float(k)
+                for fluid in ("H2O", "sCO2"):
+                    f[f"{design}/{fluid}/input/D"] = np.arange(3.0)
+        yaml = YAML(typ="safe").load("""
+            entity_group: "/*"
+            exclude_groups: [fixed_params]
+            params:
+              groups: {design: ../fixed_params}
+              location: '/(?P<design_name>[^/]+)/(?P<fluid>[^/]+)$'
+        """)
+        cfg = {"label": "GeoCLUSTER", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "*.h5", **yaml}},
+               "artifacts": [{"type": "h2o_D", "dataset": "input/D"}]}
+        ent, art = run(tmp_path, cfg)
+        assert list(zip(ent["design_name"], ent["fluid"])) == [
+            ("coaxial", "H2O"), ("coaxial", "sCO2"), ("utube", "H2O"), ("utube", "sCO2")]
+        assert ent["uid"].nunique() == 4 and len(art) == 4
+        assert ent["design.pipe_k"].isna().tolist() == [False, False, True, True]
+        assert list(ent["design.Pinj"]) == [0.0] * 4
+
+    def test_the_decision_for_zenodo_3528199(self, tmp_path):
+        d = tmp_path / "srct"
+        d.mkdir()
+        load = np.linspace(7.2, 1189.0, 11)
+        with h5py.File(d / "NT4_T.hdf5", "w") as f:
+            g = f.create_group("DataContainers/RawDataContainer_T")
+            g["Load"], g["Displacement"] = load, np.linspace(0.0314, 0.3624, 11)
+            for i in range(1, 12):
+                g[f"step_{i:02d}/CellData/CellData"] = np.zeros((2, 2, 2), dtype="uint8")
+        cfg = {"label": "X100", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "NT4_T.hdf5",
+                                     "entity_group": "/DataContainers/RawDataContainer_T",
+                                     "params": {"group": ".."}}},
+               "artifacts": [{"type": "volume", "dataset": "CellData/CellData"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid", "source_group", "Displacement", "Load"]
+        assert list(ent["Load"]) == list(load) and len(ent) == 11
+        assert ent.loc[3, "source_group"].endswith("/step_04")
+
 
 # ---------------------------------------------------------------------------
 
