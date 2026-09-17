@@ -803,14 +803,26 @@ class TestReservedNames:
         assert "samples.h5:/samples/sample_2: parameter 'dataset_spectrum'" in msg
         assert "add '/params/dataset_spectrum' to params.exclude" in msg
 
-    def test_an_attribute_parameter(self, tmp_path):
+    @pytest.mark.parametrize("group", ["/", "/meta"])
+    def test_an_attribute_parameter(self, tmp_path, group):
+        # params.exclude skips attributes too (#5), so the fix line offers it (#18)
         cfg = files_dataset(tmp_path, attrs=True)
-        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
-            f.attrs["path_spectrum"] = "calib_A"
-        with pytest.raises(ValueError, match=r"parameter 'path_spectrum'(.|\n)*Fix: rename the "
-                                             r"attribute 'path_spectrum' in the file; "
-                                             r"params.exclude skips datasets"):
+        cfg["source"]["files"]["params"]["group"] = group
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                g = f.require_group(group)
+                g.attrs["run"] = i
+                g.attrs["path_spectrum"] = "calib_A"
+        path = f"{group.rstrip('/')}/path_spectrum"
+        with pytest.raises(ValueError) as exc:
             run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert "run_0.h5: parameter 'path_spectrum' is named like a locator" in msg
+        assert (f"Fix: add '{path}' to params.exclude under the source, or rename the "
+                f"attribute 'path_spectrum' in the file.") in msg
+        cfg["source"]["files"]["params"]["exclude"] = [path]
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert "path_spectrum" not in ent.columns and len(ent) == 3
 
     def test_a_params_groups_name(self, tmp_path, nexus):
         groups = nexus["source"]["files"]["params"]["groups"]

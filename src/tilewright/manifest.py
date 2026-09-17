@@ -488,14 +488,14 @@ class _Walker:
             what = f"label '{name}' (attribute '{attr}' of parameter '{field}')"
             rename = f"rename the attribute '{attr}' in the file"
         spec = self.body.params
+        if spec.from_ == "attrs":
+            rename = f"rename the attribute '{name}' in the file"
         if spec.groups:
             fix = f"rename '{head}' under params.groups."
-        elif spec.from_ == "attrs":
-            fix = (f"rename the attribute '{name}' in the file; params.exclude skips "
-                   f"datasets, not attributes.")
         else:
-            path = "/" + "/".join(p for p in ((spec.group or "").strip("/"),
-                                              field.split(".", 1)[0]) if p)
+            # exclude names an attribute by its whole name, a dataset by its first part
+            leaf = name if spec.from_ == "attrs" else field.split(".", 1)[0]
+            path = "/" + "/".join(p for p in ((spec.group or "").strip("/"), leaf) if p)
             fix = (f"add '{path}' to params.exclude under the source"
                    + (f" (this also leaves out the parameter '{field}')"
                       if field != name else "")
