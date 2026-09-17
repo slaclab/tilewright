@@ -80,7 +80,7 @@ For a `group` entry the check runs on the template with `{name}` filled in by `_
 only the template's own text can fail there, and `tilewright manifest` runs it again on
 every expanded type, naming the member that made a bad one. Everything else is allowed,
 because a local server served it back: dots anywhere (a locator key such as
-`path_cell.0` is one flat key; registration nests only the entity's parameter columns),
+`path_stage.x` is one flat key; registration nests only the entity's parameter columns),
 `-`, `|`, a leading `_` or `.`, spaces (leading and trailing too), brackets, braces, `%`
 without two hex digits, quotes and other punctuation, non-ASCII letters, combining marks,
 no-break and zero-width spaces, C1 control characters. The `type` description states the
@@ -117,12 +117,12 @@ entries per entity and a 5.4 MB YAML, and the campaign registered the first 7 da
 variable instead. One `group` entry per variable names them all.
 
 **The character rule comes from a server, not from a guess.** A blind onboarding worker
-renamed checkpoint fields such as `pressure.cell.0` and `dupwind_relative_permeability|dpressure.face.0`
-(osti/2007951), and another renamed netCDF variables such as `/_CLDHGH` (zenodo/1246857),
-because the surface did not say which characters work. Every sample in
-`tests/test_node_keys.py` was registered into a local `tiled serve` of the pinned Tiled
-(0.2.18), through both transports, and read back by listing, by key, by path and from its
-locators. The ones that failed, and why:
+renamed checkpoint fields such as `pressure.cell.0` and
+`dupwind_relative_permeability|dpressure.face.0` (osti/2007951), and another renamed
+netCDF variables such as `/_CLDHGH` (zenodo/1246857), because the surface did not say
+which characters work. Every sample in `tests/test_node_keys.py` was registered into a
+local `tiled serve` of the pinned Tiled (0.2.18), through both transports, and read back
+by listing, by key, by path and from its locators. The ones that failed, and why:
 
 | Sample | Pointer | Upload | Cause (tiled 0.2.18) |
 |---|---|---|---|
@@ -130,8 +130,7 @@ locators. The ones that failed, and why:
 | `a?b`, `a#b` | registers; read raises `KeyError` | artifact error | same method: `self_link + "".join(f"/{key}" ...)` puts the key into the URL unescaped |
 | `a%20b`, `a%2Fb`, `%41` | registers; read raises `KeyError` | artifact error | the server decodes the escape, so it looks up another key |
 | `.`, `..` | registers; the read returns the entity, not the array | artifact error | a URL drops dot segments |
-| `a	b`, `a
-b`, `ab`, `ab` | registers; read raises `httpx.InvalidURL` | artifact error | httpx refuses a non-printable ASCII character in a URL |
+| `a\tb`, `a\nb`, `a\x01b`, `a\x7fb` (the characters, not the escapes) | registers; read raises `httpx.InvalidURL` | artifact error | httpx refuses a non-printable ASCII character in a URL |
 
 So the rule forbids exactly those, and the integration test asserts that the server
 serves back exactly the samples the rule accepts. A leading `_` was a worry in #23 and

@@ -80,7 +80,8 @@ Then edit:
   ([identity and keys](explanation/identity.md)).
 - **`artifacts`**: one per array an entity exposes; `optional: true` if some entities
   lack it. A `type` may hold spaces, dots and non-ASCII letters, but not `/`, `?` or `#`
-  ([the full rule](reference/dataset-yaml.md#artifacts)). A group that holds many arrays takes one entry, `{type: "{name}", group: /frames}`
+  ([the full rule](reference/dataset-yaml.md#artifacts)). A group that holds many arrays
+  takes one entry, `{type: "{name}", group: /frames}`
   ([many arrays in one group](explanation/sources.md#many-arrays-in-one-group)).
   Arrays common to *every* entity, like an energy axis, go under `shared`.
 
