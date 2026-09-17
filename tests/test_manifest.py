@@ -311,6 +311,258 @@ class TestGroups:
 
 
 # ---------------------------------------------------------------------------
+# nested entity groups (ADR-0011, #11)
+
+SITE_LOCATION = r":/(?P<site>[^/]+)/(?P<detector>[^/]+)$"
+
+
+def sites_dataset(tmp_path):
+    """Like osti/1972213: the entity is two group levels deep (/<site>/<detector>), and a
+    sibling group, /<site>/calibration, holds values for every detector of its site. The
+    two sites have different calibration sets, and every detector reads the same
+    temperature, so only the location tells two detectors of one site apart."""
+    d = tmp_path / "sites"
+    d.mkdir()
+    with h5py.File(d / "detectors.h5", "w") as f:
+        f.create_dataset("created", data="2026-09-17")  # a root dataset matches no glob
+        for site, detectors, calibration in (
+                ("south", ["det_c", "det_a"], {"gain": 2.0}),
+                ("north", ["det_b", "det_a"], {"gain": 1.5, "offset": 0.25, "channels": 8})):
+            for name, value in calibration.items():
+                f.create_dataset(f"{site}/calibration/{name}", data=value)
+            f[f"{site}/calibration/gain"].attrs["units"] = "counts/keV"
+            f.create_dataset(f"{site}/calibration/notes", data="bench 4")
+            for det in detectors:
+                f.create_dataset(f"{site}/{det}/temperature", data=77.0)
+                f.create_dataset(f"{site}/{det}/spectrum", data=np.zeros(4))
+        f.create_group("empty_site").create_dataset("status", data=0)  # matches, no entity
+    return {"label": "Detectors", "metadata": dict(META),
+            "source": {"groups": {"directory": str(d), "entity_group": "/*",
+                                  "exclude_groups": ["calibration"],
+                                  "params": {"groups": {"calibration": "../calibration",
+                                                        "readout": "/"},
+                                             "exclude": ["../calibration/notes"],
+                                             "location": SITE_LOCATION}}},
+            "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+
+
+def scans_dataset(tmp_path, names=None, exclude=("calibration",)):
+    """Like zenodo/3528199: per-scan values stored beside the scan groups, as 1-D arrays
+    with one element per scan, in the sorted order of the scan names."""
+    names = names or [f"scan_{i:02d}" for i in range(1, 13)]
+    d = tmp_path / "scans"
+    d.mkdir()
+    with h5py.File(d / "run.h5", "w") as f:
+        run_ = f.create_group("run")
+        run_.create_dataset("beam_current", data=np.arange(len(names)) * 10.0)
+        run_["beam_current"].attrs["units"] = "mA"
+        run_.create_dataset("energy", data=8.0)              # 0-dim: every scan
+        run_.create_dataset("mode", data=np.array([3]))      # size 1: every scan
+        run_.create_dataset("shutter", data=np.ones(5))      # another length: skipped
+        run_.create_dataset("frame", data=np.ones((len(names), 2)))  # 2-D: skipped
+        run_.create_group("calibration").create_dataset("dark", data=np.zeros(2))
+        for name in names:
+            run_.create_dataset(f"{name}/image", data=np.zeros((2, 2)))
+    return {"label": "Scans", "metadata": dict(META),
+            "source": {"groups": {"directory": str(d), "entity_group": "/run",
+                                  "exclude_groups": list(exclude),
+                                  "params": {"group": ".."}}},
+            "artifacts": [{"type": "image", "dataset": "image"}]}
+
+
+class TestNestedGroups:
+
+    def test_a_glob_entity_group_takes_the_subgroups_of_every_match(self, tmp_path):
+        ent, art = run(tmp_path, sites_dataset(tmp_path))
+        assert list(ent["source_group"]) == ["north/det_a", "north/det_b",
+                                             "south/det_a", "south/det_c"]
+        assert list(art["dataset"]) == [f"/{g}/spectrum" for g in ent["source_group"]]
+        assert list(ent.columns) == [
+            "uid", "source_group", "site", "detector", "calibration.channels",
+            "calibration.gain", "calibration.offset", "readout.temperature",
+            "calibration.gain_units"]
+        assert list(ent["site"]) == ["north", "north", "south", "south"]
+        assert list(ent["calibration.gain"]) == [1.5, 1.5, 2.0, 2.0]
+        assert list(ent["calibration.gain_units"]) == ["counts/keV"] * 4
+        assert ent.loc[0, "uid"] == params_uid("DETECTORS", {
+            "site": "north", "detector": "det_a", "calibration.channels": 8,
+            "calibration.gain": 1.5, "calibration.offset": 0.25,
+            "readout.temperature": 77.0})
+
+    def test_entities_lacking_a_parameter_get_null(self, tmp_path):
+        """docs/explanation/data-model.md: a column one entity lacks is null for it, and
+        a column of integers with a null in it is written as floats."""
+        ent, _ = run(tmp_path, sites_dataset(tmp_path))
+        assert ent["calibration.offset"].isna().tolist() == [False, False, True, True]
+        assert ent["calibration.channels"].tolist()[:2] == [8.0, 8.0]
+        assert pd.api.types.is_float_dtype(ent["calibration.channels"])
+        # the uid is computed before the table is built: the value stays the int 8
+        assert ent.loc[0, "uid"] == params_uid("DETECTORS", {
+            "site": "north", "detector": "det_a", "calibration.channels": 8,
+            "calibration.gain": 1.5, "calibration.offset": 0.25,
+            "readout.temperature": 77.0})
+
+    def test_the_location_keeps_sibling_entities_distinct(self, tmp_path):
+        cfg = sites_dataset(tmp_path)
+        del cfg["source"]["groups"]["params"]["location"]
+        with pytest.raises(ValueError, match="4 entities share 2 uids"):
+            run(tmp_path, cfg)
+
+    def test_dotdot_resolves_against_each_entity_group(self, tmp_path):
+        """'..' is the group that holds the entity group, '../..' the one above it, and a
+        glob segment may stand between literal ones."""
+        d = tmp_path / "campaigns"
+        d.mkdir()
+        with h5py.File(d / "c.h5", "w") as f:
+            for c, flux in (("c1", 1.0), ("c2", 2.0), ("x9", 9.0)):
+                f.create_dataset(f"{c}/flux", data=flux)
+                f.create_dataset(f"{c}/scans/order", data=np.array([30, 10]))
+                for s in ("s1", "s0"):
+                    f.create_dataset(f"{c}/scans/{s}/image", data=np.zeros(2))
+        cfg = {"label": "Campaigns", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "entity_group": "/c*/scans",
+                                     "params": {"groups": {"campaign": "../..",
+                                                           "scans": ".."}}}},
+               "artifacts": [{"type": "image", "dataset": "image"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent["source_group"]) == ["c1/scans/s0", "c1/scans/s1",
+                                             "c2/scans/s0", "c2/scans/s1"]
+        assert list(ent["campaign.flux"]) == [1.0, 1.0, 2.0, 2.0]
+        assert list(ent["scans.order"]) == [30, 10, 30, 10]
+
+    def test_a_sibling_array_gives_one_value_per_entity(self, tmp_path):
+        ent, art = run(tmp_path, scans_dataset(tmp_path))
+        assert list(ent["source_group"]) == [f"run/scan_{i:02d}" for i in range(1, 13)]
+        assert list(ent.columns) == ["uid", "source_group", "beam_current", "energy",
+                                     "mode", "beam_current_units"]
+        assert list(ent["beam_current"]) == [i * 10.0 for i in range(12)]
+        assert set(ent["energy"]) == {8.0} and set(ent["mode"]) == {3}
+        assert set(ent["beam_current_units"]) == {"mA"}
+        assert ent.loc[11, "uid"] == params_uid("SCANS", {
+            "beam_current": 110.0, "energy": 8.0, "mode": 3})
+        assert len(art) == 12
+
+    def test_names_pair_with_elements_in_text_order_not_numeric(self, tmp_path):
+        """The params description warns: scan_10 sorts before scan_2."""
+        names = [f"scan_{i}" for i in range(1, 13)]
+        ent, _ = run(tmp_path, scans_dataset(tmp_path, names=names))
+        order = sorted(names)
+        assert order[:4] == ["scan_1", "scan_10", "scan_11", "scan_12"]
+        assert list(ent["source_group"]) == [f"run/{n}" for n in order]
+        assert dict(zip(ent["source_group"], ent["beam_current"]))["run/scan_2"] == 40.0
+
+    def test_siblings_are_counted_after_exclude_groups(self, tmp_path):
+        """With 'calibration' not excluded there are 13 siblings, so the 12-element array
+        is skipped, and 'calibration' is an entity itself."""
+        cfg = scans_dataset(tmp_path, exclude=())
+        cfg["artifacts"][0]["optional"] = True
+        cfg["source"]["groups"]["identity"] = "provenance"
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 13 and "run/calibration" in set(ent["source_group"])
+        assert "beam_current" not in ent.columns and set(ent["energy"]) == {8.0}
+        assert len(art) == 12
+
+    def test_exclude_groups_applies_to_the_top_level_groups(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for name in ("run_1", "run_2", "_meta", "Run_3"):
+                f.create_dataset(f"{name}/spectrum", data=np.zeros(2))
+                f.create_dataset(f"{name}/params/tenDq", data=float(len(name)))
+        del cfg["source"]["groups"]["entity_group"]
+        cfg["source"]["groups"]["exclude_groups"] = ["_*", "samp*", "run_[2-9]"]
+        cfg["source"]["groups"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent["source_group"]) == ["Run_3", "run_1"]
+
+    def test_attributes_beside_the_entity_groups_go_to_every_sibling(self, tmp_path):
+        cfg = scans_dataset(tmp_path)
+        with h5py.File(tmp_path / "scans" / "run.h5", "a") as f:
+            f["run"].attrs["operator"] = "rm"
+            f["run"].attrs["thresholds"] = np.arange(12.0)  # an attribute is never split
+        cfg["source"]["groups"]["params"] = {"groups": {"run": ".."}, "from": "attrs"}
+        cfg["source"]["groups"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent["run.operator"]) == {"rm"} and len(ent) == 12
+        assert all(list(v) == list(np.arange(12.0)) for v in ent["run.thresholds"])
+
+    def test_recursing_from_dotdot_skips_the_entity_groups(self, tmp_path):
+        """The group '..' holds the entity groups themselves; 'recursive' reads the other
+        subgroups (here the excluded 'calibration'), never a sibling's own values."""
+        cfg = scans_dataset(tmp_path)
+        with h5py.File(tmp_path / "scans" / "run.h5", "a") as f:
+            f.create_dataset("run/calibration/offset", data=0.5)
+            for i in range(1, 13):
+                f.create_dataset(f"run/scan_{i:02d}/exposure", data=float(i))
+        cfg["source"]["groups"]["params"] = {"groups": {"run": "..", "own": "/"},
+                                             "recursive": True}
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == [
+            "uid", "source_group", "run.beam_current", "run.energy", "run.mode",
+            "run.calibration.offset", "own.exposure", "run.beam_current_units"]
+        assert list(ent["own.exposure"]) == [float(i) for i in range(1, 13)]
+        assert set(ent["run.calibration.offset"]) == {0.5}
+
+    def test_climbing_above_the_file_root_names_the_entity(self, tmp_path):
+        cfg = scans_dataset(tmp_path)
+        cfg["source"]["groups"]["params"] = {"groups": {"up": "../../../calibration"}}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value) == (
+            f"{tmp_path / 'scans' / 'run.h5'}:/run/scan_01: params.groups.up "
+            "'../../../calibration' climbs 3 levels from an entity group 2 levels below the "
+            "file root, so above the root; remove 1 '..'")
+
+    def test_climbing_to_the_root_reads_the_root(self, tmp_path):
+        cfg = scans_dataset(tmp_path)
+        with h5py.File(tmp_path / "scans" / "run.h5", "a") as f:
+            f.create_dataset("facility_code", data=7)
+        cfg["source"]["groups"]["params"] = {"group": "../.."}
+        cfg["source"]["groups"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid", "source_group", "facility_code"]
+        assert set(ent["facility_code"]) == {7} and len(ent) == 12
+
+    @pytest.mark.parametrize("entity_group", ["/nothere", "/r?x/*", "/run/scan_[a-z]*"])
+    def test_an_entity_group_that_matches_nothing_names_file_and_pattern(self, tmp_path,
+                                                                         entity_group):
+        cfg = scans_dataset(tmp_path)
+        cfg["source"]["groups"]["entity_group"] = entity_group
+        with pytest.raises(KeyError) as exc:
+            run(tmp_path, cfg)
+        assert exc.value.args[0] == (f"{tmp_path / 'scans' / 'run.h5'}: entity_group "
+                                     f"'{entity_group}' matches no group")
+
+    def test_a_glob_is_case_sensitive_and_skips_datasets(self, tmp_path):
+        cfg = scans_dataset(tmp_path)
+        cfg["source"]["groups"]["entity_group"] = "/R*"
+        with pytest.raises(KeyError, match="matches no group"):
+            run(tmp_path, cfg)
+        cfg["source"]["groups"]["entity_group"] = "/run/beam*"  # a dataset, not a group
+        with pytest.raises(KeyError, match="matches no group"):
+            run(tmp_path, cfg, name="ds2")
+
+    def test_excluding_every_subgroup_is_an_error(self, tmp_path):
+        cfg = scans_dataset(tmp_path, exclude=("scan_*", "cal*"))
+        with pytest.raises(ValueError, match=r"run\.h5: no groups under entity_group "
+                                             r"'/run' to treat as entities \(after "
+                                             r"exclude_groups\)"):
+            run(tmp_path, cfg)
+
+    def test_a_dotdot_group_is_read_once_per_sibling_set(self, tmp_path, monkeypatch):
+        from tilewright import manifest
+
+        reads = []
+        real = manifest._read_group
+        monkeypatch.setattr(manifest, "_read_group",
+                            lambda holder, path, *a, **k: reads.append(path)
+                            or real(holder, path, *a, **k))
+        run(tmp_path, sites_dataset(tmp_path))
+        assert reads.count("north/calibration") == 1
+        assert reads.count("south/calibration") == 1
+        assert len(reads) == 2 + 4  # and each detector's own group once
+
+
+# ---------------------------------------------------------------------------
 
 def systems_table(tmp_path, ids="system_id"):
     """Like osti/1846021: system_id repeats, and each repeat differs in one other column."""

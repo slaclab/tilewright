@@ -23,6 +23,7 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import h5py
@@ -36,7 +37,7 @@ from ruamel.yaml.error import YAMLError
 
 from .contract import (
     ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec, SharedAxisSpec,
-    load_dataset, slugify_key, source_fingerprint,
+    climb, load_dataset, slugify_key, source_fingerprint,
 )
 from .utils import ARTIFACT_STANDARD_COLS
 
@@ -336,61 +337,95 @@ def _attrs(obj, label_of=None, skip=()):
     return out
 
 
-def _read_params(container, spec: ParamsSpec, batch_size=None):
+def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
     """One entity's (or one batch file's) parameters from its container.
 
     Returns ``(params, labels)``. ``params`` maps dotted keys (``instrument.Ei``) to values,
     or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
+
+    ``siblings`` is ``(i, paths, memo)`` for a ``groups`` entity: its position among the
+    entity groups beside it, their HDF5 paths, and a dict those share. A group path that
+    starts with ``..`` leaves the entity group (ADR-0011); such a group is read once for
+    the n siblings, by the batch rule with N = n, never descending into the entity groups
+    themselves, and the entity takes element i.
     """
-    groups = spec.groups or {"": spec.group or "/"}
-    exclude = {p.strip("/") for p in spec.exclude}
-    if spec.from_ == "attrs":
-        out = OrderedDict()
-        for gname, gpath in groups.items():
-            gpath = gpath.strip("/")
-            target = container[gpath] if gpath else container
-            # an attribute's exclude path is '<group path>/<name>': '/version' at the root
-            skip = {n for n in target.attrs if f"{gpath}/{n}".strip("/") in exclude}
-            for name, val in _attrs(target, skip=skip).items():
-                key = f"{gname}.{name}" if gname else name
-                out[key] = np.full(batch_size, val) if batch_size else val
-        return out, OrderedDict()
     out, labels = OrderedDict(), OrderedDict()
-    for gname, gpath in groups.items():
-        gpath = gpath.strip("/")
-        if gpath and not (gpath in container and isinstance(container[gpath], h5py.Group)):
-            continue
-        pending = [(container[gpath] if gpath else container, "")]
-        while pending:
-            g, prefix = pending.pop(0)
-            for name in sorted(g.keys()):
-                rel = f"{prefix}/{name}" if prefix else name
-                if f"{gpath}/{rel}".strip("/") in exclude:
-                    continue
-                try:
-                    obj = g[name]
-                except KeyError as e:  # dangling link
-                    print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
-                    continue
-                if isinstance(obj, h5py.Group):
-                    if spec.recursive:
-                        pending.append((obj, rel))
-                    continue
-                if not isinstance(obj, h5py.Dataset):
-                    continue
-                key = ".".join(p for p in (gname, *rel.split("/")) if p)
-                # A scalar is a 0-dim or a size-1 dataset (NeXus writes scalars as shape
-                # (1,)). In 'batch' a scalar is broadcast to every row whatever N is, and a
-                # 1-D dataset of length N > 1 is one value per row. With N == 1 a length-1
-                # dataset is both, and both readings give the one row the same value.
-                if obj.ndim == 0 or obj.size == 1:
-                    val = _to_python(obj[()])
-                    out[key] = np.full(batch_size, val) if batch_size else val
-                elif batch_size and obj.ndim == 1 and obj.shape[0] == batch_size:
-                    out[key] = obj[:]
-                else:
-                    continue
-                labels.update(_attrs(obj, label_of=key))
+    for gname, gpath in spec.paths.items():
+        ups, rest = climb(gpath)
+        if not ups:
+            found = _read_group(container, rest, gname, gpath, spec, batch_size)
+        else:
+            i, entities, memo = siblings
+            above = [p for p in container.name.split("/") if p]
+            if ups > len(above):
+                field = f"groups.{gname}" if gname else "group"
+                raise ValueError(
+                    f"{container.file.filename}:{container.name}: params.{field} {gpath!r} "
+                    f"climbs {ups} levels from an entity group {len(above)} levels below the "
+                    f"file root, so above the root; remove {ups - len(above)} '..'")
+            if gname not in memo:
+                where = "/".join(above[:len(above) - ups] + [rest]).strip("/")
+                memo[gname] = _read_group(container.file, where, gname, gpath, spec,
+                                          None if spec.from_ == "attrs" else len(entities),
+                                          skip=entities)
+            found = memo[gname]
+            if spec.from_ == "datasets":
+                found = ({k: _to_python(v[i]) for k, v in found[0].items()}, found[1])
+        out.update(found[0])
+        labels.update(found[1])
+    return out, labels
+
+
+def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, skip=()):
+    """The parameters and labels of the one group (or, under ``from: attrs``, dataset) at
+    ``path`` in ``holder``, with keys nested under ``gname``. ``frame`` is the path as
+    written in the YAML, against which ``spec.exclude`` is matched; ``recursive`` does
+    not descend into the groups whose HDF5 paths are in ``skip``."""
+    frame = frame.strip("/")
+    exclude = {p.strip("/") for p in spec.exclude}
+    out = OrderedDict()
+    if spec.from_ == "attrs":
+        target = holder[path] if path else holder
+        # an attribute's exclude path is '<group path>/<name>': '/version' at the root
+        skip = {n for n in target.attrs if f"{frame}/{n}".strip("/") in exclude}
+        for name, val in _attrs(target, skip=skip).items():
+            key = f"{gname}.{name}" if gname else name
+            out[key] = np.full(batch_size, val) if batch_size else val
+        return out, OrderedDict()
+    labels = OrderedDict()
+    if path and not (path in holder and isinstance(holder[path], h5py.Group)):
+        return out, labels
+    pending = [(holder[path] if path else holder, "")]
+    while pending:
+        g, prefix = pending.pop(0)
+        for name in sorted(g.keys()):
+            rel = f"{prefix}/{name}" if prefix else name
+            if f"{frame}/{rel}".strip("/") in exclude:
+                continue
+            try:
+                obj = g[name]
+            except KeyError as e:  # dangling link
+                print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
+                continue
+            if isinstance(obj, h5py.Group):
+                if spec.recursive and obj.name not in skip:
+                    pending.append((obj, rel))
+                continue
+            if not isinstance(obj, h5py.Dataset):
+                continue
+            key = ".".join(p for p in (gname, *rel.split("/")) if p)
+            # A scalar is a 0-dim or a size-1 dataset (NeXus writes scalars as shape
+            # (1,)). In 'batch' a scalar is broadcast to every row whatever N is, and a
+            # 1-D dataset of length N > 1 is one value per row. With N == 1 a length-1
+            # dataset is both, and both readings give the one row the same value.
+            if obj.ndim == 0 or obj.size == 1:
+                val = _to_python(obj[()])
+                out[key] = np.full(batch_size, val) if batch_size else val
+            elif batch_size and obj.ndim == 1 and obj.shape[0] == batch_size:
+                out[key] = obj[:]
+            else:
+                continue
+            labels.update(_attrs(obj, label_of=key))
     return out, labels
 
 
@@ -625,36 +660,51 @@ class _Walker:
     def groups(self, paths):
         ent_rows, art_rows = [], []
         spec = self.body.params
-        base = (self.body.entity_group or "").strip("/")
+        pattern = (self.body.entity_group or "").strip("/")
+        excluded = self.body.exclude_groups
         for h5_path in paths:
             rel = h5_path.relative_to(self.root).as_posix()
             fsize, fmtime = _file_fingerprint(h5_path)
             with h5py.File(h5_path, "r") as f:
-                if base and not (base in f and isinstance(f[base], h5py.Group)):
-                    raise KeyError(f"{h5_path}: entity_group '/{base}' not found")
-                parent = f[base] if base else f
-                names = sorted(k for k in parent.keys() if isinstance(parent[k], h5py.Group))
-                if not names:
-                    raise ValueError(f"{h5_path}: no groups under '/{base}' to treat as entities")
-                for name in names:
-                    gpath = f"{base}/{name}" if base else name
-                    g = f[gpath]
-                    params, labels = _read_params(g, spec) if spec is not None else ({}, {})
-                    prov = f"{rel}:/{gpath}"
-                    params = self.located(params, labels, prov, f"{h5_path}:/{gpath}")
-                    uid = self.uid(params, prov, f"{h5_path}:/{gpath}")
-                    if uid in self.existing:
-                        continue
-                    ent_rows.append(self.entity(uid, params, labels, prov, source_group=gpath))
-                    for art in self.artifacts:
-                        full = f"/{gpath}/{art.dataset.lstrip('/')}"
-                        ds = _get_artifact(f, full, art, f"{h5_path}:/{gpath}")
-                        if ds is None:
+                # each group entity_group matches, with its entity groups (ADR-0011)
+                parents = []
+                for base in _matching_groups(f, pattern):
+                    parent = f[base] if base else f
+                    parents.append((base, sorted(
+                        k for k in parent.keys() if isinstance(parent[k], h5py.Group)
+                        and not any(fnmatchcase(k, x) for x in excluded))))
+                if not parents:
+                    raise KeyError(f"{h5_path}: entity_group '/{pattern}' matches no group")
+                count = sum(len(names) for _, names in parents)
+                if not count:
+                    raise ValueError(f"{h5_path}: no groups under entity_group '/{pattern}' "
+                                     f"to treat as entities"
+                                     + (" (after exclude_groups)" if excluded else ""))
+                for base, names in parents:
+                    memo = {}  # a group reached through '..' is read once per sibling set
+                    entities = [f"{base}/{n}" if base else n for n in names]
+                    siblings = {f"/{gpath}" for gpath in entities}
+                    for i, gpath in enumerate(entities):
+                        g = f[gpath]
+                        params, labels = (_read_params(g, spec, siblings=(i, siblings, memo))
+                                          if spec is not None else ({}, {}))
+                        prov = f"{rel}:/{gpath}"
+                        params = self.located(params, labels, prov, f"{h5_path}:/{gpath}")
+                        uid = self.uid(params, prov, f"{h5_path}:/{gpath}")
+                        if uid in self.existing:
                             continue
-                        art_rows.append(_artifact_row(uid, art.type, rel, full, None, fsize,
-                                                      fmtime, ds.shape, str(ds.dtype),
-                                                      labels=_attrs(ds, label_of="")))
-            print(f"  {h5_path.name}: {len(names)} entity groups")
+                        ent_rows.append(self.entity(uid, params, labels, prov,
+                                                    source_group=gpath))
+                        for art in self.artifacts:
+                            full = f"/{gpath}/{art.dataset.lstrip('/')}"
+                            ds = _get_artifact(f, full, art, f"{h5_path}:/{gpath}")
+                            if ds is None:
+                                continue
+                            art_rows.append(_artifact_row(uid, art.type, rel, full, None,
+                                                          fsize, fmtime, ds.shape,
+                                                          str(ds.dtype),
+                                                          labels=_attrs(ds, label_of="")))
+            print(f"  {h5_path.name}: {count} entity groups")
         return ent_rows, art_rows
 
     # -- table ---------------------------------------------------------------
@@ -684,6 +734,23 @@ class _Walker:
             ent_rows.append(self.entity(uid, params, {}, i))
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
+
+
+def _matching_groups(f, pattern):
+    """The paths (no leading '/') of the groups ``entity_group`` names in ``f``, sorted:
+    each segment of ``pattern`` is a group name or an fnmatch glob over the names at that
+    level (ADR-0011). An empty pattern is the root, ``''``."""
+    found = [""]
+    for segment in (s for s in pattern.split("/") if s):
+        glob = any(c in segment for c in "*?[")
+        deeper = []
+        for base in found:
+            here = f[base] if base else f
+            names = sorted(here.keys()) if glob else [segment]
+            deeper += [f"{base}/{n}" if base else n for n in names
+                       if fnmatchcase(n, segment) and isinstance(here.get(n), h5py.Group)]
+        found = deeper
+    return found
 
 
 def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec]):

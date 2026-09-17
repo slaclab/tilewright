@@ -138,6 +138,29 @@ class TestAccepted:
         assert found(one_batch, "part_00.h5:0") == found(one_batch, "part_01.h5:0")
         assert found(several, "part_00.h5:0") != found(several, "part_01.h5:0")
 
+    def test_groups_takes_a_glob_entity_group_and_exclude_groups(self):
+        raw = files_cfg(source={"groups": {
+            "directory": "/d", "entity_group": "/*", "exclude_groups": ["calibration", "_*"],
+            "params": {"groups": {"calibration": "../calibration", "own": "/"},
+                       "location": r":/(?P<site>[^/]+)/(?P<detector>[^/]+)$"}}})
+        cfg, warnings = load_dataset(raw)
+        body = cfg.source.body
+        assert warnings == [] and body.entity_group == "/*"
+        assert body.exclude_groups == ["calibration", "_*"]
+        assert body.params.paths == {"calibration": "../calibration", "own": "/"}
+
+    @pytest.mark.parametrize("path", ["..", "../..", "../calibration", "/../calibration",
+                                      "../../run/beam/", "../../.."])
+    def test_a_groups_params_path_may_start_with_dotdot(self, path):
+        for params in ({"group": path}, {"groups": {"up": path}}):
+            raw = files_cfg(source={"groups": {"directory": "/d", "params": params}})
+            cfg, warnings = load_dataset(raw)
+            assert warnings == [] and list(cfg.source.body.params.paths.values()) == [path]
+
+    def test_exclude_groups_defaults_to_empty(self):
+        raw = files_cfg(source={"groups": {"directory": "/d"}})
+        assert load_dataset(raw)[0].source.body.exclude_groups == []
+
     def test_params_location_defaults_to_none(self):
         cfg, _ = load_dataset(files_cfg())
         assert cfg.source.body.params.location is None
@@ -263,6 +286,46 @@ class TestRejected:
         raw["source"]["files"]["params"] = {"location": location}
         assert errors_of(raw) == [f"source.files.params.location: {error}"]
 
+    @pytest.mark.parametrize("tag", ["files", "batch"])
+    @pytest.mark.parametrize("params, field, path", [
+        ({"group": "../params"}, "group", "../params"),
+        ({"group": ".."}, "group", ".."),
+        ({"group": "/../params"}, "group", "/../params"),
+        ({"groups": {"own": "/entry", "cal": "../cal"}}, "groups.cal", "../cal"),
+    ])
+    def test_dotdot_needs_an_entity_group(self, tag, params, field, path):
+        raw = files_cfg(source={tag: {"directory": "/d", "params": params}})
+        assert errors_of(raw) == [
+            f"source.{tag}: params.{field} {path!r} starts with '..', which leaves an entity "
+            f"group, and only a 'groups' source has one: here a params path is inside the "
+            f"file, from its root"]
+
+    @pytest.mark.parametrize("tag", ["files", "batch", "groups"])
+    @pytest.mark.parametrize("params, field, path", [
+        ({"group": "a/../b"}, "group", "a/../b"),
+        ({"group": "../a/.."}, "group", "../a/.."),
+        ({"groups": {"cal": "run/.."}}, "groups.cal", "run/.."),
+    ])
+    def test_dotdot_may_only_lead_a_path(self, tag, params, field, path):
+        raw = files_cfg(source={tag: {"directory": "/d", "params": params}})
+        assert errors_of(raw) == [
+            f"source.{tag}.params: {field} {path!r}: '..' may only lead the path "
+            f"('../calibration'), to leave the entity group"]
+
+    def test_exclude_groups_are_name_patterns(self):
+        raw = files_cfg(source={"groups": {"directory": "/d",
+                                           "exclude_groups": ["ok_*", "run/cal", ""]}})
+        assert errors_of(raw) == [
+            "source.groups.exclude_groups: 'run/cal', '': each entry is a pattern matched "
+            "against the name of a subgroup, so it is not empty and has no '/'"]
+        raw["source"]["groups"]["exclude_groups"] = "calibration"
+        assert errors_of(raw) == ["source.groups.exclude_groups must be a list"]
+
+    @pytest.mark.parametrize("tag", ["files", "batch"])
+    def test_exclude_groups_belongs_to_groups(self, tag):
+        raw = files_cfg(source={tag: {"directory": "/d", "exclude_groups": ["cal"]}})
+        assert errors_of(raw) == [f"source.{tag}.exclude_groups is not a contract key"]
+
     def test_params_location_must_be_a_string(self):
         raw = files_cfg(source={"batch": {"directory": "/d", "params": {"location": 3}}})
         assert errors_of(raw) == ["source.batch.params.location must be a string"]
@@ -361,6 +424,35 @@ class TestKeyAndFingerprint:
         raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
         raw["source"][stem]["params"] = params
         assert source_fingerprint(load_dataset(raw)[0]) == expected
+
+    # exclude_groups is a fact only when it names a pattern (ADR-0011): an empty list, the
+    # default, leaves the b268731 value alone. A glob entity_group is a string, hashed as
+    # any entity_group was: its value below is the same at b268731.
+    GOLDEN_NESTED = [
+        ({"entity_group": "/*"}, "4b72253433bfd0d9"),
+        ({"exclude_groups": ["calibration"]}, "05db7622963a325b"),
+        ({"exclude_groups": ["calibration", "_*"]}, "ff82157c7bae495b"),
+        ({"entity_group": "/*", "exclude_groups": ["calibration"],
+          "params": {"groups": {"calibration": "../calibration"}}}, "6812c1180cae1855"),
+    ]
+
+    @staticmethod
+    def groups_fingerprint(override):
+        raw = YAML(typ="safe").load((EXAMPLES / "groups.yml").read_text())
+        raw["source"]["groups"].update(override)
+        return source_fingerprint(load_dataset(raw)[0])
+
+    def test_empty_exclude_groups_keeps_the_b268731_fingerprint(self):
+        assert self.groups_fingerprint({"exclude_groups": []}) == self.GOLDEN["groups"]
+
+    @pytest.mark.parametrize("override, expected", GOLDEN_NESTED,
+                             ids=["glob", "exclude", "exclude-two", "nested"])
+    def test_fingerprint_of_nested_groups_is_pinned(self, override, expected):
+        assert self.groups_fingerprint(override) == expected
+
+    def test_the_order_of_exclude_groups_does_not_change_the_fingerprint(self):
+        assert (self.groups_fingerprint({"exclude_groups": ["_*", "calibration"]})
+                == self.groups_fingerprint({"exclude_groups": ["calibration", "_*", "_*"]}))
 
     # A table's id is a fact only as a list (ADR-0008): a single column leaves the
     # b268731 value alone, and a list re-keys every entity, so it is different data.
@@ -489,7 +581,7 @@ def test_concept_budget():
     assert {tag: _keys(model) for tag, model in tags.items()} == {
         "files": common | hdf5 | {"params"},
         "batch": common | hdf5 | {"params"},
-        "groups": common | hdf5 | {"entity_group", "params"},
+        "groups": common | hdf5 | {"entity_group", "exclude_groups", "params"},
         "table": common | {"path", "id", "locator"},
     }
     assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude",
