@@ -17,7 +17,7 @@ One row per entity.
 |---|---|---|
 | `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](../explanation/identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
 | `source_group` | `groups` only | The entity's HDF5 group |
-| *(any others)* | no | Become the entity container's queryable metadata. A dotted column (`instrument.Ei`) is nested on registration; a `<field>_<attr>` column is that field's attribute label |
+| *(any others)* | no | Become the entity container's queryable metadata. A dotted column (`instrument.Ei`) is nested on registration; a `<field>_<attr>` column is that field's attribute label, holding a string, a number, a boolean or a list of them (an array attribute as its list) |
 
 Every extra column is carried through verbatim, which is what makes TileWright
 dataset-agnostic: no parameter name is known to it.
@@ -38,7 +38,18 @@ and the dataset's full path in `dataset`; no column records the entry itself.
 | `file_size`, `file_mtime` | no | Size and modification time of the source file when scanned |
 | `shape` | **yes** | JSON-encoded shape **as registered**: for `batch`, the leading axis is already dropped |
 | `dtype` | **yes** | numpy dtype string, e.g. `float32` |
-| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, ...); become the artifact node's metadata |
+| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, ...); become the artifact node's metadata. Each holds a string, a number, a boolean or a list of them, so an array attribute (bin edges, `DIMENSION_LABELS`) is its list. HDF5's dimension-scale bookkeeping (`CLASS`, `NAME`, `DIMENSION_LIST`, `REFERENCE_LIST`) is left out, and so is an attribute that is or holds an HDF5 object or region reference, which points inside one file and which no catalog can follow — that one with a note |
+
+### Columns of more than one kind
+
+One artifact file holds every `type` of the dataset and its shared axes, and every source
+file is read on its own. So one column can hold a list in one row and a string in the next
+(an attribute that is an array for one artifact type only), or a number in one row and a
+string in another (a parameter that changes type between files). Parquet has one type per
+column: such a column is written as each value's JSON text (`[0.5, 1.5]`, `"half"`), with
+one note naming it, and the run finishes. A query on that key then compares text, so a
+parameter that lands there is usually worth fixing in the data
+([the note](errors.md#tilewright-manifest-the-data)).
 
 ## Schema metadata
 
