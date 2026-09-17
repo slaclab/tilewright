@@ -382,7 +382,8 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, s
     """The parameters and labels of the one group (or, under ``from: attrs``, dataset) at
     ``path`` in ``holder``, with keys nested under ``gname``. ``frame`` is the path as
     written in the YAML, against which ``spec.exclude`` is matched; ``recursive`` does
-    not descend into the groups whose HDF5 paths are in ``skip``."""
+    not descend into the groups whose object ids (``Group.id``) are in ``skip``: an id
+    compares equal whichever link the group was opened through."""
     frame = frame.strip("/")
     exclude = {p.strip("/") for p in spec.exclude}
     out = OrderedDict()
@@ -410,7 +411,7 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, s
                 print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
                 continue
             if isinstance(obj, h5py.Group):
-                if spec.recursive and obj.name not in skip:
+                if spec.recursive and obj.id not in skip:
                     pending.append((obj, rel))
                 continue
             if not isinstance(obj, h5py.Dataset):
@@ -682,11 +683,11 @@ class _Walker:
                     raise ValueError(f"{h5_path}: no groups under entity_group '/{pattern}' "
                                      f"to treat as entities"
                                      + (" (after exclude_groups)" if excluded else ""))
-                # every matched group and every entity group of the file, as h5py names
-                # them: recursion from a group reached through '..' enters none of them
-                closed = {f"/{base}" for base, _ in parents} | {
-                    f"/{base}/{n}" if base else f"/{n}"
-                    for base, names in parents for n in names}
+                # every matched group and every entity group of the file, as HDF5 objects,
+                # so that a link to one is the same group: recursion from a group reached
+                # through '..' enters none of them
+                closed = {f[base or "/"].id for base, _ in parents} | {
+                    f[base or "/"][n].id for base, names in parents for n in names}
                 for base, names in parents:
                     memo = {}  # a group reached through '..' is read once per sibling set
                     gpaths = [f"{base}/{n}" if base else n for n in names]

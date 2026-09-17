@@ -44,7 +44,9 @@ number of sibling entity groups: the subgroups of the same matching group, after
   attribute is not split.
 - With `recursive: true` the reader starts at the group the path names and never goes
   into a matching group or an entity group of the file, whichever sibling set it
-  belongs to.
+  belongs to. A group is known by the HDF5 object it is (`h5py` object ids), not by the
+  path it was opened through, so a soft link or a second hard link to such a group is
+  not followed either.
   - `../..` under `"/*"` reads what lies above the matching groups and nothing inside
     any of them: no detector group, and no `calibration` group, of any site.
   - A group inside a matching group is read only through a path that starts at that
