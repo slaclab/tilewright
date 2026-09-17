@@ -230,6 +230,13 @@ class ParamsSpec(BaseModel):
         if reserved:
             raise ValueError(f"may not name a group {' or '.join(reserved)}: 'uid' and "
                              f"'source_group' are manifest columns; choose another name")
+        # The manifest keeps its own bookkeeping ('_provenance') under such names and
+        # drops it before writing, so a parameter there would be hashed, then lost.
+        private = sorted(n for n in names if n.startswith("_"))
+        if private:
+            raise ValueError(f"may not name a group {' or '.join(private)}: a name that "
+                             f"starts with '_' is kept for the manifest's own use; choose "
+                             f"another name")
         return value
 
 

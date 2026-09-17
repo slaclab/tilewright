@@ -245,6 +245,14 @@ class TestRejected:
         (r"(?P<source_group>\w+):(?P<uid>\d+)", "may not name a group source_group or uid: "
                                                 "'uid' and 'source_group' are manifest "
                                                 "columns; choose another name"),
+        # '_provenance' was hashed into the uid, then dropped from entities.parquet
+        (r"run_(?P<_provenance>\d+)", "may not name a group _provenance: a name that starts "
+                                      "with '_' is kept for the manifest's own use; choose "
+                                      "another name"),
+        (r"(?P<_run>\d+)_(?P<site>\w+)_(?P<__x>\w)", "may not name a group __x or _run: a "
+                                                    "name that starts with '_' is kept for "
+                                                    "the manifest's own use; choose another "
+                                                    "name"),
     ])
     def test_params_location_must_name_parameters(self, location, error):
         if "({})" in error:  # re's own words, e.g. 'missing ), unterminated subpattern ...'
