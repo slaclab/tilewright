@@ -72,6 +72,27 @@ class TestFiles:
         ent, _ = run(tmp_path, files_dataset(tmp_path, attrs=True))
         assert sorted(ent["temperature"]) == [300.0, 301.0, 302.0]
 
+    def test_exclude_applies_to_attrs(self, tmp_path):
+        # an attribute is excluded by '<group path>/<name>', and is never read (#5)
+        cfg = files_dataset(tmp_path, attrs=True)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.attrs["note"] = "x"
+                entry = f.create_group("entry")
+                entry.attrs["title"] = f"scan {i}"
+                entry.attrs["version"] = "1.2"
+                # an attribute h5py cannot read at all: only excluding it lets manifest pass
+                h5py.h5a.create(entry.id, b"stamp", h5py.h5t.UNIX_D32LE,
+                                h5py.h5s.create(h5py.h5s.SCALAR))
+        cfg["source"]["files"]["params"]["exclude"] = ["/note"]
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "temperature", "run"}
+        cfg["source"]["files"]["params"] = {
+            "groups": {"root": "/", "entry": "/entry"}, "from": "attrs",
+            "exclude": ["/note", "/entry/version", "entry/stamp"]}
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert set(ent.columns) == {"uid", "root.temperature", "root.run", "entry.title"}
+
     def test_shared_axis_row_has_no_uid(self, tmp_path):
         _, art = run(tmp_path, files_dataset(tmp_path))
         shared = art[art["uid"].isna()]
