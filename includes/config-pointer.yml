@@ -1,0 +1,20 @@
+# A complete Tiled config for a server that serves pointer registrations.
+# Start it with:  tiled serve config <this file> --api-key <KEY>
+uvicorn:
+  host: "127.0.0.1"          # 0.0.0.0 to take registrations from other machines
+  port: 8005
+
+trees:
+  - path: /                  # the catalog is the whole server
+    tree: catalog
+    args:
+      uri: "sqlite:///catalog.db"    # the catalog database; relative to the start directory
+      init_if_not_exists: true
+      # TileWright's array adapter. Without this line every read of a registered
+      # pointer returns HTTP 500, however clean the registration looked.
+      adapters_by_mimetype:
+        application/x-hdf5-broker: "tilewright.adapter:LazyHDF5ArrayAdapter"
+      # Every data root the server may open, as the server sees it. Physical paths:
+      # the check never resolves a symlink.
+      readable_storage:
+        - "/mnt/shared/rixs"
