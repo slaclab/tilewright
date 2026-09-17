@@ -46,9 +46,9 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | Message | Cause | Fix |
 |---|---|---|
 | `no files match '<pattern>' under <directory>` | Wrong directory or pattern | `ls` the directory; the default pattern is `**/*.h5`, and the glob rules are in [the `pattern` field](dataset-yaml.md#sourcefiles) |
-| `OSError: Unable to open file ... file signature not found` | The pattern matched a non-HDF5 sibling: a NetCDF twin, a Parquet sidecar, a `.gz` | Tighten `pattern` |
-| `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems(print)`) and correct `dataset`, or add `optional: true` |
-| `<file>: artifact type='<t>' group '<g>' not found (mark it 'optional: true' if some entities lack it)` (the entity is named `<file>:/<group>` for `groups`) | The `group` of an entry names nothing in that file. Under `groups` it is relative to each entity group, and the message shows the full path | List the file's groups (`h5py.File(p).visit(print)`) and correct `group`, or add `optional: true` |
+| `OSError: Unable to open file ... file signature not found` | The pattern matched something that is not HDF5: a Parquet sidecar, a `.gz`, or a netCDF-3 classic file, which a `.nc`, `.cdf` or `.grd` name often is | Tighten `pattern`. Check a name before you trust it: `head -c 8 <file> \| od -c` prints `211 H D F` for HDF5 (netCDF-4 included) and `C D F 001` for netCDF-3. netCDF-3 has to be converted before it can be registered, or described with a `table` source ([sources](../explanation/sources.md#what-each-one-looks-like)) |
+| `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems_links(print)`, see below) and correct `dataset`, or add `optional: true` |
+| `<file>: artifact type='<t>' group '<g>' not found (mark it 'optional: true' if some entities lack it)` (the entity is named `<file>:/<group>` for `groups`) | The `group` of an entry names nothing in that file. Under `groups` it is relative to each entity group, and the message shows the full path | List the file's groups (`h5py.File(p).visititems_links(print)`) and correct `group`, or add `optional: true` |
 | `<file>: artifact type='<t>' group '<g>' is a dataset: name it with 'dataset'` | The `group` of an entry names a dataset | Write it as a `dataset` entry, with a `type` without `{name}` |
 | `<file>: artifact type='<t>' group '<g>' has no dataset whose name matches members '<m>'; it holds N datasets (...)` | No dataset directly in the group matches `members` (case matters), or the group holds only subgroups, which are never members | Compare `members` with the names the message lists and correct it or `group`, or add `optional: true` if only some entities have them |
 | `<file>: artifacts[<i>] (...) and artifacts[<j>] (...) both give the type '<t>'` (or `shared[<k>] (...) and ...`) | Once the `group` entries are expanded, two entries, or an entry and a shared axis, give one entity the same `type` | Change a `type`, for example a prefix in the template (`dark_{name}`), or narrow `members` |
@@ -58,7 +58,7 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `WARNING: <file>:<group>/<name> links back to <group>, which is already being read; skipped` | With `recursive: true`, a link inside the params group names a group above it on the path being read (`/entry/sub/up -> /entry`). Following it would never end | Nothing; the rest of the group is read. Repair the link if it was meant to point elsewhere |
 | `WARNING: <file>:<group>/<name> links into <group>, an entity group of this dataset; skipped` | With `recursive: true` under `groups`, a second HDF5 name (a hard link) inside one entity group names a group that is itself an entity of the dataset, or a group `entity_group` matched | Nothing; that group is registered as its own entity. Name it under `params.groups` if its values belong to this entity too |
 | `<file>: artifact '<t>' has N rows but '<first>' has M; every artifact's leading axis is the entity axis` | A batch file whose arrays disagree on axis 0 | It is not one batch; split the artifact out or fix the file |
-| `<file>: entity_group '<pattern>' matches no group` | The path or glob names no group in that file: a typo, a different case (case matters), a dataset where a group was meant, or a file unlike the others | List the file's groups (`h5py.File(p).visit(print)`) and correct `entity_group`, or narrow `pattern` to the files that have it |
+| `<file>: entity_group '<pattern>' matches no group` | The path or glob names no group in that file: a typo, a different case (case matters), a dataset where a group was meant, or a file unlike the others | List the file's groups (`h5py.File(p).visititems_links(print)`) and correct `entity_group`, or narrow `pattern` to the files that have it |
 | `<file>: no groups under entity_group '<pattern>' to treat as entities` (with `(after exclude_groups)` when it is set) | The matching groups hold datasets only, or `exclude_groups` leaves out every subgroup | Point `entity_group` one level higher, or loosen `exclude_groups` |
 | `<file>:/<group>: params.group '<path>' climbs N levels from an entity group M levels below the file root, so above the root` (or `params.groups.<name>`) | The path has more `..` segments than the entity group is deep | Remove the extra `..`: M of them reach the file root. A path inside the file root is written after them: `../../calibration` |
 | `<file>:/<group>: params.group '<path>' names no group or dataset there, and under `from: attrs` a group that a container lacks is an error` (or `params.groups.<name>`) | Under `from: attrs` the group's own attributes are the parameters, so a file (or entity group) without that group has none of them; the message names the container that lacks it. Under `from: datasets` the same missing group leaves null columns instead | Follow the `Fix:` line: narrow `pattern` (and `entity_group`) to the containers that hold the group, name a group every one of them has, or read these parameters with `from: datasets` |
@@ -75,6 +75,23 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `note: <path>@<attr> is not carried as array metadata: HDF5 object references cannot be stored` (or `as a label`, for a parameter field's attribute) | The attribute is an HDF5 object or region reference, or holds one. A reference points inside one file, so no catalog can follow it | Nothing to do: the array and the other attributes are carried. Write what a reader needs as a path or a name in another attribute |
 | `WARNING: /path@attr is not carried as array metadata` | A dataset attribute is named like a manifest column: `type`, `shape`, `dtype`, `file`, `dataset`, `index`, `uid` | Harmless; the attribute is dropped, not the array. Rename it in the file if you need it carried |
 | Entity or artifact counts differ from what you expected | The glob matched extra or fewer files; a batch leading axis is not what you assumed (it is read from `artifacts[0]`); `entity_group` or `exclude_groups` is wrong | Count the files, dump one file, fix, regenerate. Formulas below |
+
+### Dumping a file that uses hard links
+
+`visit` and `visititems` walk *objects*, and each object is visited once. A field that is
+hard-linked into two groups — the usual way a detector's arrays also appear under the
+group a reader is pointed at — is therefore listed under one of its paths only, and the
+other path looks missing although it resolves perfectly. `visititems_links(print)` walks
+*links*, so it prints every path, and so does walking `keys()` group by group:
+
+```python
+import h5py
+with h5py.File(p) as f:
+    f.visititems_links(print)                 # every path, hard links included
+    f["/entry/data"].keys()                   # or walk the groups yourself
+```
+
+A path this prints is a path the YAML can name, whichever link leads to it.
 
 ### Collisions: the fix for each source
 
