@@ -127,7 +127,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
 - **netCDF-4 and CF files.** A packed variable (`scale_factor` / `add_offset` on an int
   array) registers as the **stored integers**: nothing unpacks, both factors ride along as
   artifact metadata, and a reader who does not apply them sees counts — say so in the
-  `description`. A grid-mapping variable (a 0-dim value such as `spatial_ref = 0` whose
+  `description`. A grid-mapping variable (a 0-dim value such as `crs = 0` whose
   meaning is entirely in its attributes) is broadcast to every entity as a meaningless
   parameter under `batch`: `exclude` it and put the projection in the dataset `metadata`.
   Dataset-level facts kept as root attributes (`@title`, `@source`) never reach `metadata`

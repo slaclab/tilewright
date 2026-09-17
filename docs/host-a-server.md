@@ -39,7 +39,7 @@ write from memory and get wrong. `uri` names the catalog database (`sqlite:///ca
 is a file in the directory the server starts from; a shared deployment points it at
 PostgreSQL), `init_if_not_exists` creates it on the first run, and `uvicorn` is where the
 host and port go. A server that also accepts `--upload` registrations adds
-`writable_storage` beside them, as `config.upload.yml` does.
+`writable_storage` beside them, as the repository's own `config.yml` does.
 
 The adapter line makes the server slice batched arrays in h5py instead of materializing
 whole datasets ([sliced reads](explanation/data-model.md#an-entity-is-a-slice)). It is an import path
