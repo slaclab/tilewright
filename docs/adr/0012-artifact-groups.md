@@ -101,7 +101,12 @@ transport, so the `type` description states the limit instead of refusing the ty
 group that is not a scalar (0-dim or of size 1) is skipped without a message, as
 `manifest.py` has always done; the `from` description now says so, beside the `batch`
 rule it already stated. No behaviour changes; tests pin it for a params group, a
-`params.groups` entry and a `groups` source.
+`params.groups` entry and a `groups` source. The description also states two cases that
+follow from reading each file on its own, both quiet: a dataset of size 1 in some files
+and an array in others is a parameter only where it has size 1, and a group that some
+files (or entity groups) lack gives their entities null in its columns. Under `from:
+attrs` a missing group stops the manifest with an error instead, and the description
+says that too. Tests pin all three.
 
 **Documented limit.** Each member becomes an array node of its own, registered with one
 request and read back one step at a time. The `group` description says that thousands of
