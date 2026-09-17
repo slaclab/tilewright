@@ -121,7 +121,7 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
                               "groups": walker.groups}[tag](files)
         shared_rows = _shared_axis_rows(files, Path(body.directory), cfg.shared)
 
-    _check_collisions(ent_rows, key, identity)
+    _check_collisions(ent_rows, key, cfg.source)
     for row in ent_rows:
         row.pop("_provenance", None)
 
@@ -171,23 +171,60 @@ def _sha256_file(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _check_collisions(ent_rows, key, identity):
-    """Two entities with the same uid is a contract error, named, never a silent merge."""
+def _check_collisions(ent_rows, key, source):
+    """Two entities with the same uid is a contract error, named, never a silent merge.
+
+    For every shared uid the report says where each entity came from and lists each
+    column (parameter) whose values differ between them, one value per entity in that
+    order; under ``identity: params`` it also shows the parameters they share. One Fix
+    line follows, chosen by the source's tag and identity.
+    """
     by_uid = {}
     for row in ent_rows:
         by_uid.setdefault(row["uid"], []).append(row)
     dupes = {u: rows for u, rows in by_uid.items() if len(rows) > 1}
     if not dupes:
         return
+    table = source.tag == "table"
+    by_params = not table and source.identity == Identity.params
+    ids = source.body.id if table else []
+    ids = [ids] if isinstance(ids, str) else list(ids)
     lines = [f"{key}: {sum(len(r) for r in dupes.values())} entities share "
              f"{len(dupes)} uids; every entity must be distinct."]
-    for u, rows in list(dupes.items())[:3]:
-        where = ", ".join(str(r.get("_provenance", "?")) for r in rows[:4])
-        shared = {k: v for k, v in rows[0].items()
-                  if not k.startswith("_") and k not in ("uid", "source_group")}
-        lines.append(f"  uid {u}: {where}" + (f" ... ({len(rows)} entities)" if len(rows) > 4 else "")
-                     + f"  params {json.dumps(shared, default=str)[:160]}")
-    if identity == Identity.params:
+    cover, some_equal = [], False  # one differing column per uid tells every group apart
+    for u, rows in dupes.items():
+        where = ", ".join(str(r.get("_provenance", "?")) for r in rows)
+        if table:
+            where = (", ".join(f"{c}={json.dumps(rows[0].get(c), default=str)}" for c in ids)
+                     + f" at table rows {where} (first data row = 0)")
+        lines.append(f"  uid {u}: {where}")
+        names = [k for k in dict.fromkeys(k for r in rows for k in r)
+                 if k not in ("uid", "source_group") and not k.startswith("_")]
+        equal, differing = {}, []
+        for name in names:
+            values = [json.dumps(r[name], default=str, sort_keys=True) if name in r
+                      else "(absent)" for r in rows]
+            if len(set(values)) == 1:
+                equal[name] = rows[0][name]
+                continue
+            lines.append(f"    {name}: " + " | ".join(
+                v if len(v) <= 60 else v[:57] + "..." for v in values))
+            differing.append(name)
+        if differing and not set(differing) & set(cover):
+            cover.append(differing[0])
+        if len(equal) == len(names):
+            some_equal = True
+            lines.append(f"    no {'column' if table else 'parameter'} differs")
+        if by_params and equal:
+            lines.append(f"    equal: {json.dumps(equal, default=str)[:160]}")
+    if table and cover:
+        lines.append(f"Fix: for each uid, list one of the columns that differ in 'id', so "
+                     f"that together they are unique, e.g. id: [{', '.join(ids + cover)}]."
+                     + (" Rows equal in every column are duplicates: de-duplicate the "
+                        "table." if some_equal else ""))
+    elif table:
+        lines.append("Fix: these rows are equal in every column; de-duplicate the table.")
+    elif by_params:
         lines.append("Fix: add a field that distinguishes them (a run number, a seed) to the "
                      "parameters, or set 'identity: provenance' under the source.")
     else:
@@ -486,7 +523,7 @@ class _Walker:
         if "uid" in df.columns:
             raise ValueError(f"{path}: 'uid' is a reserved column name")
         ent_rows = []
-        for record in df.to_dict(orient="records"):
+        for i, record in enumerate(df.to_dict(orient="records")):
             params = {k: _to_python(v) for k, v in record.items()}
             for name, template in self.body.locator.items():
                 params[name] = template.format(**record)
@@ -496,7 +533,7 @@ class _Walker:
             uid = _uid(f"{self.key}:{value}")
             if uid in self.existing:
                 continue
-            ent_rows.append(self.entity(uid, params, {}, value))
+            ent_rows.append(self.entity(uid, params, {}, i))
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
 
