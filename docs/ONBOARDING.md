@@ -202,6 +202,17 @@ Register a small sample first, then the rest:
 Either way registration is incremental: an existing entity is skipped, so the second
 command continues from the first and an interrupted run resumes.
 
+**How long a pointer run takes.** Cheap is not instant. Every entity container and every
+artifact is one HTTP round trip, so the time follows the number of *nodes* —
+entities × artifacts, plus one per shared axis — and not the bytes on disk. A few tens of
+nodes a second is the order of magnitude for a server on a SQLite catalog, which makes ten
+thousand entities minutes and a hundred thousand hours. Measure your own rate rather than
+trusting that: time `tilewright register -n 100`, divide, and multiply out. Two levers if
+it matters: `--max-workers N` sets how many entities register at once (default 8, or
+`TILEWRIGHT_MAX_WORKERS`; [the flags](reference/cli.md#tilewright-register)), and a long
+run can simply be re-run, since it resumes. Reading back is not affected: a query answers
+from the catalog database, at any size.
+
 If the key already exists on the server, `register` compares fingerprints. The same data
 proceeds; different data under your label is refused, with both fingerprints and the
 existing container's description printed, and you pick another label
@@ -235,12 +246,25 @@ entity = ds[entities[0]]
 len(entities)                          # the entity count manifest printed (or -n)
 print(dict(ds.metadata))               # the facets you wrote, plus storage/fingerprint/registered_at
 print(dict(entity.metadata))           # this entity's physics parameters
-print(entity["spectrum"][:].shape)     # the array itself, at the shape the manifest recorded
-[ds[k][:].shape for k in shared]       # every shared axis
+
+spectrum = entity["spectrum"]          # the array client: no bytes have moved yet
+print(spectrum.shape, spectrum.dtype)  # the shape and dtype the manifest recorded
+print(spectrum[0:2, 0:2])              # a corner: the server slices, these bytes cross
+[ds[k].shape for k in shared]          # every shared axis
 ```
+
+Ask the array client for `.shape` and read a **small slice**. `spectrum[:]` would pull the
+whole array over HTTP, which for a multi-gigabyte artifact is a long wait and proves
+nothing the slice does not: both go through the same adapter, the same file and the same
+pointer. Compare the slice with the same corner read from the HDF5 by hand if you want the
+values checked too.
 
 Metadata on the dataset, parameters on the entity, an array at the shape you registered:
 the whole contract, proven. Collaborators need nothing beyond the Tiled client.
+
+A `table` dataset has no artifact to read, so its proof is the other three: the entity
+count, one row's metadata, and a `Key` search that returns the rows you expect
+([search](using-the-catalog.md#search)).
 
 Next: [read a registered catalog](using-the-catalog.md).
 
