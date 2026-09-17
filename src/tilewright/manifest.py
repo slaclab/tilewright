@@ -20,6 +20,7 @@ import datetime
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
 from collections import OrderedDict
@@ -408,8 +409,10 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None, cl
     entity groups beside it, and a dict the n share. A group path that starts with ``..``
     leaves the entity group (ADR-0011); such a group is read once for the n siblings, by
     the batch rule with N = n, and the entity takes element i. The contract refuses
-    ``recursive`` on such a path. ``closed`` says which groups recursion never enters,
-    whatever link leads to them (see ``_ClosedGroups`` and ``_read_group``).
+    ``recursive`` on such a path. ``closed`` maps the object id of every entity group of
+    the file being read, and of every group ``entity_group`` matched in it, to its path:
+    a hard link cannot lead out of the subtree recursion stays in, so it is the one way
+    such a group is still reached from inside another one (ADR-0013, ``_read_group``).
     """
     out, labels = OrderedDict(), OrderedDict()
     for gname, gpath in spec.paths.items():
@@ -442,12 +445,12 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     ``path`` in ``holder``, with keys nested under ``gname``. ``frame`` is the path as
     written in the YAML, against which ``spec.exclude`` is matched.
 
-    ``recursive`` descends into a subgroup unless ``closed`` names it (an entity group of
-    the dataset, in this file or in another one a link leads into: ``_ClosedGroups``) or
-    the group is already on the path being read, which a link back to an ancestor makes
-    (#29): that walk would never end, so the link is named in a WARNING and skipped.
-    Groups are told apart by their HDF5 object id (``Group.id``), which compares equal
-    whichever link opened them.
+    ``recursive`` follows only what lies inside the subtree of the group it starts from
+    (ADR-0013): a subgroup whose link leads out of it (``_outside``), one already on the
+    path being read, which a link back to an ancestor makes (#29) and whose walk would
+    never end, and one ``closed`` names, are each named in a WARNING and skipped. Groups
+    on the path, and those ``closed`` names, are told apart by their HDF5 object id
+    (``Group.id``), which compares equal whichever link opened them.
 
     Under ``from: attrs`` a container that does not hold the group (or dataset) is an
     error naming both, since there its attributes are the parameters."""
@@ -476,6 +479,7 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     if path and not (path in holder and isinstance(holder[path], h5py.Group)):
         return out, labels
     start = holder[path] if path else holder["/"] if isinstance(holder, h5py.File) else holder
+    root = (start.id.fileno, start.name.rstrip("/") or "/")   # the subtree recursion stays in
     pending = [(start, "", ((start.id, start.name),))]   # with the groups above each one
     while pending:
         g, prefix, ancestors = pending.pop(0)
@@ -491,14 +495,17 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
             if isinstance(obj, h5py.Group):
                 if spec.recursive:
                     link = f"{g.file.filename}:{g.name.rstrip('/')}/{name}"
+                    away = _outside(g, name, obj, root)
                     back = next((n for i, n in ancestors if i == obj.id), None)
-                    if back is not None:
+                    if away is not None:
+                        print(f"  WARNING: {link} links to {away}, outside the group "
+                              f"being read ({root[1]}); skipped")
+                    elif back is not None:
                         print(f"  WARNING: {link} links back to {back}, which is already "
                               f"being read; skipped")
-                    elif closed is not None and closed(obj):
-                        if obj.id.fileno != g.id.fileno:   # an ExternalLink, so say so
-                            print(f"  WARNING: {link} links into {obj.file.filename}:"
-                                  f"{obj.name}, an entity group of this dataset; skipped")
+                    elif closed and obj.id in closed:
+                        print(f"  WARNING: {link} links into {closed[obj.id]}, an entity "
+                              f"group of this dataset; skipped")
                     else:
                         pending.append((obj, rel, ancestors + ((obj.id, obj.name),)))
                 continue
@@ -518,6 +525,33 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
                 continue
             labels.update(_attrs(obj, label_of=key))
     return out, labels
+
+
+def _outside(holder, name, obj, root):
+    """Where the member ``name`` of the group ``holder`` leads when that is not inside the
+    subtree recursion stays in, as ``<file>:<path>``; None when it is inside (ADR-0013).
+    ``root`` is ``(id.fileno, path)`` of the group the walk started from, and ``obj`` the
+    member already resolved.
+
+    An external link resolves in another file, so it never leads inside. A soft link's
+    target path, resolved against the group that holds it when the path is relative, must
+    be that group or one under it (and in its file: a soft link may name an external link
+    in turn). A hard link needs no test: it is one of the object's own names, and that
+    name is inside the group that holds it -- which is why ``closed`` is still needed for
+    an entity group a hard link names from inside another one.
+    """
+    fileno, path = root
+    link = holder.get(name, getlink=True)
+    if isinstance(link, h5py.ExternalLink):
+        return f"{obj.file.filename}:{obj.name}"
+    if isinstance(link, h5py.SoftLink):
+        target = posixpath.normpath(link.path if link.path.startswith("/")
+                                    else f"{holder.name.rstrip('/')}/{link.path}")
+        if obj.id.fileno == fileno and (path == "/" or target == path
+                                        or target.startswith(f"{path}/")):
+            return None
+        return f"{obj.file.filename}:{target}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -828,7 +862,6 @@ class _Walker:
         spec = self.body.params
         pattern = (self.body.entity_group or "").strip("/")
         excluded = self.body.exclude_groups
-        closed = _ClosedGroups(paths, pattern, excluded)
         for h5_path in paths:
             rel = h5_path.relative_to(self.root).as_posix()
             fsize, fmtime = _file_fingerprint(h5_path)
@@ -842,7 +875,13 @@ class _Walker:
                     raise ValueError(f"{h5_path}: no groups under entity_group '/{pattern}' "
                                      f"to treat as entities"
                                      + (" (after exclude_groups)" if excluded else ""))
-                closed.remember(f, parents)
+                # the groups of this file that are entities of their own, by object id: a
+                # hard link is the one link that still names one from inside another
+                closed = {f[base or "/"].id: f"/{base}" for base, _ in parents}
+                for base, names in parents:
+                    parent = f[base] if base else f
+                    for n in names:
+                        closed[parent[n].id] = "/" + (f"{base}/{n}" if base else n)
                 for base, names in parents:
                     memo = {}  # a group reached through '..' is read once per sibling set
                     gpaths = [f"{base}/{n}" if base else n for n in names]
@@ -907,53 +946,6 @@ def _entity_groups(f, pattern, excluded):
             k for k in parent.keys() if isinstance(parent[k], h5py.Group)
             and not any(fnmatchcase(k, x) for x in excluded))))
     return parents
-
-
-def _file_id(path):
-    """``(device, inode)`` of a file: two names for one file, or one file opened twice,
-    give the same pair. None when it cannot be read, so it is never taken for a file of
-    the dataset."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_dev, st.st_ino
-
-
-class _ClosedGroups:
-    """The groups recursion inside an entity group never enters: every entity group and
-    every group ``entity_group`` matched, whatever HDF5 link leads to it (ADR-0011).
-
-    A group is known by its HDF5 object id, so a link to one is the same group. A link
-    may also lead into another file (an ``h5py.ExternalLink``), whose entity groups hold
-    their own entities' values; the entity groups of another file of the dataset are
-    collected the first time a link reaches it, so the rule holds across files too. A
-    file the dataset's ``pattern`` does not match holds no entity of it, and a group
-    there is read as any other group is.
-    """
-
-    def __init__(self, paths, pattern, excluded):
-        self.pattern, self.excluded = pattern, excluded
-        self.files = {i for i in (_file_id(p) for p in paths) if i is not None}
-        self._closed = {}
-
-    def remember(self, f, parents):
-        """Keep the entity groups of a file already listed, so it is not listed twice. A
-        walker calls it for each file it opens, which also drops the ids it kept for the
-        file before: an id holds its file open, and a source can have thousands of files
-        with thousands of entity groups each."""
-        ids = {f[base or "/"].id for base, _ in parents} | {
-            f[base or "/"][n].id for base, names in parents for n in names}
-        self._closed = {f["/"].id.fileno: ids}
-        return ids
-
-    def __call__(self, obj):
-        if obj.id.fileno not in self._closed:
-            other = obj.file
-            self._closed[obj.id.fileno] = (
-                self.remember(other, _entity_groups(other, self.pattern, self.excluded))
-                if _file_id(other.filename) in self.files else set())
-        return obj.id in self._closed[obj.id.fileno]
 
 
 def _matching_groups(f, pattern):
