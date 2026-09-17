@@ -129,8 +129,8 @@ whose rows are the siblings.
   read this site's `calibration` too. It lost because the columns would differ per set
   for one kind of value (`top.north.calibration.offset` on north, `top.south...` on
   south, each null on the other), while `../calibration` gives every set the same
-  column; and "never into a matching group" is one boundary, where "not into another
-  set's" needs the reader to know which set is its own at every level.
+  column; and "never into a matching group" is the same boundary for every set, where
+  "never into another set's" makes each set read a different subtree of one path.
 - *Refusing `recursive: true` on a path that starts with `..`.* It closes the leak with
   no boundary to explain. It lost because `..` with `recursive: true` reads every
   excluded group beside the entities without naming each one, and the boundary keeps
@@ -184,8 +184,10 @@ whose rows are the siblings.
   such a group, and zenodo/3528199 reads `..` itself.
 - The group a path names is not checked. The path is the author's explicit choice, and
   knowing that it names an entity group or another set's matching group needs the file,
-  so it could not be a contract error. A test pins how `../det_a` is read, so the choice
-  cannot change unnoticed.
+  so it could not be a contract error. The sharp edge is written down here: `../../south`
+  with `recursive: true` reads south's `calibration` for north's detectors, split by
+  north's N, as `../../south/calibration` would. A test pins how `../det_a` is read, so
+  the choice cannot change unnoticed.
 - `tests/test_contract.py::test_concept_budget` lists `exclude_groups` among the keys of
   `groups`.
 - The reference page, `examples/datasets/groups.yml` (commented alternatives that
