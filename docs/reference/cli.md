@@ -66,7 +66,7 @@ tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-
 | `--url URL` | Server URL (default `$TILED_URL`, else `http://localhost:8005`) |
 | `--api-key KEY` | API key with write scopes (default `$TILED_API_KEY`) |
 | `-n`, `--max-entities NUM` | Register at most `NUM` entities per dataset (default: all) |
-| `--max-workers N` | Concurrent registration workers (default: `TILEWRIGHT_MAX_WORKERS`, else `8`) |
+| `--max-workers N` | How many **entities** register at once. One entity's artifacts are posted one after another inside its own worker, and the shared axes before the pool starts, so a value above the entity count changes nothing and a dataset of few entities and very many arrays gains little (default: `TILEWRIGHT_MAX_WORKERS`, else `8`) |
 | `--upload` | Read the arrays from local HDF5 and write them through the server into its writable storage, instead of registering pointers to files the server reads itself |
 | `--update` | Also merge-patch the dataset container's metadata from the YAML. Same data only; the previous version is kept as a Tiled revision |
 | `--adopt` | Claim a container registered before fingerprints existed |
