@@ -2441,7 +2441,13 @@ class TestNonScalarParameters:
         assert "under 'from: attrs' a group that a container lacks is an error" in message
         assert "Fix: narrow 'pattern'" in message
         assert main([str(tmp_path / "ds.yml")]) == 1
-        assert "Traceback" not in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "Traceback" not in err
+        # A KeyError's str() is the repr of its argument, so the message would come out
+        # double-quoted with its own quotes escaped, unlike the ValueError errors beside
+        # it. The CLI prints it as it was written.
+        assert err.startswith("error: /") and err.rstrip().endswith("null columns")
+        assert "params.groups.slit '/slit'" in err and "\\'" not in err
 
 
 # ---------------------------------------------------------------------------

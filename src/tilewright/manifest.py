@@ -1073,7 +1073,11 @@ def main(argv=None):
         print(str(e), file=sys.stderr)
         return 1
     except (FileNotFoundError, KeyError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
+        # A KeyError's str() is the repr of its argument, so a message written for a
+        # reader would come out double-quoted with its own quotes escaped. Each of these
+        # carries exactly one message; print it as it was written.
+        message = e.args[0] if isinstance(e, KeyError) and len(e.args) == 1 else e
+        print(f"error: {message}", file=sys.stderr)
         return 1
 
 
