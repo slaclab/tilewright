@@ -597,6 +597,47 @@ class TestNestedGroups:
         assert list(ent["local.gain"]) == [0.5, 0.6, 0.7]
         assert {k: ent.loc[0, k] for k in read} == read
 
+    def test_recursion_enters_no_entity_group_of_another_file_of_the_dataset(
+            self, tmp_path, capsys):
+        """#34: the entity groups recursion never enters are those of every file of the
+        dataset, not only of the file being read. An h5py.ExternalLink to another file's
+        entity group would give this entity that entity's values, and so another uid; it
+        is named and skipped. A link into a file the pattern does not match holds no
+        entity of the dataset and is read as any other group (ADR-0011's rule)."""
+        d = tmp_path / "stations"
+        d.mkdir()
+        with h5py.File(d / "bench_calibration.h5", "w") as f:   # not matched by 'pattern'
+            f["board/offset"] = 0.125
+        with h5py.File(d / "station_b.h5", "w") as f:
+            g = f.create_group("runs/night")
+            g["temperature"] = 275.0
+            g["readout/gain"] = 9.0
+            g["spectrum"] = np.zeros(4)
+        with h5py.File(d / "station_a.h5", "w") as f:
+            g = f.create_group("runs/day")
+            g["temperature"] = 300.0
+            g["readout/gain"] = 3.0
+            g["spectrum"] = np.zeros(4)
+            g["other"] = h5py.ExternalLink("station_b.h5", "/runs/night")
+            g["board"] = h5py.ExternalLink("bench_calibration.h5", "/board")
+        cfg = {"label": "Stations Test", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "station_*.h5",
+                                     "entity_group": "/runs",
+                                     "params": {"group": "/", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "source_group", "temperature", "readout.gain",
+                                    "board.offset"}
+        assert sorted(ent["temperature"]) == [275.0, 300.0]
+        assert sorted(ent["readout.gain"]) == [3.0, 9.0]
+        assert ent.set_index("source_group").loc["runs/day", "board.offset"] == 0.125
+        assert "station_a.h5:/runs/day/other links into" in out
+        assert "station_b.h5:/runs/night, an entity group of this dataset; skipped" in out
+        assert "board" not in out       # the calibration file's group is read, not skipped
+
     def test_a_dotdot_path_that_names_an_entity_group_is_read_by_the_sibling_rule(
             self, tmp_path):
         """A path that names a group is read as written, an entity group included, and by
