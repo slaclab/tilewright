@@ -9,6 +9,8 @@ Run with: uv run --with pytest pytest tests/test_registration_helpers.py -v
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from tilewright.register import verify_registration_http
 
 

@@ -83,6 +83,9 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `exclude` for blobs, `recursive` for subgroups), and any **shared axes** (arrays
   *identical* in every file → `shared:`; an axis that varies per entity is an artifact).
   Field attributes (`units`, ...) are captured automatically — nothing to declare.
+  `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
+  `type` (`docs/reference/manifest.md`, Reserved names): a parameter with such a name goes
+  in `exclude`, or pick artifact type names that do not clash.
 - **Decide identity.** The default hashes parameter values, so two entities with identical
   parameters would collide — `tilewright manifest` refuses that and names them. Repeated
   measurements (same settings, different runs) are the usual case: put a run number in the

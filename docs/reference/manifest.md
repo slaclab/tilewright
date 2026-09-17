@@ -68,5 +68,21 @@ Registration stamps locator keys onto each entity's metadata, one set per artifa
 
 They make provenance searchable and are what `tilewright.client.locate` reads
 ([How to read a registered catalog](../using-the-catalog.md#read-the-files-directly)).
+A locator is the pair `path_<type>` and `dataset_<type>`; `index_<type>` is optional. A
+`path_*` key without its `dataset_*` key is an ordinary parameter, such as the table
+column `path_p_travel_s`: `locate`, `load`, `query_catalog` and the check at the end of
+`tilewright register` pass over it.
 The dataset container is stamped with `storage`, `fingerprint`, `registered_at`, `label`,
 and one `shared_dataset_<type>` per shared axis.
+
+### Reserved names
+
+The locators and the parameters share one metadata mapping. So, for every artifact `type`
+a dataset declares, `path_<type>`, `dataset_<type>` and `index_<type>` are reserved.
+`tilewright manifest` refuses a parameter, an attribute label or a `params.groups` name
+that is one of them (a dotted parameter nests under its first part, so that part
+counts), and the message names it ([the fix](errors.md#tilewright-manifest-the-data)).
+
+- A `table` declares no artifacts, so its columns are never refused.
+- A shared axis has no locator on the entity, so its `type` reserves nothing.
+- Other names with these prefixes, such as `path_length`, are ordinary parameters.
