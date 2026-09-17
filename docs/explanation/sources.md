@@ -53,6 +53,51 @@ cncs/
 └── …
 ```
 
+## Parameters from the location
+
+Some values live only in a name: a year and a month in `BCI_2011APR.h5`, two dates in a
+directory called `In20230501_20230512/`, a sample number in a group called `sample_7`,
+or, in a batch file, only the row. `params.location` turns them into parameters. It is a
+Python regular expression, searched (`re.search`) in the entity's location, and each named
+group becomes a parameter:
+
+| Source | Location searched | Example |
+|---|---|---|
+| `files` | the file path relative to `directory`, with `/` separators | `2011/BCI_2011APR.h5` |
+| `groups` | `<file path>:/<group path>` | `samples.h5:/samples/sample_7` |
+| `batch` | `<file path>:<row number>` | `sim/batch_0.h5:41` |
+
+```yaml
+source:
+  files:
+    directory: /data/bci
+    pattern: "*/BCI_*.h5"
+    params: {location: 'BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$'}
+```
+
+Every entity then has `year` (2011) and `month` (`"APR"`) beside whatever its file holds.
+Write the expression in single quotes: YAML keeps every backslash there. In double
+quotes `"\d"` is a YAML error, and `"\b"` silently becomes a backspace.
+
+- **The text decides the type.** Digits with an optional sign become an int, so `0042`
+  is 42 and its zeros are gone; a decimal or exponent literal (`0.4`, `1e-3`) becomes a
+  float; anything else stays a string. To keep the zeros, capture a letter with the
+  digits, `(?P<run>r\d+)`. A group has to capture the same kind of text for every
+  entity, or the manifest cannot hold the column.
+- **Unnamed groups are wildcards.** `'(\d{4})_(?P<member>[^_]+)_'` skips the year and
+  keeps the member.
+- **A location parameter is a parameter.** It is queryable, and under `identity: params`
+  it is part of the identity ([identity and keys](identity.md#the-entity-key-comes-from-the-entitys-identity)).
+  A batch file whose rows hold nothing else can use the row, `':(?P<row>\d+)$'`, so that
+  each row keeps a number to query and a key of its own.
+- **Every entity must match, and a name comes from one place.** `tilewright manifest`
+  stops at an entity whose location does not match, and at a name that is also read
+  inside the file or group ([errors](../reference/errors.md#tilewright-manifest-the-data)).
+
+Why a regular expression and not a `{year:d}` template: real names need wildcards for the
+parts that are not values, and Python already parses the expression. Why not a table that
+lists each file's values: it is a second file to keep in step with the data.
+
 ## Why the tag owns the keys
 
 The source is written as one tagged block, `source: {batch: {...}}`, and each tag accepts

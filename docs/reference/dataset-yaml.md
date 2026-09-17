@@ -115,7 +115,9 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 Where an entity's parameters are read from, within its container (the file for `files`
 and `batch`, the entity group for `groups`). Scalars found there become the entity's
 queryable metadata; each field's own HDF5 attributes ride along as `<field>_<attr>`
-labels, stored beside the value and never part of the identity.
+labels, stored beside the value and never part of the identity. `location` adds the
+values that only the entity's path holds: a year in a file name, a group name, a batch
+row number ([parameters from the location](../explanation/sources.md#parameters-from-the-location)).
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|

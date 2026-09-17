@@ -69,7 +69,10 @@ Then edit:
   warn, not fail. Write the description for a person deciding whether to open the
   dataset, and say what a reader should know before trusting the data.
 - **`source`**: one tag, `files`, `batch`, `groups`, or `table`, with its `directory`
-  and where the parameters are. Repeated measurements with identical parameters need a
+  and where the parameters are: inside the files, or only in their names, which
+  `params.location` reads
+  ([parameters from the location](explanation/sources.md#parameters-from-the-location)).
+  Repeated measurements with identical parameters need a
   distinguishing parameter or `identity: provenance`; a table whose `id` column repeats
   needs more columns in `id`
   ([identity and keys](explanation/identity.md)).

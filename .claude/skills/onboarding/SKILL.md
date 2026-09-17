@@ -96,6 +96,15 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   params, or write `identity: provenance` under the source. Say which and why in a comment.
   A `batch` file with no per-entity values at all takes `params: null` (identity becomes
   provenance), as `files` and `groups` do.
+- **Values only in the file, directory or group name, or a batch row number →
+  `params.location`.** A regex, in single quotes, searched in the path relative to
+  `directory` (`groups`: `<file>:/<group>`; `batch`: `<file>:<row>`); each named group is
+  a parameter and part of the identity:
+  `params: {location: 'BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$'}`. Digits become ints
+  (leading zeros are lost), unnamed groups are wildcards. Try it with `re.search` on every
+  name you listed: one that does not match stops the manifest. A `batch` file with nothing
+  else per row can keep a queryable row number, `':(?P<row>\d+)$'`, instead of
+  `params: null`.
 - **A `table` has no `identity` key: its `id` is the identity.** Check that the `id`
   column is unique (`df[col].is_unique`). If no single column is, list several,
   `id: [system_id, tilt]`, and say in a comment which rows needed the extra column. If no
