@@ -34,6 +34,10 @@ manifest is the output.
 file per entity), `batch` (stacked on axis 0), `groups` (one group per entity), `table`
 (rows of a sidecar table, no arrays). Each tag owns only its keys. _Avoid_: layout, format.
 
+**Sibling entity groups**: in a `groups` source, the entity groups under one group that
+`entity_group` matches, after `exclude_groups`. A params group reached with `..` gives
+them one value each from a 1-D array of their count, by sorted name (ADR-0011).
+
 **Identity**: how an entity's uid is computed (ADR-0007, ADR-0008). For `files`, `batch`
 and `groups`: `params` (default), a hash of parameter values, or `provenance`, a hash of
 file path plus row or group, forced when there are no parameters. For a `table`: a hash
@@ -42,8 +46,9 @@ of its `id` column(s); it has no `identity` key. Duplicate identities fail the m
 **Key**: the dataset container key, `slug(label)`, written by `tilewright manifest`.
 
 **Fingerprint**: a hash of which data a YAML describes (tag, server-visible directory,
-pattern, params, identity, and a table's `id` when it is a list), stamped on the
-container; `register` refuses a different fingerprint under the same key.
+pattern, entity group, params, identity, a groups source's `exclude_groups` when it names
+any, and a table's `id` when it is a list), stamped on the container; `register` refuses a
+different fingerprint under the same key.
 
 **Vocabulary**: canonical ids and aliases for the facets, in `vocabulary.yml`. Soft:
 unknown values warn (ADR-0003). Grows by pull request. _Avoid_: schema, semantic model.

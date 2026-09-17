@@ -103,6 +103,44 @@ Why a regular expression and not a `{bias_mV:d}` template: real names need wildc
 the parts that are not values, and Python already parses the expression. Why not a table
 that lists each file's values: it is a second file to keep in step with the data.
 
+## Nested entity groups and values beside them
+
+A `groups` source can take entities deeper than one level, and read the values stored
+next to them rather than inside them. Take files where each site holds one group per
+detector and a `calibration` group for all of its detectors:
+
+```yaml
+source:
+  groups:
+    directory: /data/detectors
+    entity_group: "/*"
+    exclude_groups: [calibration]
+    params:
+      groups: {calibration: ../calibration}
+      location: ':/(?P<site>[^/]+)/(?P<detector>[^/]+)$'
+```
+
+- **`entity_group` may hold globs.** `"/*"` takes every top-level group, and the entities
+  are the subgroups of each one: one per `/<site>/<detector>`.
+- **`exclude_groups` names the subgroups that are not entities**, here `calibration`.
+- **A params path may start with `..`**, which leaves the entity group: every detector
+  reads the `calibration` group of its own site.
+- **An array beside the entity groups can give one value per entity.** With
+  `params: {group: ..}`, a `beam_current` array of 12 values next to `scan_01` …
+  `scan_12` gives each scan its own element, in the order of the sorted names.
+
+Two detectors of one site read the same calibration, so under `identity: params` they
+would be the same entity; the `location` names keep them apart
+([parameters from the location](#parameters-from-the-location)). Which arrays count as one
+value per entity, the sort order and what is skipped are in
+[the `groups` fields](../reference/dataset-yaml.md#sourcegroups); entities that read
+different parameters get null for the others
+([the data model](data-model.md#entities-with-different-parameters)).
+
+Why `..` and not a path from the file root: each site has its own `calibration`, and one
+fixed path can name only one of them. Why a glob and not a number of levels: a depth
+cannot leave out `calibration`, which sits at the same level as the detectors.
+
 ## Why the tag owns the keys
 
 The source is written as one tagged block, `source: {batch: {...}}`, and each tag accepts
@@ -133,7 +171,8 @@ ADR.
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
   and stores the row number in `index`. An entity is a slice, read by slicing in h5py
   rather than pulling the whole stacked dataset ([sliced reads](data-model.md#an-entity-is-a-slice)).
-- **`groups`**: an artifact's `dataset` path resolves relative to each entity group.
+- **`groups`**: an artifact's `dataset` path resolves relative to each entity group, and
+  so does a params path, which can leave it with `..`.
 - **`files`**: the file is the entity boundary, so there is no index.
 - **`table`**: entity identity is the `id` column, or several columns listed in `id`
   ([identity and keys](identity.md)); nothing is served as an array.

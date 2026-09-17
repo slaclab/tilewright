@@ -71,7 +71,9 @@ Then edit:
 - **`source`**: one tag, `files`, `batch`, `groups`, or `table`, with its `directory`
   and where the parameters are: inside the files, or only in their names, which
   `params.location` reads
-  ([parameters from the location](explanation/sources.md#parameters-from-the-location)).
+  ([parameters from the location](explanation/sources.md#parameters-from-the-location)),
+  or, for `groups`, beside the entity groups
+  ([nested entity groups](explanation/sources.md#nested-entity-groups-and-values-beside-them)).
   Repeated measurements with identical parameters need a
   distinguishing parameter or `identity: provenance`; a table whose `id` column repeats
   needs more columns in `id`

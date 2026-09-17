@@ -149,10 +149,10 @@ class ParamsSpec(BaseModel):
     location.
 
     The container is the file (``files``, ``batch``) or the entity group (``groups``),
-    which a ``groups`` path can leave with ``..`` (ADR-0011). Scalar datasets (or attributes) found there become the entity's queryable metadata;
-    each field's own HDF5 attributes ride along as ``<field>_<attr>`` labels. ``location``
-    adds the values that only the file, directory or group name (or a batch row number)
-    holds (ADR-0010).
+    which a ``groups`` path can leave with ``..`` (ADR-0011). Scalar datasets (or
+    attributes) found there become the entity's queryable metadata; each field's own HDF5
+    attributes ride along as ``<field>_<attr>`` labels. ``location`` adds the values that
+    only the file, directory or group name (or a batch row number) holds (ADR-0010).
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -372,7 +372,7 @@ class GroupsSource(_HDF5SourceBase):
         description="Subgroups that are not entities: fnmatch patterns matched against the "
         "name of each subgroup of the entity group(s), not against its path. "
         "[calibration] leaves out a group that holds values for the entities beside it; "
-        "['_*'] every name that starts with '_'. Excluded groups are not counted as "
+        "['tmp*'] every group whose name starts with 'tmp'. Excluded groups are not counted as "
         "siblings (see 'params').",
     )
     params: ParamsSpec | None = Field(

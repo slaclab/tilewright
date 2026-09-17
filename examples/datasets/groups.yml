@@ -27,6 +27,24 @@ source:
     pattern: "*.h5"
     entity_group: /samples           # omit to treat each file's top-level groups as entities
     params: {group: params}          # relative to each entity group
+    # Entities two levels down, with values beside them. For files laid out as
+    #   /<site>/<detector>/spectrum        → one entity per site × detector
+    #   /<site>/calibration/gain  ()       → a parameter of every detector of that site
+    # replace entity_group and params with:
+    #   entity_group: "/*"
+    #   exclude_groups: [calibration]
+    #   params: {groups: {calibration: ../calibration}, location: ':/(?P<site>[^/]+)/(?P<detector>[^/]+)$'}
+    # Expected: entities = detector groups summed over sites.
+    # The location names keep two detectors of one site apart, since both read the same gain.
+    #
+    # One value per entity in an array beside the entity groups. For files laid out as
+    #   /run/scan_01/spectrum ... /run/scan_12/spectrum   → one entity per scan
+    #   /run/beam_current  (12,)   → element i belongs to the i-th scan in sorted name order
+    # replace entity_group and params with:
+    #   entity_group: /run
+    #   params: {group: ..}
+    # Expected: entities = scan groups. Names sort as text: scan_10 comes before scan_2,
+    # so number them with leading zeros.
 
 artifacts:
   - {type: spectrum, dataset: spectrum}
