@@ -1757,6 +1757,31 @@ class TestArtifactGroups:
         assert len(ent) == 2 and len(art) == 5
         assert set(art["file"]) == {"movie_0.h5"}
 
+    def test_a_group_under_each_entity_group_a_glob_matches(self, tmp_path):
+        # ADR-0011: entity_group may be a glob; the entry is relative to each entity group
+        d = tmp_path / "nested"
+        d.mkdir()
+        with h5py.File(d / "plates.h5", "w") as f:
+            for plate in ("plate_a", "plate_b"):
+                for well in ("w1", "w2"):
+                    g = f.create_group(f"plates/{plate}/{well}")
+                    g["params/dose"] = float(len(plate) + int(well[1:]))
+                    g["params/tag"] = f"{plate}/{well}"
+                    for c in ("red", "blue"):
+                        g[f"channels/{c}"] = np.arange(3.0)
+        cfg = {"label": "Plates Test", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "entity_group": "/plates/plate_*",
+                                     "params": {"group": "params"}}},
+               "artifacts": [{"type": "ch_{name}", "group": "channels"}]}
+        ent, art = run(tmp_path, cfg)
+        assert sorted(ent["source_group"]) == [
+            "plates/plate_a/w1", "plates/plate_a/w2", "plates/plate_b/w1", "plates/plate_b/w2"]
+        uid = ent.loc[ent["source_group"] == "plates/plate_b/w2", "uid"].item()
+        assert rows_of(art, uid) == [
+            ("ch_blue", "/plates/plate_b/w2/channels/blue", "[3]"),
+            ("ch_red", "/plates/plate_b/w2/channels/red", "[3]")]
+        assert len(art) == 8
+
     def test_a_group_without_a_matching_member_is_an_error_unless_optional(self, tmp_path):
         cfg = frames_dataset(tmp_path, frames=3)
         cfg["artifacts"] = [{"type": "{name}", "group": "/frames", "members": "shot_*"},

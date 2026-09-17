@@ -15,11 +15,11 @@ same change states what [#24](https://github.com/slaclab/TileWright/issues/24) a
 
 - `dataset` is the entry as before: one array per entity.
 - `group` names an HDF5 group (absolute under `files`, relative to each entity group
-  under `groups`). The entry expands to one artifact per dataset *directly* in that
-  group, in sorted name order. Subgroups are skipped; scalar (0-dim) datasets are
-  included; a dataset with no dataspace (`h5py.Empty`) has no array to register and is
-  skipped; a member that is a dangling link is skipped with a warning, as a dangling
-  parameter is.
+  under `groups`, whichever group ADR-0011's `entity_group` pattern found it under). The
+  entry expands to one artifact per dataset *directly* in that group, in sorted name
+  order. Subgroups are skipped; scalar (0-dim) datasets are included; a dataset with no
+  dataspace (`h5py.Empty`) has no array to register and is skipped; a member that is a
+  dangling link is skipped with a warning, as a dangling parameter is.
 - `members` is an fnmatch pattern, matched case-sensitively (`fnmatchcase`) against each
   member's name, default `*`. It is allowed only with `group`: on a `dataset` entry it
   is a contract error.
