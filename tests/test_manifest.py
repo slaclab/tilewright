@@ -296,6 +296,19 @@ class TestGroups:
         with pytest.raises(KeyError, match="sample_0.*not found"):
             run(tmp_path, cfg)
 
+    def test_a_slash_in_params_is_the_entity_group_not_the_file_root(self, tmp_path):
+        """The params.group description says so: under 'groups', '/' is the entity group
+        and '/params' is 'params'; the root's 'file_time' is never read."""
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}"].create_dataset("gain", data=10 + i)
+        for n, group in enumerate(["/", "/params", "params"]):
+            cfg["source"]["groups"]["params"] = {"group": group}
+            ent, _ = run(tmp_path, cfg, name=f"ds{n}")
+            assert list(ent.columns) == ["uid", "source_group",
+                                         "gain" if group == "/" else "tenDq"]
+
 
 # ---------------------------------------------------------------------------
 
