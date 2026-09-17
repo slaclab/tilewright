@@ -41,7 +41,9 @@ the source's `identity`:
 entity across re-registration and file moves, which is what a simulation sweep wants and
 what makes re-running `register` safe. A float is hashed at 12 significant digits, so
 noise past the twelfth digit is not a new entity, and values at any scale stay apart:
-times of 1e-13 s are as distinct as temperatures of 300 K. The cost is that two entities
+times of 1e-13 s are as distinct as temperatures of 300 K.
+[ADR-0009](../adr/0009-float-parameters-at-12-significant-digits.md) says why, and which
+registered datasets got new keys when the rule changed. The cost is that two entities
 with identical parameters would collide, so `tilewright manifest` refuses that, names the
 colliding entities, what differs between them and the parameters they share, and offers
 the two fixes: add a distinguishing parameter, or switch identity.

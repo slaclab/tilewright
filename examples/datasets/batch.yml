@@ -26,7 +26,7 @@ source:
   batch:
     directory: /abs/path/to/sim
     pattern: "*/simulations.h5"
-    params: {group: /params}       # 1-D datasets of length N; 0-dim ones broadcast
+    params: {group: /params}       # 1-D datasets of length N; 0-dim and size-1 ones broadcast
                                    # (null if the file holds no per-entity values)
 
 artifacts:
