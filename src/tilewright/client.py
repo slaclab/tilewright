@@ -34,6 +34,8 @@ import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuff
 import numpy as np
 import pandas as pd
 
+from .utils import read_selection
+
 
 def query_catalog(client, artifact_type, limit=None):
     """Query Tiled catalog and return all entity metadata as a DataFrame.
@@ -127,9 +129,10 @@ def load(entity, artifact_type, base_dir, slc=None):
 
     For readers on the same filesystem as the data. ``slc`` is applied *after* the batch
     row index (``ds[index][slc]``), which is the one detail that is easy to get wrong.
+    Both go to h5py as one index, so only the chunks ``slc`` touches are read, not the
+    whole row (``utils.read_selection``).
     """
     loc = locate(entity)[artifact_type]
+    row = () if loc["index"] is None else (loc["index"],)
     with h5py.File(os.path.join(base_dir, loc["file"]), "r") as f:
-        ds = f[loc["dataset"]]
-        arr = ds[loc["index"]] if loc["index"] is not None else ds[()]
-    return arr if slc is None else arr[slc]
+        return read_selection(f[loc["dataset"]], row, slc)
