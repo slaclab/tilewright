@@ -2095,3 +2095,22 @@ class TestNonScalarParameters:
             f.create_group("slit").attrs["width"] = 0.5
         ent, _ = run(tmp_path, cfg, name="ds2")
         assert sorted(ent["slit.width"]) == [0.25, 0.5, 0.75]
+
+    def test_under_attrs_a_missing_group_names_the_container_and_the_path(
+            self, tmp_path, capsys):
+        """#35: the error names the file and the group path, and how to go on, instead of
+        h5py's bare "Unable to synchronously open object (object 'slit' doesn't exist)",
+        which says nothing about which of the files lacks it."""
+        cfg = files_dataset(tmp_path, attrs=True)
+        cfg["source"]["files"]["params"] = {"groups": {"top": "/", "slit": "/slit"},
+                                            "from": "attrs"}
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            f.create_group("slit").attrs["width"] = 0.25
+        with pytest.raises(KeyError) as raised:
+            run(tmp_path, cfg)
+        message = str(raised.value)
+        assert "run_1.h5:/slit" in message and "params.groups.slit '/slit'" in message
+        assert "under 'from: attrs' a group that a container lacks is an error" in message
+        assert "Fix: narrow 'pattern'" in message
+        assert main([str(tmp_path / "ds.yml")]) == 1
+        assert "Traceback" not in capsys.readouterr().err
