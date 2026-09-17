@@ -59,7 +59,7 @@ pin the unchanged values and four fingerprints with a `location`.
 - `from: datasets` reads scalar datasets, 0-dim or of size 1, and a `batch` source
   broadcasts both;
 - under `from: attrs`, an `exclude` path for an attribute is `<group path>/<attribute>`,
-  such as `/version`.
+  such as `/operator_note`.
 
 ## Why
 
@@ -121,7 +121,10 @@ queryable as a number without a type table in the YAML.
 - The examples on the pages authors read (the field description, the explanation page,
   the onboarding skill) are invented. The dataset expressions in the table above stay
   here: the pages that onboard a dataset must not hand its answer to the person
-  onboarding it.
+  onboarding it. For the same reason this change replaces an older example on those
+  pages: the composite table id of ADR-0008, `[system_id, tilt]` from osti/1846021, is
+  now `id: [specimen, replicate]` in the `id` description, `explanation/identity.md`,
+  `errors.md` and the onboarding skill. The meaning and the behaviour are unchanged.
 - `tests/test_contract.py::test_concept_budget` lists `location` among the keys of
   `params`.
 - The reference page, the onboarding skill's Step 2, `ONBOARDING.md`,
