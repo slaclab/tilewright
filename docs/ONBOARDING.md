@@ -208,10 +208,10 @@ entities × artifacts, plus one per shared axis — and not the bytes on disk. A
 nodes a second is the order of magnitude for a server on a SQLite catalog, which makes ten
 thousand entities minutes and a hundred thousand hours. Measure your own rate rather than
 trusting that: time `tilewright register -n 100`, divide, and multiply out. Two levers if
-it matters: `--max-workers N` sets how many entities register at once (default 8, or
-`TILEWRIGHT_MAX_WORKERS`; [the flags](reference/cli.md#tilewright-register)), and a long
-run can simply be re-run, since it resumes. Reading back is not affected: a query answers
-from the catalog database, at any size.
+it matters: `--max-workers N`, which helps a dataset of many entities and hardly one of
+few entities and very many arrays ([the flags](reference/cli.md#tilewright-register) say
+why), and the run's own resumability — a long one can simply be started again. Reading
+back is not affected: a query answers from the catalog database, at any size.
 
 If the key already exists on the server, `register` compares fingerprints. The same data
 proceeds; different data under your label is refused, with both fingerprints and the
