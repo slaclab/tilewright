@@ -152,7 +152,9 @@ def register_main():
     client = from_uri(tiled_url, api_key=api_key)
     print(f"Connected to {tiled_url} ({len(client)} existing containers)")
 
-    stale_datasets = []
+    # datasets this run does not report complete: an artifact changed on disk, a node
+    # that serves nothing, or both. The run ends with exit 1 for any of them.
+    unfinished_datasets = []
     artifact_rows = {}  # entity artifacts each manifest declares, for the verify step
     for config_path, cfg in datasets:
         label, dataset_key = cfg.label, cfg.catalog_key
@@ -237,7 +239,7 @@ def register_main():
                   f"    tilewright manifest {config_path}\n"
                   f"    tilewright delete {dataset_key}\n"
                   f"    tilewright register {config_path}", file=sys.stderr)
-            stale_datasets.append(dataset_key)
+            unfinished_datasets.append(dataset_key)
         if summary.broken:
             # A node that serves nothing is not a registered artifact, so the run does not
             # report the dataset complete (#38). Each one is named above with its key.
@@ -246,12 +248,12 @@ def register_main():
                   f"register again:\n"
                   f"    tilewright delete {dataset_key} <ENTITY> <ARTIFACT>\n"
                   f"    tilewright register {config_path}", file=sys.stderr)
-            if dataset_key not in stale_datasets:
-                stale_datasets.append(dataset_key)
+            if dataset_key not in unfinished_datasets:
+                unfinished_datasets.append(dataset_key)
 
     verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets],
                              artifact_rows=artifact_rows)
-    if stale_datasets:
+    if unfinished_datasets:
         sys.exit(1)
 
     print("\nDone!")

@@ -292,6 +292,34 @@ class TestVDPRegistration:
         assert f"art={wreck}" in out and "cannot serve this artifact" in out, out
         assert "gone.h5" in out and "tilewright delete" in out, out
 
+    def test_the_half_registered_count_leaves_out_the_broken_nodes(self, vdp_manifests,
+                                                                   capsys):
+        """#38: the 'k of n' line counts artifacts that serve their row. A node the same
+        loop has just called broken is on the server but serves nothing, and this run does
+        not repair it, so counting it among the k would report more than is there."""
+        from tilewright.register import _register_one_entity
+
+        ent_df, art_df, base_dir = vdp_manifests
+        rows = art_df[art_df["uid"] == ent_df.iloc[0]["uid"]]
+        assert len(rows) >= 3
+        wreck = rows.iloc[0]["type"]
+        parent = MagicMock()
+        parent.__contains__.return_value = True
+        # every artifact but the last is on the server, and the first of those serves nothing
+        already_on(parent, on_server(rows.iloc[:-1], base_dir, reads={wreck: "gone.h5"}))
+
+        result = _register_one_entity(
+            ent_df.iloc[0], list(ent_df.columns),
+            art_df.groupby("uid"), list(art_df.columns),
+            parent, base_dir=base_dir, server_base_dir=None,
+            dataset_key="TEST_KEY",
+        )
+
+        assert result == (0, 1, 1, 0, 0, 1)        # one registered, one broken
+        out = capsys.readouterr().out
+        assert (f"half-registered: {len(rows) - 2} of {len(rows)} artifacts on the server "
+                f"(1 more serve nothing)") in out, out
+
     def test_a_failed_registration_leaves_no_node_behind(self, vdp_manifests):
         """#38: a creation that fails partway can leave the node half-created, and the key
         would then be skipped for ever. What the server kept is dropped before the
