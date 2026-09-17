@@ -5,10 +5,14 @@ tag its filename promises."""
 import re
 from pathlib import Path
 
+import h5py
+import numpy as np
+import pandas as pd
 import pytest
 from ruamel.yaml import YAML
 
 from tilewright.contract import load_dataset
+from tilewright.manifest import generate_manifests
 
 EXAMPLES = sorted((Path(__file__).parent.parent / "examples" / "datasets").glob("*.yml"))
 
@@ -40,3 +44,47 @@ def test_commented_params_in_the_files_example_validate():
         if cfg.source.body.params is not None and cfg.source.body.params.location:
             match = re.search(cfg.source.body.params.location, "run_0001.h5")
             assert match and match.groupdict() == {"run": "0001"}
+
+
+def test_commented_alternatives_in_the_groups_example_do_what_they_say(tmp_path):
+    """Each run of '#   <key>: ...' lines in the source block of groups.yml replaces
+    entity_group and params. Built on the layouts its comments draw, each gives the
+    entities and values the comments promise."""
+    path = next(p for p in EXAMPLES if p.stem == "groups")
+    blocks = re.findall(r"((?:^    #   (?:entity_group|exclude_groups|params): .*\n)+)",
+                        path.read_text(), flags=re.M)
+    nested, beside = [YAML(typ="safe").load(re.sub(r"(?m)^    #   ", "", b)) for b in blocks]
+    assert "exclude_groups" in nested and nested["params"]["groups"]
+    assert beside["params"] == {"group": ".."}
+
+    data = tmp_path / "data"
+    data.mkdir()
+    with h5py.File(data / "sites.h5", "w") as f:
+        for site, gain in (("east", 1.5), ("west", 2.0)):
+            f[f"{site}/calibration/gain"] = gain
+            for detector in ("det_a", "det_b", "det_c"):
+                f[f"{site}/{detector}/spectrum"] = np.zeros(3)
+    with h5py.File(data / "scans.h5", "w") as f:
+        f["run/beam_current"] = np.arange(12.0)
+        for i in range(1, 13):
+            f[f"run/scan_{i:02d}/spectrum"] = np.zeros(3)
+
+    found = {}
+    for name, alternative in (("sites", nested), ("scans", beside)):
+        raw = YAML(typ="safe").load(path.read_text())
+        raw["source"]["groups"].update(alternative, directory=str(data), pattern=f"{name}.h5")
+        assert load_dataset(raw)[1] == []
+        yaml_path = tmp_path / f"{name}.yml"
+        with open(yaml_path, "w") as f:
+            YAML().dump(raw, f)
+        ent_path, art_path = generate_manifests(str(yaml_path), tmp_path / name)
+        found[name] = pd.read_parquet(ent_path)
+        assert len(pd.read_parquet(art_path)) == len(found[name])
+
+    sites = found["sites"]
+    assert len(sites) == 6 and sites["uid"].nunique() == 6
+    assert list(zip(sites["site"], sites["detector"], sites["calibration.gain"]))[2:4] == [
+        ("east", "det_c", 1.5), ("west", "det_a", 2.0)]
+    scans = found["scans"]
+    assert list(scans["source_group"]) == [f"run/scan_{i:02d}" for i in range(1, 13)]
+    assert list(scans["beam_current"]) == list(np.arange(12.0))

@@ -50,6 +50,20 @@ or stops a third from calling it `sig`. The [soft vocabulary](vocabulary.md) cov
 the few facets used for cross-dataset discovery, such as `material` and `method`, not the
 physics parameters.
 
+## Entities with different parameters
+
+Inside one dataset, entities do not have to read the same parameters: two kinds of entity
+group can hold different fields, a group that `params` names can be missing for some
+entities, and a group beside the entities can hold more values in one place than in
+another. The manifest is still one table, `entities.parquet`, with a column for every
+parameter any entity has, so an entity that lacks a parameter has null in that column,
+and registration gives its container that key with a null value. Nothing is dropped and
+nothing is an error.
+
+One side effect: a column of integers with a null in it is written as floats, so an
+entity that has `channels: 8` is registered with `8.0`. Its key does not change, because
+the identity is computed from the value as read, before the table is built.
+
 ## Dataset metadata is the human record
 
 The dataset container carries the facets (`method`, `material`, `producer`, ...), a

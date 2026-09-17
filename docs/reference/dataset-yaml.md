@@ -96,7 +96,7 @@ One HDF5 group per entity inside each file.
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
 | `entity_group` | str | no |  | Group whose subgroups are the entities ('/samples'). Default: the file's top-level groups. Any segment may be a glob, matched with fnmatch against the names of the groups at that level: '\*' and '?' match within the name, '[...]' one character of a set, and case matters. '/\*' takes every top-level group, so that each subgroup of each of them is an entity (/<site>/<detector>); '/run_\*/scans' takes the 'scans' group of every run_ group. The matching groups are taken in sorted order, and the entities are the subgroups of every one of them. A file in which no group matches is an error, and so is one in which the matching groups have no subgroup left (see 'exclude_groups'). |
-| `exclude_groups` | list of str | no |  | Subgroups that are not entities: fnmatch patterns matched against the name of each subgroup of the entity group(s), not against its path. [calibration] leaves out a group that holds values for the entities beside it; ['_\*'] every name that starts with '_'. Excluded groups are not counted as siblings (see 'params'). |
+| `exclude_groups` | list of str | no |  | Subgroups that are not entities: fnmatch patterns matched against the name of each subgroup of the entity group(s), not against its path. [calibration] leaves out a group that holds values for the entities beside it; ['tmp\*'] every group whose name starts with 'tmp'. Excluded groups are not counted as siblings (see 'params'). |
 | `params` | mapping or `null` | no |  | Where the parameters live: relative to each entity group, and with 'location' in its file and group path. Default: the entity group's own scalar datasets. A group path may start with '..' segments to leave the entity group, resolved against its path: '..' is the group that holds the entity group and its siblings, '../calibration' a group beside them, '../..' one level higher. A path that climbs above the file root is an error. In a group reached through '..', a 1-D dataset whose length equals the number of sibling entity groups (the subgroups of the same group, after 'exclude_groups') gives one value per entity: element i goes to the i-th sibling with the names sorted as text. Text is not numeric order: scan_10 sorts before scan_2, so scan_1 ... scan_12 do not pair with elements 0 ... 11 in order, while scan_01 ... scan_12 do. Scalar datasets (0-dim or of size 1) there are given to every sibling, and any other member, a 1-D dataset of another length included, is skipped without a message, as in 'batch'. Under 'from: attrs' the attributes of such a group are given to every sibling. 'null' declares none. |
 
 ### `source.table`
@@ -114,11 +114,14 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 ### `params`
 
 Where an entity's parameters are read from, within its container (the file for `files`
-and `batch`, the entity group for `groups`). Scalars found there become the entity's
+and `batch`, the entity group for `groups`, which a path can leave with `..`; see
+`source.groups`). Scalars found there become the entity's
 queryable metadata; each field's own HDF5 attributes ride along as `<field>_<attr>`
 labels, stored beside the value and never part of the identity. `location` adds the
 values that only the entity's path holds: a number in a file or directory name, a group
 name, a batch row number ([parameters from the location](../explanation/sources.md#parameters-from-the-location)).
+Entities that read different parameters get null for the ones they lack
+([the data model](../explanation/data-model.md#entities-with-different-parameters)).
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
