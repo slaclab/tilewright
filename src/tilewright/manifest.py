@@ -479,8 +479,10 @@ class _Walker:
         if not path.exists():
             raise FileNotFoundError(f"{path}: table not found")
         df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        if self.body.id not in df.columns:
-            raise KeyError(f"{path}: id column {self.body.id!r} not among {list(df.columns)}")
+        ids = self.body.id
+        for column in [ids] if isinstance(ids, str) else ids:
+            if column not in df.columns:
+                raise KeyError(f"{path}: id column {column!r} not among {list(df.columns)}")
         if "uid" in df.columns:
             raise ValueError(f"{path}: 'uid' is a reserved column name")
         ent_rows = []
@@ -488,11 +490,13 @@ class _Walker:
             params = {k: _to_python(v) for k, v in record.items()}
             for name, template in self.body.locator.items():
                 params[name] = template.format(**record)
-            prov = str(record[self.body.id])
-            uid = _uid(f"{self.key}:{prov}")
+            # one column: its value, as before ADR-0008; several: the JSON list of values
+            value = (str(record[ids]) if isinstance(ids, str) else
+                     json.dumps([_to_python(record[c]) for c in ids], default=str))
+            uid = _uid(f"{self.key}:{value}")
             if uid in self.existing:
                 continue
-            ent_rows.append(self.entity(uid, params, {}, prov))
+            ent_rows.append(self.entity(uid, params, {}, value))
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
 

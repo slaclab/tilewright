@@ -229,7 +229,29 @@ class TestGroups:
 
 # ---------------------------------------------------------------------------
 
+def systems_table(tmp_path, ids="system_id"):
+    """Like osti/1846021: system_id repeats, and each repeat differs in one other column."""
+    d = tmp_path / "pvdaq"
+    d.mkdir(exist_ok=True)
+    pd.DataFrame({"system_id": [1332, 1332, 4901, 4901, 7],
+                  "tilt": [16.77, 60.0, 20.0, 20.0, 10.0],
+                  "azimuth": [180, 180, 270, 90, 180],
+                  "site": ["a", "a", "b", "b", "c"]}).to_csv(d / "systems.csv", index=False)
+    return {"label": "Systems", "metadata": dict(META),
+            "source": {"table": {"directory": str(d), "path": "systems.csv", "id": ids}}}
+
+
 class TestTable:
+
+    def test_composite_id_resolves_repeated_ids(self, tmp_path):
+        ent, _ = run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt", "azimuth"]))
+        assert len(ent) == 5 and ent["uid"].nunique() == 5
+        assert ent.loc[0, "uid"] == sha16('SYSTEMS:[1332, 16.77, 180]')
+        assert list(ent["system_id"]) == [1332, 1332, 4901, 4901, 7]
+
+    def test_missing_id_column_is_named(self, tmp_path):
+        with pytest.raises(KeyError, match="id column 'tilt_deg' not among"):
+            run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt_deg"]))
 
     def test_rows_are_entities(self, tmp_path):
         d = tmp_path / "cncs"
@@ -241,6 +263,8 @@ class TestTable:
                                     "locator": {"url": "https://x/{filename}"}}}}
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 2 and list(ent["url"]) == ["https://x/a.gz", "https://x/b.gz"]
+        # one id column: sha256('<KEY>:<value>'), as before ADR-0008
+        assert list(ent["uid"]) == [sha16("TABLE_TEST:1"), sha16("TABLE_TEST:2")]
         assert len(art) == 0 and list(art.columns)[:4] == ["uid", "type", "file", "dataset"]
 
 

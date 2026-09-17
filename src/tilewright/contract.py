@@ -11,10 +11,11 @@ Closed sections ``forbid`` unknown keys; ``metadata`` allows any extra key (it b
 queryable facet). Values of the vocabulary facets are soft-checked in ``vocabulary.py``
 (ADR-0003): unknown values warn, they never block.
 
-Identity (ADR-0007): an entity's uid is a hash of its parameter values unless the source
-says ``identity: provenance`` (hash of where it came from), which is forced when
-``params: null``. ``key`` is derived from ``label`` by ``tilewright manifest``; a key that
-drifted from its label is an error.
+Identity (ADR-0007, ADR-0008): in the HDF5 sources an entity's uid is a hash of its
+parameter values unless the source says ``identity: provenance`` (hash of where it came
+from), which is forced when ``params: null``; a ``table`` has no ``identity`` key, its uid
+is a hash of its ``id`` column(s). ``key`` is derived from ``label`` by
+``tilewright manifest``; a key that drifted from its label is an error.
 """
 
 import hashlib
@@ -23,7 +24,9 @@ import re
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator,
+)
 
 TOP_LEVEL_KEYS = frozenset({"label", "key", "metadata", "source", "artifacts", "shared"})
 SOURCE_TAGS = ("files", "batch", "groups", "table")
@@ -35,13 +38,20 @@ class StrEnum(str, Enum):
 
 
 class Identity(StrEnum):
-    """How an entity's uid is computed (``source.<tag>.identity``).
+    """How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+    ``batch`` and ``groups``).
 
     - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
       entity across re-registration and file moves; two entities with identical
       parameters are a contract error (``tilewright manifest`` names them).
     - ``provenance`` — sha256 of where the entity came from (file path relative to the
-      directory, plus row or group). Never collides; forced when ``params: null``.
+      directory, plus row or group). Never collides unless ``pattern`` or
+      ``entity_group`` matches the same thing twice; forced when ``params: null``.
+
+    A ``table`` has no ``identity`` key: its identity is its ``id`` column(s), the sha256
+    of their values. Rows that repeat those values are a contract error; list a further
+    column in ``id``, or de-duplicate the table. The manifest records a table's mode as
+    ``provenance``.
     """
 
     params = "params"
@@ -187,10 +197,6 @@ class _SourceBase(BaseModel):
         description="The same root as the Tiled server sees it, when its mount differs. "
         "Ignored for --upload.",
     )
-    identity: Identity = Field(
-        default=Identity.params,
-        description="How entity uids are computed; see Identity. Write it only to override.",
-    )
 
     @model_validator(mode="after")
     def _paths(self):
@@ -200,13 +206,29 @@ class _SourceBase(BaseModel):
         return self
 
 
-class FilesSource(_SourceBase):
-    """One HDF5 file per entity."""
+class _HDF5SourceBase(_SourceBase):
+    """The keys the three HDF5 sources share: which files, and how an entity's uid is
+    computed. A ``table`` has neither (ADR-0008)."""
 
+    identity: Identity = Field(
+        default=Identity.params,
+        description="How entity uids are computed; see Identity. Write it only to override.",
+    )
     pattern: str = Field(
         default="**/*.h5",
-        description="Glob for the entity files under 'directory'.",
+        description="Glob for the HDF5 files under 'directory', matched with Python's "
+        "Path.glob relative to 'directory': '*', '?' and '[...]' match within one path "
+        "segment, and a '**' segment matches any number of directories, so '**/*.h5' "
+        "recurses. Names starting with '.' match like any other. There are no braces: "
+        "'*.{h5,hdf5}' matches nothing; use a wider glob such as '*.h*5'. A pattern that "
+        "matches nothing is retried with Path.rglob, which puts '**/' in front of it, so "
+        "it then matches at any depth. Only files are kept, in sorted order.",
     )
+
+
+class FilesSource(_HDF5SourceBase):
+    """One HDF5 file per entity."""
+
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live in each file; default: 0-dim datasets at "
@@ -215,13 +237,9 @@ class FilesSource(_SourceBase):
     )
 
 
-class BatchSource(_SourceBase):
+class BatchSource(_HDF5SourceBase):
     """Many entities stacked along axis 0 of each file's datasets; entity i is row i."""
 
-    pattern: str = Field(
-        default="**/*.h5",
-        description="Glob for the batch files under 'directory'.",
-    )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live in each file; default: the root. N is the "
@@ -232,13 +250,9 @@ class BatchSource(_SourceBase):
     )
 
 
-class GroupsSource(_SourceBase):
+class GroupsSource(_HDF5SourceBase):
     """One HDF5 group per entity inside each file."""
 
-    pattern: str = Field(
-        default="**/*.h5",
-        description="Glob for the files under 'directory'.",
-    )
     entity_group: str | None = Field(
         default=None,
         description="Group whose subgroups are the entities ('/samples'). Default: the "
@@ -259,15 +273,28 @@ class TableSource(_SourceBase):
         description="Parquet or CSV file, relative to 'directory'. Every column becomes "
         "entity metadata.",
     )
-    id: str = Field(
-        min_length=1,
-        description="Column whose value identifies a row; it is the entity's identity.",
+    id: str | list[str] = Field(
+        description="The entity's identity: one column, or a list of columns when no "
+        "single column is unique ('id: [system_id, tilt]'); together their values must be "
+        "unique across rows. Changing it re-keys every entity.",
     )
     locator: dict[str, str] = Field(
         default_factory=dict,
         description="Extra metadata rendered per row from '{column}' templates, e.g. "
         "{globus_url: 'https://.../{filename}'}.",
     )
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _id_columns(cls, value):
+        names = [value] if isinstance(value, str) else value
+        if not (isinstance(names, list) and names
+                and all(isinstance(n, str) and n for n in names)):
+            raise ValueError("must be a column name or a list of column names, none of "
+                             "them empty")
+        if len(set(names)) != len(names):
+            raise ValueError("names a column more than once")
+        return value
 
 
 class Source(BaseModel):
@@ -298,6 +325,8 @@ class Source(BaseModel):
 
     @property
     def identity(self):
+        """The mode the uids are computed with. A ``table`` (whose uid hashes its ``id``
+        column(s)) and a source with ``params: null`` report ``provenance``."""
         if self.tag == "table" or getattr(self.body, "params", "absent") is None:
             return Identity.provenance
         return self.body.identity
