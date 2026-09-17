@@ -159,11 +159,15 @@ def test_register_sends_float_and_nested_yaml_metadata_as_plain_json(tmp_path, m
 
 def test_register_reports_an_unserializable_value_as_an_error_line(tmp_path, monkeypatch, capsys):
     import tilewright.register
+    from tiled.utils import safe_json_dump
 
     yaml_path = _keyed_float_dataset(tmp_path)
 
+    class Something:
+        pass
+
     def refuse(*a, **kw):
-        raise TypeError("Type is not JSON serializable: Something")
+        safe_json_dump({"value": Something()})  # the Tiled client's encoder refuses it
 
     monkeypatch.setattr(tilewright.register, "register_dataset_http", refuse)
     with pytest.raises(SystemExit) as exc:
@@ -172,6 +176,35 @@ def test_register_reports_an_unserializable_value_as_an_error_line(tmp_path, mon
     err = capsys.readouterr().err
     assert "ERROR:" in err and "FLOAT_META" in err
     assert "TypeError: Type is not JSON serializable: Something" in err
+
+
+def test_register_reports_any_value_the_encoder_refuses_as_an_error_line(tmp_path, monkeypatch,
+                                                                         capsys):
+    """Not only a type: orjson also refuses an integer beyond 64 bits, with a TypeError
+    whose message says nothing about serializing."""
+    yaml_path = _keyed_float_dataset(tmp_path)
+    yaml_path.write_text(yaml_path.read_text().replace(
+        "  sample_length_mm: 1.5\n", "  sample_length_mm: 1.5\n  run_id: 123456789012345678901234\n"))
+    with pytest.raises(SystemExit) as exc:
+        _run_register(monkeypatch, yaml_path, _serializing_client()[0])
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "ERROR:" in err and "TypeError: Integer exceeds 64-bit range" in err
+
+
+def test_register_keeps_the_traceback_of_a_type_error_that_is_a_bug(tmp_path, monkeypatch):
+    """A TypeError raised outside the Tiled client is a programming error: it is not
+    turned into an ERROR line, so its traceback is printed."""
+    import tilewright.register
+
+    yaml_path = _keyed_float_dataset(tmp_path)
+
+    def buggy(*a, **kw):
+        return len(None)
+
+    monkeypatch.setattr(tilewright.register, "register_dataset_http", buggy)
+    with pytest.raises(TypeError, match="has no len"):
+        _run_register(monkeypatch, yaml_path, _serializing_client()[0])
 
 
 # ---------------------------------------------------------------------------

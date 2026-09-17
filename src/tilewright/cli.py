@@ -9,6 +9,7 @@ CLI entry points for TileWright.
 import os
 import sys
 import argparse
+import traceback
 from pathlib import Path
 
 
@@ -219,7 +220,13 @@ def register_main():
         except ValueError as e:
             print(f"\nERROR: {e}", file=sys.stderr)
             sys.exit(1)
-        except TypeError as e:  # e.g. a value the Tiled client cannot serialize
+        except TypeError as e:
+            # One line for a value the Tiled client cannot encode. Its encoder (orjson)
+            # raises TypeError itself, so where the error was raised tells it apart from
+            # a bug, which keeps its traceback.
+            *_, (frame, _) = traceback.walk_tb(e.__traceback__)
+            if frame.f_globals.get("__name__", "").split(".")[0] not in ("tiled", "jsonpatch"):
+                raise
             print(f"\nERROR: {config_path}: could not register '{dataset_key}': "
                   f"{type(e).__name__}: {e}", file=sys.stderr)
             sys.exit(1)
