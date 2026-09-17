@@ -31,6 +31,7 @@ source:
     # params: {group: /, from: attrs}      # root attributes instead
     # params: {group: /, from: attrs, exclude: [/operator_note]}   # an attribute's path is <group>/<name>
     # params: null                         # no per-entity parameters (identity: provenance)
+    # params: {location: 'run_(?P<run>\d+)\.h5$'}   # plus run from the file name: 0001 -> 1
 
 artifacts:
   - {type: spectrum, dataset: /spectrum}

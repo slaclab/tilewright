@@ -18,7 +18,9 @@ data is the fingerprint.
 `tilewright manifest` hashes the facts that identify *which data* a YAML describes: the
 source tag, the directory as the server sees it, the file pattern or table path, the
 params spec, the identity mode, and a table's `id` when it is a list. Not the label, not
-the metadata. The hash goes into the manifest, and `tilewright register` stamps it on the
+the metadata. The params spec's `location` counts only when it is set, so a YAML written
+before `location` existed keeps its fingerprint; adding or changing a `location` gives a
+new one. The hash goes into the manifest, and `tilewright register` stamps it on the
 dataset container as `fingerprint`.
 
 When the key already exists on the server:
@@ -63,6 +65,14 @@ changes that entity's key.
 
 These two modes belong to the HDF5 sources (`files`, `batch`, `groups`). Nothing about
 identity appears in their YAML unless you write `identity: provenance`.
+
+**Parameters from the location count too.** A value taken from an entity's path with
+`params.location` ([sources](sources.md#parameters-from-the-location)) is a parameter
+like the ones read inside the file, and `params` identity hashes it with them. Two files
+with the same contents whose names carry different years are two entities. The value
+follows the name, though: renaming a file changes it, and with it the entity's key.
+Moving the whole directory changes nothing, because the location is relative to
+`directory`.
 
 **A table's identity is its `id` column(s).** A `table` source has no `identity` key. One
 column, `id: run_number`, hashes that column's value; a list, `id: [system_id, tilt]`,
