@@ -217,6 +217,10 @@ def register_main():
         except ValueError as e:
             print(f"\nERROR: {e}", file=sys.stderr)
             sys.exit(1)
+        except TypeError as e:  # e.g. a value the Tiled client cannot serialize
+            print(f"\nERROR: {config_path}: could not register '{dataset_key}': "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
+            sys.exit(1)
         stale = summary.stale
         if stale:
             print(f"\nERROR: {stale} artifact(s) of '{dataset_key}' changed on disk since they "
