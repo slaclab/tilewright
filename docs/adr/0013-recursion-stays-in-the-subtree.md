@@ -7,7 +7,9 @@ keeps ADR-0007's identity rule (only what is read is hashed) and ADR-0011's refu
 `recursive` together with a `..` path. Decided by the fix campaign's orchestrator after
 the fourth review of the rule, on the three leaks below, and amended after the fifth,
 which defeated the first form of the test with one extra hop and showed that a linked
-dataset below the group was still read out of the subtree.
+dataset below the group was still read out of the subtree, and after the sixth, which
+defeated the chain test with a link in the *middle* of a target path — the rule now
+decides on the object a name resolves to, never on the text of a path.
 
 ## Decision
 
@@ -24,7 +26,11 @@ WARNING and skipped:
 
 The target is placed from the link, not from the path the reader opened it through
 (`h5py` reports the opened path for a linked object, so `Group.name` cannot say where a
-link led), and a **chain** of links is followed to its final target:
+link led), and **the path a link names is walked component by component from the group
+the walk started from**, never resolved in one `get()`: `h5py` follows every link inside
+a path it is handed, so a target path that *runs through* a link lands at the real parent
+with the links it crossed never tested. One loop therefore covers the member itself,
+every hop of a **chain**, and every segment of a path:
 
 - an **external link** resolves in another file, so it is never inside the subtree. The
   warning names that link's own file — made absolute against the file that holds it, as
@@ -32,13 +38,21 @@ link led), and a **chain** of links is followed to its final target:
   not pair the target file with a path in the source file;
 - a **soft link**'s target path, resolved against the group that holds the link when it
   is relative, must be the group the walk started from or one under it, in that file.
-  When it is, whatever lies at that path may be a link in turn, and the chain goes on
-  there: a test of one link's own target passes at `hop` in
-  `hop -> direct -> /elsewhere`, because `/entry/direct` is inside `/entry`, and the walk
-  then descends into what `direct` names. The chain is bounded at 32 hops. HDF5 itself
-  traverses at most 16 links before it refuses to resolve one (`H5Pset_nlinks`), so twice
-  that never decides for a member the library could open, while a file that manages to
-  loop is named and skipped rather than walked for ever (#29's guarantee);
+  When it is, the walk goes on through that path's own components, and a link met at any
+  of them is tested in turn: a test of one link's own target passes at `hop` in
+  `hop -> direct -> /elsewhere`, because `/entry/direct` is inside `/entry`, and the same
+  text passes for `sub/hop -> /entry/out/gain` when `out` links to `/elsewhere`. The soft
+  links followed are bounded at 32; walking a component of a path the file already holds
+  costs none of them, so a path of any depth inside the subtree is still walked to its
+  end. HDF5 itself traverses at most 16 links before it refuses to resolve one
+  (`H5Pset_nlinks`), so twice that never decides for a member the library could open,
+  while a file that manages to loop is named and skipped rather than walked for ever
+  (#29's guarantee);
+- the **file of the object** a name resolves to is tested on its own, behind the walk: an
+  object whose `file.filename` differs from that of the group the walk started from is
+  outside whatever its path says. An external link is the only way to reach one, so the
+  walk names it first and more precisely; this test is what makes the cross-file half
+  hold even where a path argues otherwise;
 - a **hard link** is one of the object's own names, and that name is inside the group
   that holds it, so it needs no test. It is the one link that can still put a group that
   is an entity of the dataset inside another one, and object identity is the only way to
@@ -207,20 +221,37 @@ compared uids and `source_fingerprint` against the registered Parquet files.
   each hold such a link prints a thousand lines. That is the shape of the existing
   unreadable-link warning, and it is what makes the skip visible in a log.
 - `manifest.py` loses `_ClosedGroups` and `_file_id` and gains one function, `_outside`,
-  which places a member's link chain; the object-id set is now three lines in the
-  `groups` walker. `_outside` reads `get(..., getlink=True)` once per hop, so a member
-  that is not a link costs one call and a chain of k links costs k; on a wide group that
-  is one call per member, the same order as reading it.
-- The subtree is compared by path. A params group reached *through* a soft link is read
-  under the path the reader opened it with, so a soft link inside it that names its own
-  target by an absolute path is outside that path and skipped, with the warning naming
-  both. Naming the group under `params.groups` is the way to read it.
+  which places a member by the object it resolves to; the object-id set is now three lines
+  in the `groups` walker. `_outside` reads `get(..., getlink=True)` once per component
+  walked, so a member that is not a link costs one call, and a link costs one per hop plus
+  one per component of each target path — bounded by the depth the file itself writes; on
+  a wide group that is one call per member, the same order as reading it.
+- The subtree is compared by path, and a path is not evidence: any component of it can be
+  a link, so the comparison holds only because the walk tests every component and the
+  file of the resolved object is tested behind it. Two cases follow.
+  - A params group reached *through* a soft link is read under the path the reader opened
+    it with, so a soft link inside it that names its own target by an absolute path is
+    outside that path and skipped, with the warning naming both. Naming the group under
+    `params.groups` is the way to read it.
+  - A target path that *contains* a link is a different case from a params group *reached*
+    through one, and this is the round that closes it. `sub/hop -> /entry/out/gain`, where
+    `out` links to `/elsewhere`, is spelled inside `/entry` from end to end; resolving the
+    target's parent in one `get()` placed it at `/elsewhere` with the crossed link never
+    tested, so the same group was skipped under one name and read under another in one
+    walk, and with an external link in the middle another file's values entered the uid.
+    Walking the path component by component makes the two names agree; a legitimate deep
+    path inside the subtree, links inside it and all, is still read, because a component
+    that is a hard link costs no hop.
 - Tests: `tests/test_manifest.py::TestRecursionStaysInTheSubtree` holds the five leaks and
   the positive cases — a soft link inside the subtree, absolute and relative, is read, and
   a link to the group being read is the #29 case; a chain out of the subtree is skipped
   under `files`, `groups` and `batch` (three links deep under `files`); a linked dataset
   below the group is skipped and named; a member of the group itself is read wherever its
-  link leads; a soft link to an external link names that link's own file and path; and a
+  link leads; a soft link to an external link names that link's own file and path; a link
+  in the middle of a target path is skipped under `files`, under `groups` with a globbed
+  `entity_group` (where it reached a sibling entity's own value) and under `batch`, an
+  external link in the middle of one with it, while a legitimate deep path inside the
+  subtree is still read and the file of the resolved object is tested on its own; and a
   hard link into a sibling entity group's subgroup is read, the residual case above;
   `TestNestedGroups::test_recursion_inside_an_entity_group_follows_no_link_out_of_the_group`
   covers the six link shapes inside one file, the hard link to another entity among them;
