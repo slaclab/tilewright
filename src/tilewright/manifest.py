@@ -593,10 +593,11 @@ class _Walker:
                 for name in sorted(group):
                     if not fnmatchcase(name, art.members):
                         continue
+                    full = f"{gpath.rstrip('/')}/{name}"  # gpath is '/' for the root group
                     try:
                         ds = group[name]
                     except KeyError as e:  # dangling link
-                        print(f"  WARNING: {where}: {gpath}/{name} unreadable ({e}); skipped")
+                        print(f"  WARNING: {where}: {full} unreadable ({e}); skipped")
                         continue
                     if not isinstance(ds, h5py.Dataset) or ds.shape is None:
                         continue
@@ -608,7 +609,7 @@ class _Walker:
                             f"{name!r} gives the type {art_type!r}, and that type {problem}; "
                             f"{TYPE_RULE}. Leave the member out with 'members', or rename "
                             f"it in the file")
-                    found.append((art_type, f"{gpath.rstrip('/')}/{name}", ds,
+                    found.append((art_type, full, ds,
                                   f"artifacts[{i}] (type {art.type!r}, group {art.group!r}, "
                                   f"member {name!r})"))
                 if not found and not art.optional:
