@@ -62,7 +62,10 @@ matching group of the file, of any sibling set. A group is known by the HDF5 obj
 is (`h5py` object ids), not by the path it was opened through, so a soft link or a
 second hard link inside an entity group does not lead the reader into another entity,
 into another set's matching group, or back into its own entity group or matching
-group.
+group. A link to a group *inside* one of them (another detector's subgroup, another
+site's `calibration`) is still followed: knowing every such group would mean walking the
+subtree of every matching group. Only the scalars of such a group are read, since a path
+inside the entity group splits no array, so nothing is paired by another set's names.
 
 **Different parameter sets.** Entities whose groups hold different parameters get null
 for the ones they lack. This is how `entities.parquet` always behaved, and it is now

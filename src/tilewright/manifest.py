@@ -683,7 +683,7 @@ class _Walker:
                                      + (" (after exclude_groups)" if excluded else ""))
                 # every matched group and every entity group of the file, as HDF5 objects,
                 # so that a link to one is the same group: recursion inside an entity group
-                # enters none of them, so no entity reads another's values through a link
+                # enters none of them, whatever link leads there (ADR-0011)
                 closed = {f[base or "/"].id for base, _ in parents} | {
                     f[base or "/"][n].id for base, names in parents for n in names}
                 for base, names in parents:

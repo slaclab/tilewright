@@ -550,28 +550,36 @@ class TestNestedGroups:
             "site": "north", "detector": "det_b", "top.beamline": 7, "cal.gain": 1.5,
             "cal.offset": 0.5, "own.temperature": 71.0})
 
-    @pytest.mark.parametrize("link", ["peer", "copy", "far", "up"])
+    @pytest.mark.parametrize("link, read", [
+        ("peer", {}), ("copy", {}), ("far", {}), ("up", {}),
+        ("into", {"into.gain": 0.7}), ("cal", {"cal.gain": 2.0}),
+    ])
     def test_recursion_inside_an_entity_group_follows_no_link_to_an_entity_or_matched_group(
-            self, tmp_path, link):
+            self, tmp_path, link, read):
         """Recursion stays for paths inside the entity group, where another entity can be
         reached only through an HDF5 link. The reader knows a group by its HDF5 object,
         not by the path it opened it through, so it goes through none of these links:
         'peer' (a soft link to a sibling detector), 'copy' (a second hard link to another
         site's detector), 'far' (a soft link to another site) and 'up' (a soft link back
         to its own site, which a walk that follows it never leaves). A plain subgroup is
-        read (reviews 2 and 3 of #21)."""
+        read (reviews 2 and 3 of #21). A link to a group inside one of those groups is
+        followed, as ADR-0011 records: 'into' (another detector's subgroup) and 'cal'
+        (another site's excluded group); only their scalars are read."""
         d = tmp_path / "sites"
         d.mkdir()
         with h5py.File(d / "detectors.h5", "w") as f:
             for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a"]):
                 f[f"sites/{group}/temperature"] = 70.0 + n
                 f[f"sites/{group}/spectrum"] = np.zeros(4)
+                f[f"sites/{group}/local/gain"] = 0.5 + n / 10
             for site, gain in (("north", 1.5), ("south", 2.0)):
                 f[f"sites/{site}/calibration/gain"] = gain
-            f["sites/north/det_a/local/gain"] = 0.5
+                f[f"sites/{site}/calibration/offsets"] = np.array([0.1, 0.2])
             f["sites/north/det_a"][link] = {
                 "peer": h5py.SoftLink("/sites/north/det_b"), "copy": f["sites/south/det_a"],
                 "far": h5py.SoftLink("/sites/south"), "up": h5py.SoftLink("/sites/north"),
+                "into": h5py.SoftLink("/sites/south/det_a/local"),
+                "cal": h5py.SoftLink("/sites/south/calibration"),
             }[link]
         cfg = {"label": "Detectors", "metadata": dict(META),
                "source": {"groups": {
@@ -583,9 +591,10 @@ class TestNestedGroups:
         with stops_within(30):
             ent, _ = run(tmp_path, cfg)
         assert set(ent.columns) == {"uid", "source_group", "site", "detector",
-                                    "temperature", "local.gain"}
+                                    "temperature", "local.gain", *read}
         assert list(ent["temperature"]) == [70.0, 71.0, 72.0]
-        assert ent["local.gain"].tolist()[0] == 0.5
+        assert list(ent["local.gain"]) == [0.5, 0.6, 0.7]
+        assert {k: ent.loc[0, k] for k in read} == read
 
     def test_a_dotdot_path_that_names_an_entity_group_is_read_by_the_sibling_rule(
             self, tmp_path):
