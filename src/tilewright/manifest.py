@@ -343,12 +343,13 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
     Returns ``(params, labels)``. ``params`` maps dotted keys (``instrument.Ei``) to values,
     or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
 
-    ``siblings`` is ``(i, n, entities, memo)`` for a ``groups`` entity: its position among
-    the n entity groups beside it, the HDF5 paths of every entity group in the file, and a
-    dict the n share. A group path that starts with ``..`` leaves the entity group
-    (ADR-0011); such a group is read once for the n siblings, by the batch rule with
-    N = n, never descending into any entity group of the file (a path above the matched
-    group reaches those of other sibling sets too), and the entity takes element i.
+    ``siblings`` is ``(i, n, closed, memo)`` for a ``groups`` entity: its position among
+    the n entity groups beside it, the groups of the file that recursion never enters
+    (every matched group and every entity group), and a dict the n share. A group path
+    that starts with ``..`` leaves the entity group (ADR-0011); such a group is read once
+    for the n siblings, by the batch rule with N = n, and the entity takes element i.
+    Recursion from it enters no group in ``closed``: a path above the matched group would
+    otherwise reach the groups of other sibling sets, whose arrays follow their own names.
     """
     out, labels = OrderedDict(), OrderedDict()
     for gname, gpath in spec.paths.items():
@@ -356,7 +357,7 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
         if not ups:
             found = _read_group(container, rest, gname, gpath, spec, batch_size)
         else:
-            i, n, entities, memo = siblings
+            i, n, closed, memo = siblings
             above = [p for p in container.name.split("/") if p]
             if ups > len(above):
                 field = f"groups.{gname}" if gname else "group"
@@ -368,7 +369,7 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
                 where = "/".join(above[:len(above) - ups] + [rest]).strip("/")
                 memo[gname] = _read_group(container.file, where, gname, gpath, spec,
                                           None if spec.from_ == "attrs" else n,
-                                          skip=entities)
+                                          skip=closed)
             found = memo[gname]
             if spec.from_ == "datasets":
                 found = ({k: _to_python(v[i]) for k, v in found[0].items()}, found[1])
@@ -681,16 +682,17 @@ class _Walker:
                     raise ValueError(f"{h5_path}: no groups under entity_group '/{pattern}' "
                                      f"to treat as entities"
                                      + (" (after exclude_groups)" if excluded else ""))
-                # every entity group of the file, as h5py names them: recursion from a
-                # group reached through '..' never enters one, whichever set it is in
-                entities = {f"/{base}/{n}" if base else f"/{n}"
-                            for base, names in parents for n in names}
+                # every matched group and every entity group of the file, as h5py names
+                # them: recursion from a group reached through '..' enters none of them
+                closed = {f"/{base}" for base, _ in parents} | {
+                    f"/{base}/{n}" if base else f"/{n}"
+                    for base, names in parents for n in names}
                 for base, names in parents:
                     memo = {}  # a group reached through '..' is read once per sibling set
                     gpaths = [f"{base}/{n}" if base else n for n in names]
                     for i, gpath in enumerate(gpaths):
                         g = f[gpath]
-                        siblings = (i, len(gpaths), entities, memo)
+                        siblings = (i, len(gpaths), closed, memo)
                         params, labels = (_read_params(g, spec, siblings=siblings)
                                           if spec is not None else ({}, {}))
                         prov = f"{rel}:/{gpath}"

@@ -503,12 +503,13 @@ class TestNestedGroups:
         assert set(ent["run.calibration.offset"]) == {0.5}
 
     def test_recursing_above_the_matched_groups_skips_every_entity_group(self, tmp_path):
-        """'../..' under '/*' is the file root, which holds the detector groups of both
-        sites. 'recursive' reads each site's calibration (excluded, so not an entity), but
-        no detector group of either site: no detector takes another site's values into
-        its parameters or its uid (review of #21)."""
+        """'../..' under '/*' is the file root, which holds the matched site groups and
+        their detector groups. 'recursive' reads the root, but goes into no site group,
+        and so into no detector group of either site: no detector takes another site's
+        values into its parameters or its uid (reviews of #21)."""
         cfg = sites_dataset(tmp_path)
         with h5py.File(tmp_path / "sites" / "detectors.h5", "a") as f:
+            f["beamline"] = 7
             for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a",
                                        "south/det_c"]):
                 del f[f"{group}/temperature"]
@@ -517,39 +518,93 @@ class TestNestedGroups:
             "groups": {"top": "../..", "own": "/"}, "recursive": True,
             "location": SITE_LOCATION, "exclude": ["../../created"]}
         ent, _ = run(tmp_path, cfg)
-        assert set(ent.columns) == {
-            "uid", "source_group", "site", "detector", "top.empty_site.status",
-            "top.north.calibration.channels", "top.north.calibration.gain",
-            "top.north.calibration.notes", "top.north.calibration.offset",
-            "top.south.calibration.gain", "top.south.calibration.notes",
-            "top.north.calibration.gain_units", "top.south.calibration.gain_units",
-            "own.temperature"}
+        assert set(ent.columns) == {"uid", "source_group", "site", "detector",
+                                    "top.beamline", "own.temperature"}
         assert list(ent["own.temperature"]) == [70.0, 71.0, 72.0, 73.0]
-        assert list(ent["top.south.calibration.gain"]) == [2.0] * 4
+        assert list(ent["top.beamline"]) == [7] * 4
         assert ent.loc[0, "uid"] == params_uid("DETECTORS", {
-            "site": "north", "detector": "det_a", "top.empty_site.status": 0,
-            "top.north.calibration.channels": 8, "top.north.calibration.gain": 1.5,
-            "top.north.calibration.notes": "bench 4", "top.north.calibration.offset": 0.25,
-            "top.south.calibration.gain": 2.0, "top.south.calibration.notes": "bench 4",
+            "site": "north", "detector": "det_a", "top.beamline": 7,
             "own.temperature": 70.0})
 
+    @pytest.mark.parametrize("south", [["det_a", "det_b"], ["det_a", "det_b", "det_c"]],
+                             ids=["same-size", "other-size"])
+    def test_recursing_above_the_matched_groups_reads_no_other_sets_array(self, tmp_path,
+                                                                           south):
+        """Each site's calibration holds one offset per detector of that site, in the
+        order of that site's names. From '../..' the reader goes into no matched group, so
+        no site reads another site's offsets, which it would pair with its own detectors
+        when the sizes agree (review 2 of #21). A site reads its own through a path that
+        names it, '../calibration', and there element i is its own i-th detector."""
+        d = tmp_path / "sites"
+        d.mkdir()
+        sets = {"north": (["det_a", "det_b"], 1.5, [0.25, 0.5]),
+                "south": (south, 2.0, [0.1, 0.2, 0.3][:len(south)])}
+        with h5py.File(d / "detectors.h5", "w") as f:
+            f["beamline"] = 7
+            for site, (detectors, gain, offsets) in sets.items():
+                f[f"{site}/calibration/gain"] = gain
+                f[f"{site}/calibration/offset"] = np.array(offsets)
+                for k, det in enumerate(detectors):
+                    f[f"{site}/{det}/temperature"] = 70.0 + k
+                    f[f"{site}/{det}/spectrum"] = np.zeros(4)
+        cfg = {"label": "Detectors", "metadata": dict(META),
+               "source": {"groups": {
+                   "directory": str(d), "entity_group": "/*",
+                   "exclude_groups": ["calibration"],
+                   "params": {"groups": {"top": "../..", "cal": "../calibration",
+                                         "own": "/"},
+                              "recursive": True, "location": SITE_LOCATION}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "source_group", "site", "detector",
+                                    "top.beamline", "cal.gain", "cal.offset",
+                                    "own.temperature"}
+        assert list(zip(ent["source_group"], ent["cal.offset"])) == [
+            ("north/det_a", 0.25), ("north/det_b", 0.5),
+            *zip((f"south/{n}" for n in south), sets["south"][2])]
+        assert list(ent["cal.gain"]) == [1.5, 1.5] + [2.0] * len(south)
+        assert ent.loc[1, "uid"] == params_uid("DETECTORS", {
+            "site": "north", "detector": "det_b", "top.beamline": 7, "cal.gain": 1.5,
+            "cal.offset": 0.5, "own.temperature": 71.0})
+
+    def test_a_dotdot_path_that_names_an_entity_group_is_read_by_the_sibling_rule(
+            self, tmp_path):
+        """A path that names a group is read as written, an entity group included, and by
+        the rule of every group reached through '..': a scalar goes to every sibling, and
+        a 1-D dataset of length N is split among them, so det_b takes element 1 of
+        det_a's offsets (review 2 of #21)."""
+        cfg = sites_dataset(tmp_path)
+        with h5py.File(tmp_path / "sites" / "detectors.h5", "a") as f:
+            for site, temperature, offsets in (("north", 70.0, [0.25, 0.5]),
+                                               ("south", 72.0, [0.1, 0.2])):
+                del f[f"{site}/det_a/temperature"]
+                f[f"{site}/det_a/temperature"] = temperature
+                f[f"{site}/det_a/offsets"] = np.array(offsets)
+        cfg["source"]["groups"]["params"] = {"groups": {"ref": "../det_a"},
+                                             "location": SITE_LOCATION}
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent["source_group"]) == ["north/det_a", "north/det_b",
+                                             "south/det_a", "south/det_c"]
+        assert list(ent["ref.temperature"]) == [70.0, 70.0, 72.0, 72.0]
+        assert list(ent["ref.offsets"]) == [0.25, 0.5, 0.1, 0.2]
+
     @pytest.mark.parametrize("path, above", [
-        ("../../..", ["campaign.beamtime", "campaign.sites.north.calibration.gain",
-                      "campaign.sites.south.calibration.gain"]),
-        ("../../../..", ["campaign.c1.beamtime", "campaign.c1.sites.north.calibration.gain",
-                         "campaign.c1.sites.south.calibration.gain", "campaign.c2.beamtime",
-                         "campaign.c2.sites.north.calibration.gain"]),
+        ("../../..", ["campaign.beamtime", "campaign.sites.count"]),
+        ("../../../..", ["campaign.c1.beamtime", "campaign.c1.sites.count",
+                         "campaign.c2.beamtime", "campaign.c2.sites.count"]),
     ])
     def test_recursing_from_a_deeper_glob_skips_every_entity_group(self, tmp_path, path,
                                                                    above):
         """Under '/*/sites/*' the entity groups hang below three matched groups. A path to
-        a run, or to the root, reaches the matched groups themselves and their excluded
-        'calibration' groups, never an entity group of another sibling set."""
+        a run, or to the root, reads the groups above the matched groups ('sites'), but
+        no matched group, so neither its excluded 'calibration' group nor an entity group
+        of any sibling set."""
         d = tmp_path / "runs"
         d.mkdir()
         with h5py.File(d / "r.h5", "w") as f:
-            for run_, beamtime in (("c1", 5), ("c2", 6)):
+            for run_, beamtime, count in (("c1", 5, 2), ("c2", 6, 1)):
                 f[f"{run_}/beamtime"] = beamtime
+                f[f"{run_}/sites/count"] = count
             for group, gain, temperatures in (
                     ("c1/sites/north", 1.0, {"det_a": 10.0, "det_b": 11.0}),
                     ("c1/sites/south", 2.0, {"det_a": 20.0}),
@@ -573,6 +628,7 @@ class TestNestedGroups:
                                     *above, "own.temperature"}
         assert list(ent["own.temperature"]) == [10.0, 11.0, 20.0, 30.0]
         assert list(ent[above[0]])[:3] == [5, 5, 5] and len(art) == 4
+        assert list(ent[above[1]])[:3] == [2, 2, 2]
 
     def test_climbing_above_the_file_root_names_the_entity(self, tmp_path):
         cfg = scans_dataset(tmp_path)
