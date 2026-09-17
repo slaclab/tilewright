@@ -114,6 +114,10 @@ queryable as a number without a type table in the YAML.
   file's rows start again at 0. With several files and nothing else that differs, the
   expression has to capture part of the file path too, or the rows collide; the field
   description says so and shows `'part_(?P<part>\d+)\.h5:(?P<shot>\d+)$'`.
+- A named group called like a locator of a declared artifact type (`path_<type>`,
+  `dataset_<type>`, `index_<type>`) is refused by the same data check as any other
+  parameter with such a name; its `Fix:` line says to rename the group in
+  `params.location`, since neither `exclude` nor renaming something in the file helps.
 - The examples on the pages authors read (the field description, the explanation page,
   the onboarding skill) are invented. The dataset expressions in the table above stay
   here: the pages that onboard a dataset must not hand its answer to the person

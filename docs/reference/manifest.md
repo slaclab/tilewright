@@ -79,9 +79,10 @@ and one `shared_dataset_<type>` per shared axis.
 
 The locators and the parameters share one metadata mapping. So, for every artifact `type`
 a dataset declares, `path_<type>`, `dataset_<type>` and `index_<type>` are reserved.
-`tilewright manifest` refuses a parameter, an attribute label or a `params.groups` name
-that is one of them (a dotted parameter nests under its first part, so that part
-counts), and the message names it ([the fix](errors.md#tilewright-manifest-the-data)).
+`tilewright manifest` refuses a parameter, an attribute label, a `params.groups` name or
+a named group of `params.location` that is one of them (a dotted parameter nests under
+its first part, so that part counts), and the message names it
+([the fix](errors.md#tilewright-manifest-the-data)).
 
 - A `table` declares no artifacts, so its columns are never refused.
 - A shared axis has no locator on the entity, so its `type` reserves nothing.
