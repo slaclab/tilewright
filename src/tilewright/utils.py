@@ -135,3 +135,67 @@ def make_artifact_key(art_row):
     so the type is already the key (e.g. ``mh_powder_30T``, ``rixs``).
     """
     return art_row["type"]
+
+
+def read_selection(ds, *selections):
+    """``ds[s1][s2]...`` for an h5py dataset, asking h5py for only the elements it returns.
+
+    The one read behind both read paths: a batch row then a user slice
+    (``ds[index][slc]``), and a server block between the two
+    (``ds[index][block][slc]``). Reading ``ds[index]`` first and slicing in memory would
+    read the whole row; here every selection is folded into a single h5py index, so HDF5
+    reads only the chunks that index touches.
+
+    Each selection is numpy-style (an int, a slice, ``...``, or a tuple of those) and
+    applies to what the previous ones left; a ``None`` selection is skipped. A negative
+    step is read forwards and reversed in memory. A selection h5py cannot take (index
+    arrays, masks, ``np.newaxis``), and every one after it, is applied in numpy to what
+    the selections before it read.
+    """
+    axes = [range(n) for n in ds.shape]  # per dataset axis: the int or range still selected
+    rest = [s for s in selections if s is not None]
+    while rest:
+        sel = tuple(rest[0]) if isinstance(rest[0], tuple) else (rest[0],)
+        if not all(s is Ellipsis or isinstance(s, slice)
+                   or (isinstance(s, (int, np.integer)) and not isinstance(s, bool))
+                   for s in sel):
+            break
+        live = [d for d, a in enumerate(axes) if isinstance(a, range)]
+        ellipses = [k for k, s in enumerate(sel) if s is Ellipsis]
+        given = len(sel) - len(ellipses)
+        if len(ellipses) > 1:
+            raise IndexError("an index can only have a single ellipsis ('...')")
+        if given > len(live):
+            raise IndexError(f"too many indices for array: array is {len(live)}-dimensional, "
+                             f"but {given} were indexed")
+        at = ellipses[0] if ellipses else len(sel)
+        sel = sel[:at] + (slice(None),) * (len(live) - given) + sel[at + 1:]
+        for axis, (d, s) in enumerate(zip(live, sel)):
+            if isinstance(s, slice):
+                axes[d] = axes[d][s]
+            elif -len(axes[d]) <= int(s) < len(axes[d]):
+                axes[d] = axes[d][int(s)]
+            else:
+                raise IndexError(f"index {int(s)} is out of bounds for axis {axis} "
+                                 f"with size {len(axes[d])}")
+        rest.pop(0)
+
+    key, flip = [], []
+    for a in axes:
+        if isinstance(a, int):
+            key.append(a)
+        elif not a:
+            key.append(slice(0, 0))
+            flip.append(slice(None))
+        elif a.step > 0:
+            key.append(slice(a[0], a[-1] + 1, a.step))
+            flip.append(slice(None))
+        else:  # h5py reads forwards only
+            key.append(slice(a[-1], a[0] + 1, -a.step))
+            flip.append(slice(None, None, -1))
+    arr = ds[tuple(key)]
+    if any(f.step for f in flip):
+        arr = arr[tuple(flip)]
+    for s in rest:
+        arr = arr[s]
+    return arr

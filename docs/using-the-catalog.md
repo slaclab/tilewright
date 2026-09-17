@@ -123,11 +123,14 @@ from tilewright.client import locate, load
 
 locate(ent)          # {'rixs_spectrum': {'file': 'batch_0/sim.h5', 'dataset': '/spectra', 'index': 42}}
 load(ent, "rixs_spectrum", base_dir="/mnt/shared/rixs/data/my_dataset")   # the (151, 40) array
+load(ent, "rixs_spectrum", base_dir="/mnt/shared/rixs/data/my_dataset",
+     slc=(slice(0, 5), 0))                                                 # a (5,) array
 ```
 
 `base_dir` is the dataset's `directory` as *you* see it; ask whoever onboarded it. The
 row index is applied before any slice you pass, which is the one detail that is easy to
-get wrong when writing this by hand.
+get wrong when writing this by hand. Both go to h5py as one index, so a slice reads only
+what it selects ([sliced reads](explanation/data-model.md#an-entity-is-a-slice)).
 
 `tilewright.client` imports [`hdf5plugin`](https://pypi.org/project/hdf5plugin/), so
 arrays compressed with the filters it ships (LZ4, Bitshuffle, Blosc, Zstd, ...) read like
