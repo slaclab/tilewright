@@ -71,7 +71,7 @@ One HDF5 file per entity.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
-| `params` | mapping or `null` | no |  | Where the parameters live: inside each file, and with 'location' in its path. Default: 0-dim datasets at the root. 'null' declares that entities have no parameters (identity becomes provenance). |
+| `params` | mapping or `null` | no |  | Where the parameters live: inside each file, and with 'location' in its path. Default: the scalar datasets at the root. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.batch`
 
@@ -83,7 +83,7 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
-| `params` | mapping or `null` | no |  | Where the parameters live: inside each file, and with 'location' in its path and row number. Default: the root. N is the file's leading axis (that of the first artifact). Only 1-D datasets of length N are per-entity values, one per row; 0-dim datasets are broadcast to every entity in the file; any other member, (N, 1) included, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
+| `params` | mapping or `null` | no |  | Where the parameters live: inside each file, and with 'location' in its path and row number. Default: the root. N is the file's leading axis (that of the first artifact). Only 1-D datasets of length N are per-entity values, one per row; scalar datasets (0-dim or of size 1) are broadcast to every entity in the file; any other member, (N, 1) with N > 1 included, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.groups`
 
@@ -96,7 +96,7 @@ One HDF5 group per entity inside each file.
 | `identity` | `params` \| `provenance` | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the HDF5 files under 'directory', matched with Python's Path.glob relative to 'directory': '\*', '?' and '[...]' match within one path segment, and a '\*\*' segment matches any number of directories, so '\*\*/\*.h5' recurses. Names starting with '.' match like any other. There are no braces: '\*.{h5,hdf5}' matches nothing; use a wider glob such as '\*.h\*5'. A pattern that matches nothing is retried with Path.rglob, which puts '\*\*/' in front of it, so it then matches at any depth. Only files are kept, in sorted order. |
 | `entity_group` | str | no |  | Group whose subgroups are the entities ('/samples'). Default: the file's top-level groups. |
-| `params` | mapping or `null` | no |  | Where the parameters live: relative to each entity group, and with 'location' in its file and group path. Default: the entity group's own 0-dim datasets. 'null' declares none. |
+| `params` | mapping or `null` | no |  | Where the parameters live: relative to each entity group, and with 'location' in its file and group path. Default: the entity group's own scalar datasets. 'null' declares none. |
 
 ### `source.table`
 
@@ -119,11 +119,11 @@ labels, stored beside the value and never part of the identity.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `group` | str | no |  | One HDF5 group whose fields become flat metadata keys. '/' is the container itself. Default '/' when neither 'group' nor 'groups' is given. |
+| `group` | str | no |  | One HDF5 group whose fields become flat metadata keys. '/' is the container itself. Default '/' when neither 'group' nor 'groups' is given. With 'from: attrs' it may also name a dataset: that dataset's attributes are then the parameters. An attribute name with a dot in it ('run.number') is a dotted key, nested on registration like the keys 'groups' makes (metadata.run.number). |
 | `groups` | mapping | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
-| `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': 0-dim datasets in the group are parameters (in 'batch', a 1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 attributes are the parameters. |
+| `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': scalar datasets in the group are parameters, 0-dim or of size 1 (NeXus writes scalars with shape (1,)); in 'batch', a 1-D dataset of length N is one value per entity. 'attrs': the group's HDF5 attributes are the parameters. |
 | `recursive` | bool | no | `False` | Descend into subgroups, nesting one level per subgroup. |
-| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. |
+| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: `/version` skips the root's attribute 'version'. |
 | `location` | str | no |  | A Python regular expression, searched (re.search) in each entity's location: for 'files', the file path relative to 'directory' with '/' separators (`2011/BCI_2011APR.h5`); for 'groups', `<file path>:/<group path>` (`samples.h5:/samples/sample_7`); for 'batch', `<file path>:<row number>` (`sim/batch_0.h5:41`). Each named group, `(?P<name>...)`, becomes a flat parameter beside those read in the container, and is part of the identity like them. Its type comes from the text it captures: an integer, `[+-]?\d+`, becomes an int, so leading zeros are lost (`0042` -> 42); a decimal or exponent literal (`0.4`, `1e-3`) becomes a float; anything else stays a string; a group that takes no part in the match is null. Unnamed groups, `(...)`, are wildcards only; at least one named group is required. Write it in single quotes, so that YAML keeps the backslashes: `location: 'BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$'` gives year 2011 and month 'APR'. A batch row number is a legitimate parameter when nothing else varies between rows: `location: ':(?P<row>\d+)$'`. An entity whose location does not match is an error, and so is a name that is also read in the container. |
 
 `groups` nests: `{instrument: /entry/instrument}` puts `Ei` at `metadata.instrument.Ei`,

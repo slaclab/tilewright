@@ -146,7 +146,10 @@ class ParamsSpec(BaseModel):
     group: str | None = Field(
         default=None,
         description="One HDF5 group whose fields become flat metadata keys. '/' is the "
-        "container itself. Default '/' when neither 'group' nor 'groups' is given.",
+        "container itself. Default '/' when neither 'group' nor 'groups' is given. With "
+        "'from: attrs' it may also name a dataset: that dataset's attributes are then the "
+        "parameters. An attribute name with a dot in it ('run.number') is a dotted key, "
+        "nested on registration like the keys 'groups' makes (metadata.run.number).",
     )
     groups: dict[str, str] | None = Field(
         default=None,
@@ -157,9 +160,10 @@ class ParamsSpec(BaseModel):
     from_: Literal["datasets", "attrs"] = Field(
         default="datasets",
         alias="from",
-        description="'datasets': 0-dim datasets in the group are parameters (in 'batch', a "
-        "1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 "
-        "attributes are the parameters.",
+        description="'datasets': scalar datasets in the group are parameters, 0-dim or of "
+        "size 1 (NeXus writes scalars with shape (1,)); in 'batch', a 1-D dataset of "
+        "length N is one value per entity. 'attrs': the group's HDF5 attributes are the "
+        "parameters.",
     )
     recursive: bool = Field(
         default=False,
@@ -167,7 +171,9 @@ class ParamsSpec(BaseModel):
     )
     exclude: list[str] = Field(
         default_factory=list,
-        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say.",
+        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. "
+        "Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: "
+        "`/version` skips the root's attribute 'version'.",
     )
     location: str | None = Field(
         default=None,
@@ -276,7 +282,7 @@ class FilesSource(_HDF5SourceBase):
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live: inside each file, and with 'location' in "
-        "its path. Default: 0-dim datasets at the root. 'null' declares that entities "
+        "its path. Default: the scalar datasets at the root. 'null' declares that entities "
         "have no parameters (identity becomes provenance).",
     )
 
@@ -289,8 +295,8 @@ class BatchSource(_HDF5SourceBase):
         description="Where the parameters live: inside each file, and with 'location' in "
         "its path and row number. Default: the root. N is the file's leading axis (that of "
         "the first artifact). Only 1-D datasets of length N are per-entity values, one per "
-        "row; 0-dim datasets are broadcast to every entity in the file; any other member, "
-        "(N, 1) included, is skipped without a message. "
+        "row; scalar datasets (0-dim or of size 1) are broadcast to every entity in the "
+        "file; any other member, (N, 1) with N > 1 included, is skipped without a message. "
         "'null' declares that entities have no parameters (identity becomes provenance).",
     )
 
@@ -306,7 +312,7 @@ class GroupsSource(_HDF5SourceBase):
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live: relative to each entity group, and with "
-        "'location' in its file and group path. Default: the entity group's own 0-dim "
+        "'location' in its file and group path. Default: the entity group's own scalar "
         "datasets. 'null' declares none.",
     )
 
