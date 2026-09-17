@@ -34,9 +34,10 @@ manifest is the output.
 file per entity), `batch` (stacked on axis 0), `groups` (one group per entity), `table`
 (rows of a sidecar table, no arrays). Each tag owns only its keys. _Avoid_: layout, format.
 
-**Identity**: how an entity's uid is computed (ADR-0007). `params` (default): a hash of
-parameter values. `provenance`: a hash of file path plus row or group; forced when there
-are no parameters. Duplicate identities fail the manifest.
+**Identity**: how an entity's uid is computed (ADR-0007, ADR-0008). For `files`, `batch`
+and `groups`: `params` (default), a hash of parameter values, or `provenance`, a hash of
+file path plus row or group, forced when there are no parameters. For a `table`: a hash
+of its `id` column(s); it has no `identity` key. Duplicate identities fail the manifest.
 
 **Key**: the dataset container key, `slug(label)`, written by `tilewright manifest`.
 

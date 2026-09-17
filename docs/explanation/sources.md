@@ -85,7 +85,8 @@ ADR.
   rather than pulling the whole stacked dataset ([sliced reads](data-model.md#an-entity-is-a-slice)).
 - **`groups`**: an artifact's `dataset` path resolves relative to each entity group.
 - **`files`**: the file is the entity boundary, so there is no index.
-- **`table`**: entity identity is the `id` column; nothing is served as an array.
+- **`table`**: entity identity is the `id` column, or several columns listed in `id`
+  ([identity and keys](identity.md)); nothing is served as an array.
 
 You declare it once and it is never re-inferred: the manifest, the locator metadata, and
 the read path all rely on it matching the files.
