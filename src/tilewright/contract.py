@@ -88,17 +88,23 @@ class DatasetMetadata(BaseModel):
     data_type: str = Field(
         min_length=1,
         description="What kind of data, as one of the data_type ids in the vocabulary: "
-        "'simulation', 'experimental', 'benchmark' or 'optimization'. Vocabulary facet.",
+        "'simulation', 'experimental', 'benchmark' or 'optimization'. A measurement of "
+        "the world is experimental wherever the instrument stood, a laboratory, a field "
+        "site or an orbit; what a model or a code computed is simulation. Vocabulary "
+        "facet.",
     )
     material: str = Field(
         min_length=1,
-        description="Material or system studied, e.g. 'NiPS3'; 'not_applicable' for "
-        "non-physical data. Vocabulary facet.",
+        description="Material or system studied, e.g. 'NiPS3'. A physical system that is "
+        "not a substance is named as the system it is ('upper atmosphere', 'seafloor "
+        "sediment'); 'not_applicable' is for data with no physical subject at all, such "
+        "as a benchmark of a solver. Vocabulary facet.",
     )
     producer: str | None = Field(
         default=None,
-        description="Code that produced or reduced the data ('sunny_jl', 'mantid'). "
-        "Vocabulary facet.",
+        description="Code that produced or reduced the data ('sunny_jl', 'mantid'). When "
+        "a chain of codes made the files, it names the last one that shaped the arrays "
+        "being registered; name the earlier steps in 'description'. Vocabulary facet.",
     )
     project: str | None = Field(
         default=None,
@@ -124,7 +130,11 @@ class DatasetMetadata(BaseModel):
         default=None,
         description="One paragraph a reader uses to decide whether to open the dataset. "
         "Repeat the defining numbers here freely, but every number in it must also "
-        "exist as a metadata key: the key is authoritative, the prose is the summary.",
+        "exist as a metadata key: the key is authoritative, the prose is the summary. A "
+        "number is a quantity someone could query on (a count, a size, a rate, a "
+        "temperature); a year in a name, a version string, a DOI and a field name are "
+        "prose, and need no key. Nothing checks the rule, so a prose number that no key "
+        "carries, or a key whose value the prose contradicts, is found by a reader.",
     )
 
 
@@ -192,7 +202,12 @@ class ParamsSpec(BaseModel):
         "files or entity groups lack (one of 'groups', say) gives their entities none of "
         "its parameters. Those entities hold null in the columns they miss. 'attrs': the "
         "group's HDF5 attributes are the parameters, and a group that a file or an entity "
-        "group lacks is an error naming it.",
+        "group lacks is an error naming it. Every attribute of that group is read whatever "
+        "its value holds: an array-valued attribute becomes a list parameter, an empty one "
+        "(a null dataspace) becomes null. One block reads one way, for every path in it, "
+        "and a source takes one 'params' block: a container that keeps some values in "
+        "scalar datasets and others in attributes gives up one of the two, so copy what is "
+        "left over into 'metadata' by hand, or ask the producer to move it.",
     )
     recursive: bool = Field(
         default=False,
@@ -210,7 +225,10 @@ class ParamsSpec(BaseModel):
         "spells: the object a name resolves to decides, not the text. A group named under "
         "'group' or 'groups' is likewise read wherever its path leads. It applies to every "
         "path of the block, so under 'groups' a block with 'recursive: true' may hold no "
-        "path that starts with '..' (see 'params' under 'source.groups').",
+        "path that starts with '..' (see 'params' under 'source.groups'). The key is the "
+        "path: a field kept as a group of its own ('/beam_current' holding 'data' and "
+        "'description') gives 'beam_current.data' and 'beam_current.description', and "
+        "nothing renames a key: the parameter a reader queries is the one the file spells.",
     )
     exclude: list[str] = Field(
         default_factory=list,
@@ -243,7 +261,9 @@ class ParamsSpec(BaseModel):
         "repeat from file to file (every batch file's rows start again at 0), so capture "
         r"part of the file path as well: `location: 'part_(?P<part>\d+)\.h5:(?P<shot>\d+)$'`. "
         "An entity whose location does not match is an error, and so is a name that is "
-        "also read in the container.",
+        "also read in the container. A params block that holds nothing but 'location' is "
+        "complete: for files that keep no scalar and no attribute anywhere, the named "
+        "groups are the entity's whole identity, and the empty default group is no error.",
     )
 
     @property
@@ -459,12 +479,17 @@ class TableSource(_SourceBase):
     path: str = Field(
         min_length=1,
         description="Parquet or CSV file, relative to 'directory'. Every column becomes "
-        "entity metadata.",
+        "entity metadata, and there is no way to leave one out: a column whose header "
+        "cell is empty is read under the name pandas gives it ('Unnamed: 4') and is null "
+        "in every row. To drop a column, change the table.",
     )
     id: str | list[str] = Field(
         description="The entity's identity: one column, or a list of columns when no "
         "single column is unique ('id: [specimen, replicate]'); together their values must be "
-        "unique across rows. Changing it re-keys every entity: delete the registered "
+        "unique across rows. A null cell is allowed and hashed as null, so rows are still "
+        "told apart by the cells that are filled in; what no equality search can then "
+        "find is that row, because a null is not a value to compare with. Changing it "
+        "re-keys every entity: delete the registered "
         "dataset, then register again. A list is part of the fingerprint, so 'register' "
         "refuses a change to, from or between lists until you do.",
     )
@@ -579,7 +604,9 @@ class ArtifactSpec(BaseModel):
         "'%' followed by two hex digits ('%20'), and the type may not be '.' or '..': it "
         "travels in a URL, so the server would not serve such an array back. Dots, "
         "spaces, brackets, '-', '|', a leading '_' or '.', and non-ASCII "
-        "letters all work, and a dot does not nest the locators. With --upload, a "
+        "letters all work, and a dot does not nest the locators. A type is taken "
+        "exactly as written, so 'gain_a' and 'Gain_A' are two different arrays of one "
+        "entity, and only an exact repeat is a duplicate. With --upload, a "
         "server that keeps arrays as files names a directory after the type, "
         "URL-escaped as Python's urllib.parse.quote_plus does it, so that must also fit "
         "in one file name, 255 bytes on most filesystems.",
@@ -671,8 +698,12 @@ class SharedAxisSpec(BaseModel):
         min_length=1,
         description="Absolute HDF5 path (in every source) of an array identical for all "
         "entities. Read from the first file that holds it; every other file must agree. "
-        "A shared entry names one array: the 'group' form of 'artifacts' is not available "
-        "here.",
+        "A file that does not hold the path at all is passed over silently, so one entry "
+        "cannot reach values kept under a path that carries the entity's own name "
+        "('/<sample>/energy_grid'), however identical: those belong in the dataset "
+        "'metadata'. Nothing else is claimed about the values: an axis that repeats or "
+        "runs backwards is a valid shared axis as long as every file agrees. A shared "
+        "entry names one array: the 'group' form of 'artifacts' is not available here.",
     )
 
     @model_validator(mode="after")
@@ -699,7 +730,11 @@ class DatasetConfig(BaseModel):
 
     label: str = Field(
         min_length=1,
-        description="Human-readable dataset name. The catalog key is derived from it.",
+        description="Human-readable dataset name. The catalog key is derived from it: "
+        "slug(label) keeps A-Z and 0-9 only, so every other character, a non-ASCII "
+        "letter included, becomes '_' ('Fernández Powder' -> FERN_NDEZ_POWDER), and a "
+        "label with no ASCII letter or digit at all is an error. Write the label as the "
+        "name should read; the key is allowed to be the plainer spelling.",
     )
     key: str | None = Field(
         default=None,
@@ -713,7 +748,10 @@ class DatasetConfig(BaseModel):
     artifacts: list[ArtifactSpec] = Field(
         default_factory=list,
         description="Arrays each entity exposes; at least one entry, except for 'table'. "
-        "An entry names one array ('dataset') or every array in a group ('group').",
+        "An entry names one array ('dataset') or every array in a group ('group'). The "
+        "list says what the dataset serves, not what the files hold: an array no reader "
+        "would ask for, a constant placeholder whose meaning is in its own attributes "
+        "say, is left out, and nothing checks the files for arrays nobody named.",
     )
     shared: list[SharedAxisSpec] = Field(
         default_factory=list,
