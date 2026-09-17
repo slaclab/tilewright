@@ -172,3 +172,74 @@ def test_register_reports_an_unserializable_value_as_an_error_line(tmp_path, mon
     err = capsys.readouterr().err
     assert "ERROR:" in err and "FLOAT_META" in err
     assert "TypeError: Type is not JSON serializable: Something" in err
+
+
+# ---------------------------------------------------------------------------
+# register: the verify step on a table whose columns start with path_ (#8, #18)
+# ---------------------------------------------------------------------------
+
+class _Node:
+    """An in-memory Tiled container: as much of the client as `register` and its verify
+    step use on a dataset without artifacts."""
+
+    def __init__(self, metadata=None):
+        self.metadata = dict(metadata or {})
+        self.children = {}
+
+    def __contains__(self, key):
+        return key in self.children
+
+    def __getitem__(self, key):
+        return self.children[key]
+
+    def __len__(self):
+        return len(self.children)
+
+    def keys(self):
+        return list(self.children)
+
+    def items(self):
+        return list(self.children.items())
+
+    def create_container(self, key=None, metadata=None, **kw):
+        from tiled.utils import safe_json_dump
+
+        safe_json_dump(metadata)
+        self.children[key] = _Node(metadata)
+        return self.children[key]
+
+
+PICKS_YAML = """\
+label: Picks table
+metadata: {{method: [seismology], data_type: experimental, material: not_applicable}}
+source:
+  table:
+    directory: {directory}
+    path: meta.csv
+    id: trace_name
+"""
+
+
+def test_register_a_table_with_path_columns_verifies_without_a_warning(tmp_path, monkeypatch,
+                                                                        capsys):
+    """PickBlue (zenodo/10277799): the SeisBench columns path_p_travel_s and
+    path_s_travel_s are table metadata. The verify step must not take them for locators
+    and warn that reads through the server will fail (#8)."""
+    from tilewright.manifest import generate_manifests
+
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "meta.csv").write_text("trace_name,path_p_travel_s,path_s_travel_s,magnitude\n"
+                                   "ev1,3.5,6.0,1.2\nev2,4.25,7.5,0.8\n")
+    yaml_path = tmp_path / "PICKS_TABLE.yml"
+    yaml_path.write_text(PICKS_YAML.format(directory=data))
+    generate_manifests(str(yaml_path))
+    root = _Node()
+    _run_register(monkeypatch, yaml_path, root)
+    out = capsys.readouterr().out
+    entities = root["PICKS_TABLE"].children
+    assert len(entities) == 2
+    assert sorted(e.metadata["path_p_travel_s"] for e in entities.values()) == [3.5, 4.25]
+    assert "Entity 'PICKS_TABLE_" in out and "no artifacts declared" in out
+    assert "WARNING" not in out and "reads through the server will fail" not in out
+    assert "Done!" in out
