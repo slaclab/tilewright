@@ -1013,6 +1013,35 @@ class TestParameterGroups:
         assert "WARNING" in out and ("run_0.h5:/entry/sub/up links back to /entry, which "
                                      "is already being read; skipped") in out
 
+    def test_a_link_cycle_in_the_params_group_is_named_and_skipped(self, tmp_path, capsys):
+        """#40: two members that link to each other make a chain longer than HDF5 will
+        follow, and it refuses to resolve either. That is a RuntimeError, not the KeyError
+        a dangling link raises, so it escaped and killed the command with a traceback
+        naming no file and no member. It is now named and skipped, as the dangling link
+        beside it is, and the rest of the group is read."""
+        d = tmp_path / "linkcycle"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            meta = f.create_group("meta")
+            meta["temperature"] = 300.0
+            meta["sub/gain"] = 7
+            meta["a"] = h5py.SoftLink("/meta/b")
+            meta["b"] = h5py.SoftLink("/meta/a")
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Link Cycle Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/meta", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "temperature", "sub.gain"}
+        assert ent.loc[0, "temperature"] == 300.0 and ent.loc[0, "sub.gain"] == 7
+        out = capsys.readouterr().out
+        for member in ("a", "b"):
+            assert f"{d / 'run_0.h5'}:/meta/{member} unreadable" in out, out
+        assert out.count("skipped") == 2
+
     def test_one_group_linked_twice_beside_the_path_is_read_under_both_names(self, tmp_path):
         """#29: only the groups on the current path are skipped. A file that holds one
         group under two names is read under both, and keeps the uid it had before the
@@ -2440,6 +2469,20 @@ class TestArtifactGroups:
         assert list(art["type"]) == ["top_run"]
         out = capsys.readouterr().out
         assert f"{tmp_path / 'movies' / 'movie_0.h5'}: /frame_9999 unreadable" in out, out
+
+    def test_a_link_cycle_among_the_members_is_skipped_too(self, tmp_path, capsys):
+        """#40: a member HDF5 refuses to resolve raises RuntimeError, not the KeyError a
+        dangling link raises. Here as in a params group, it is named and skipped; the
+        other members of the group are still registered."""
+        cfg = frames_dataset(tmp_path, files=1)
+        with h5py.File(tmp_path / "movies" / "movie_0.h5", "a") as f:
+            f["frames/frame_8888"] = h5py.SoftLink("/frames/frame_9999")
+            f["frames/frame_9999"] = h5py.SoftLink("/frames/frame_8888")
+        _, art = run(tmp_path, cfg)
+        assert len(art) == 5 and {"frame_8888", "frame_9999"}.isdisjoint(set(art["type"]))
+        out = capsys.readouterr().out
+        for member in ("frame_8888", "frame_9999"):
+            assert f"/frames/{member} unreadable" in out, out
 
     @pytest.mark.parametrize("second, entry", [
         ({"type": "frame_0001", "dataset": "/frames/frame_0001"},

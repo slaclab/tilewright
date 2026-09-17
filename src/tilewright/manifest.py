@@ -458,6 +458,11 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     Groups on the path, and those ``closed`` names, are told apart by their HDF5 object id
     (``Group.id``), which compares equal whichever link opened them.
 
+    A member HDF5 cannot resolve at all is named and skipped the same way, whether it is a
+    link that leads nowhere (``KeyError``) or one HDF5 refuses to follow (``RuntimeError``:
+    a chain longer than its link limit, which a cycle reaches at once). One unreadable
+    member costs its own value, never the run (#40).
+
     Under ``from: attrs`` a container that does not hold the group (or dataset) is an
     error naming both, since there its attributes are the parameters."""
     written, frame = frame, frame.strip("/")
@@ -495,8 +500,9 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
                 continue
             try:
                 obj = g[name]
-            except KeyError as e:  # dangling link
-                print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
+            except (KeyError, RuntimeError) as e:  # dangling, or a chain HDF5 will not follow
+                print(f"  WARNING: {g.file.filename}:{g.name.rstrip('/')}/{name} "
+                      f"unreadable ({e}); skipped")
                 continue
             link = f"{g.file.filename}:{g.name.rstrip('/')}/{name}"
             if isinstance(obj, h5py.Group):
@@ -788,7 +794,7 @@ class _Walker:
                     full = f"{gpath.rstrip('/')}/{name}"  # gpath is '/' for the root group
                     try:
                         ds = group[name]
-                    except KeyError as e:  # dangling link
+                    except (KeyError, RuntimeError) as e:  # dangling, or a chain HDF5 won't follow
                         print(f"  WARNING: {where}: {full} unreadable ({e}); skipped")
                         continue
                     if not isinstance(ds, h5py.Dataset) or ds.shape is None:
