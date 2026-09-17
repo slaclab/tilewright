@@ -30,6 +30,8 @@ from pydantic import (
 
 TOP_LEVEL_KEYS = frozenset({"label", "key", "metadata", "source", "artifacts", "shared"})
 SOURCE_TAGS = ("files", "batch", "groups", "table")
+# Columns of entities.parquet that are not parameters; params.location may not name them.
+_ENTITY_COLUMNS = frozenset({"uid", "source_group"})
 
 
 class StrEnum(str, Enum):
@@ -129,11 +131,14 @@ class DatasetMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ParamsSpec(BaseModel):
-    """Where an entity's parameters are read from, within its container.
+    """Where an entity's parameters are read from: within its container, and from its
+    location.
 
     The container is the file (``files``, ``batch``) or the entity group (``groups``).
     Scalar datasets (or attributes) found there become the entity's queryable metadata;
-    each field's own HDF5 attributes ride along as ``<field>_<attr>`` labels.
+    each field's own HDF5 attributes ride along as ``<field>_<attr>`` labels. ``location``
+    adds the values that only the file, directory or group name (or a batch row number)
+    holds (ADR-0010).
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -164,6 +169,26 @@ class ParamsSpec(BaseModel):
         default_factory=list,
         description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say.",
     )
+    location: str | None = Field(
+        default=None,
+        description="A Python regular expression, searched (re.search) in each entity's "
+        "location: for 'files', the file path relative to 'directory' with '/' separators "
+        "(`2011/BCI_2011APR.h5`); for 'groups', `<file path>:/<group path>` "
+        "(`samples.h5:/samples/sample_7`); for 'batch', `<file path>:<row number>` "
+        "(`sim/batch_0.h5:41`). Each named group, `(?P<name>...)`, becomes a flat "
+        "parameter beside those read in the container, and is part of the identity like "
+        "them. Its type comes from the text it captures: an integer, `[+-]?\\d+`, becomes "
+        "an int, so leading zeros are lost (`0042` -> 42); a decimal or exponent literal "
+        "(`0.4`, `1e-3`) becomes a float; anything else stays a string; a group that takes "
+        "no part in the match is null. Unnamed groups, `(...)`, are wildcards only; at "
+        "least one named group is required. Write it in single quotes, so that YAML keeps "
+        "the backslashes: "
+        r"`location: 'BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$'` "
+        "gives year 2011 and month 'APR'. A batch row number is a legitimate parameter "
+        r"when nothing else varies between rows: `location: ':(?P<row>\d+)$'`. "
+        "An entity whose location does not match is an error, and so is a name that is "
+        "also read in the container.",
+    )
 
     @model_validator(mode="after")
     def _one_way_to_name_groups(self):
@@ -173,6 +198,25 @@ class ParamsSpec(BaseModel):
         if self.groups is not None and not self.groups:
             raise ValueError("'groups' must name at least one group")
         return self
+
+    @field_validator("location")
+    @classmethod
+    def _location_names_parameters(cls, value):
+        if value is None:
+            return value
+        try:
+            names = re.compile(value).groupindex
+        except re.error as exc:
+            raise ValueError(f"is not a Python regular expression ({exc}); write it in "
+                             f"single quotes so that YAML keeps the backslashes") from None
+        if not names:
+            raise ValueError("has no named group, so it gives no parameter: write "
+                             "(?P<name>...) around each value")
+        reserved = sorted(set(names) & _ENTITY_COLUMNS)
+        if reserved:
+            raise ValueError(f"may not name a group {' or '.join(reserved)}: 'uid' and "
+                             f"'source_group' are manifest columns; choose another name")
+        return value
 
 
 def _absolute(path, what):
@@ -231,9 +275,9 @@ class FilesSource(_HDF5SourceBase):
 
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live in each file; default: 0-dim datasets at "
-        "the root. 'null' declares that entities have no parameters (identity becomes "
-        "provenance).",
+        description="Where the parameters live: inside each file, and with 'location' in "
+        "its path. Default: 0-dim datasets at the root. 'null' declares that entities "
+        "have no parameters (identity becomes provenance).",
     )
 
 
@@ -242,10 +286,11 @@ class BatchSource(_HDF5SourceBase):
 
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live in each file; default: the root. N is the "
-        "file's leading axis (that of the first artifact). Only 1-D datasets of length N "
-        "are per-entity values, one per row; 0-dim datasets are broadcast to every entity "
-        "in the file; any other member, (N, 1) included, is skipped without a message. "
+        description="Where the parameters live: inside each file, and with 'location' in "
+        "its path and row number. Default: the root. N is the file's leading axis (that of "
+        "the first artifact). Only 1-D datasets of length N are per-entity values, one per "
+        "row; 0-dim datasets are broadcast to every entity in the file; any other member, "
+        "(N, 1) included, is skipped without a message. "
         "'null' declares that entities have no parameters (identity becomes provenance).",
     )
 
@@ -260,8 +305,9 @@ class GroupsSource(_HDF5SourceBase):
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live, relative to each entity group; default: "
-        "the entity group's own 0-dim datasets. 'null' declares none.",
+        description="Where the parameters live: relative to each entity group, and with "
+        "'location' in its file and group path. Default: the entity group's own 0-dim "
+        "datasets. 'null' declares none.",
     )
 
 
@@ -528,20 +574,25 @@ def load_dataset(raw):
 def source_fingerprint(cfg: DatasetConfig):
     """16 hex chars identifying *which data* a YAML describes, independent of its label
     or metadata: the source tag, the directory as the server sees it, the file pattern
-    or table path, the params spec, the identity mode, and a table's ``id`` when it is a
-    list. Two YAMLs for the same files share it; the same label over different files
-    does not (``tilewright register`` refuses that).
+    or table path, the params spec (its ``location`` only when set), the identity mode,
+    and a table's ``id`` when it is a list. Two YAMLs for the same files share it; the
+    same label over different files does not (``tilewright register`` refuses that).
 
     A single-column ``id`` is not hashed, so no table fingerprinted before ADR-0008
     changes; a list is, so switching a table to a composite id (which re-keys every
     entity) is refused as different data rather than registered beside the old keys."""
     body = cfg.source.body
     params = getattr(body, "params", None)
+    if params is not None:
+        # model_dump includes defaults, so a params field added after ADR-0007 is dropped
+        # while unset: no YAML without it gets a new fingerprint (ADR-0010).
+        params = params.model_dump(
+            by_alias=True, exclude={"location"} if params.location is None else None)
     facts = {
         "tag": cfg.source.tag,
         "directory": body.server_base_dir or body.directory,
         "pattern": getattr(body, "pattern", None) or getattr(body, "path", None),
-        "params": params.model_dump(by_alias=True) if params is not None else None,
+        "params": params,
         "entity_group": getattr(body, "entity_group", None),
         "identity": str(cfg.source.identity),
     }

@@ -658,6 +658,207 @@ def si_dataset(tmp_path, identity):
             "artifacts": [{"type": "signal", "dataset": "/signal"}]}
 
 
+def params_uid(key, params):
+    return sha16(json.dumps({"ns": key, "params": params}, sort_keys=True))
+
+
+def bci_dataset(tmp_path):
+    """Like osti/1414275: year and month only in the file name, nothing to tell the files
+    apart inside (every file holds the same measurement height)."""
+    d = tmp_path / "bci"
+    for year, month in ((2010, "DEC"), (2011, "APR"), (2011, "MAY")):
+        (d / str(year)).mkdir(parents=True, exist_ok=True)
+        with h5py.File(d / str(year) / f"BCI_{year}{month}.h5", "w") as f:
+            f.create_dataset("hgt", data=50.0)
+            f.create_dataset("tmp", data=np.zeros((1, 1, 4)))
+    return {"label": "BCI", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*/BCI_*.h5", "params": {
+                "location": r"BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$"}}},
+            "artifacts": [{"type": "tmp", "dataset": "/tmp"}]}
+
+
+class TestLocation:
+    """params.location (ADR-0010): values that only the path, group name or row holds."""
+
+    def test_files_year_and_month_from_the_file_name(self, tmp_path):
+        ent, art = run(tmp_path, bci_dataset(tmp_path))
+        assert list(ent.columns) == ["uid", "year", "month", "hgt"]
+        assert list(zip(ent["year"], ent["month"])) == [(2010, "DEC"), (2011, "APR"),
+                                                        (2011, "MAY")]
+        assert pd.api.types.is_integer_dtype(ent["year"])
+        assert pd.api.types.is_string_dtype(ent["month"])
+        assert ent.loc[1, "uid"] == params_uid("BCI", {"year": 2011, "month": "APR",
+                                                       "hgt": 50.0})
+        assert list(art["file"]) == ["2010/BCI_2010DEC.h5", "2011/BCI_2011APR.h5",
+                                     "2011/BCI_2011MAY.h5"]
+
+    def test_files_location_is_the_relative_path_with_slashes(self, tmp_path):
+        cfg = bci_dataset(tmp_path)
+        cfg["source"]["files"]["params"]["location"] = r"^(?P<folder>\d{4})/BCI_\d{4}"
+        cfg["source"]["files"]["params"]["exclude"] = ["/hgt"]
+        cfg["source"]["files"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid", "folder"]
+        assert list(ent["folder"]) == [2010, 2011, 2011]
+
+    def test_unnamed_groups_are_wildcards(self, tmp_path):
+        cfg = bci_dataset(tmp_path)
+        cfg["source"]["files"]["params"]["location"] = r"(\d{4})/BCI_(\d{4})(?P<month>\w+)\."
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid", "month", "hgt"]
+        assert list(ent["month"]) == ["DEC", "APR", "MAY"]
+
+    def test_a_group_outside_the_match_is_null(self, tmp_path):
+        cfg = bci_dataset(tmp_path)
+        cfg["source"]["files"]["params"]["location"] = (
+            r"BCI_(?P<year>\d{4})(?:(?P<may>MAY)|[A-Z]{3})\.h5$")
+        cfg["source"]["files"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg)
+        assert ent["may"].isna().tolist() == [True, True, False]
+        assert ent.loc[2, "may"] == "MAY"
+
+    def test_groups_capture_the_group_name(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/tenDq"][...] = 1.5
+        cfg["source"]["groups"]["params"]["location"] = (
+            r"^(?P<file>\w+)\.h5:/samples/sample_(?P<sample>\d+)$")
+        ent, _ = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid", "source_group", "file", "sample", "tenDq"]
+        assert list(ent["sample"]) == [0, 1, 2] and set(ent["file"]) == {"samples"}
+        assert ent["uid"].nunique() == 3
+        assert ent.loc[2, "uid"] == params_uid("GROUPS_TEST", {"file": "samples",
+                                                               "sample": 2, "tenDq": 1.5})
+
+    def test_batch_row_number_makes_rows_distinct(self, tmp_path):
+        """Like osti/1787546: nothing but the row tells the rows of a file apart."""
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                del f["params/alpha"], f["params/beta"]
+        with pytest.raises(ValueError, match="6 entities share 2 uids"):
+            run(tmp_path, cfg)
+        cfg["source"]["batch"]["params"]["location"] = r":(?P<row>\d+)$"
+        ent, art = run(tmp_path, cfg, name="ds2")
+        assert list(ent.columns) == ["uid", "row", "seed"]
+        assert list(zip(ent["seed"], ent["row"])) == [(0, 0), (0, 1), (0, 2),
+                                                      (1, 0), (1, 1), (1, 2)]
+        assert list(ent["uid"]) == [params_uid("BATCH_TEST", {"row": i, "seed": b})
+                                    for b in range(2) for i in range(3)]
+        arts = art[art["uid"].notna()]
+        assert list(arts["index"].astype(int)) == list(ent["row"])
+
+    def test_batch_location_is_file_colon_row(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"]["location"] = (
+            r"^batch_(?P<batch>\d+)/sim\.h5:(?P<row>\d+)$")
+        ent, _ = run(tmp_path, cfg)
+        assert list(zip(ent["batch"], ent["row"])) == [(b, i) for b in range(2)
+                                                       for i in range(3)]
+
+    def test_an_entity_whose_location_does_not_match_is_named(self, tmp_path):
+        cfg = bci_dataset(tmp_path)
+        (tmp_path / "bci" / "2012").mkdir()
+        with h5py.File(tmp_path / "bci" / "2012" / "BCI_2012_spring.h5", "w") as f:
+            f.create_dataset("hgt", data=50.0)
+            f.create_dataset("tmp", data=np.zeros((1, 1, 4)))
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value).startswith(
+            f"{tmp_path / 'bci' / '2012' / 'BCI_2012_spring.h5'}: its location "
+            "'2012/BCI_2012_spring.h5' does not match params.location "
+            "'BCI_(?P<year>\\\\d{4})(?P<month>[A-Z]{3})\\\\.h5$'")
+
+    def test_a_batch_row_that_does_not_match_is_named(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"]["location"] = r"batch_1/sim\.h5:(?P<row>\d+)$"
+        with pytest.raises(ValueError, match=r"batch_0/sim\.h5 row 0: its location "
+                                             r"'batch_0/sim\.h5:0' does not match"):
+            run(tmp_path, cfg)
+
+    @pytest.mark.parametrize("name, inside", [
+        ("temperature", "temperature"),           # a scalar dataset
+        ("temperature_units", "temperature_units"),  # a field's attribute label
+    ])
+    def test_a_name_also_read_in_the_file_is_an_error(self, tmp_path, name, inside):
+        cfg = files_dataset(tmp_path)
+        cfg["source"]["files"]["params"] = {"location": rf"run_(?P<{name}>\d+)\.h5$"}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value) == (
+            f"{tmp_path / 'runs' / 'run_0.h5'}: params.location names {name!r}, and "
+            f"{inside!r} is also read inside the file; rename the group in 'location', or "
+            f"leave the other out with 'exclude'")
+
+    def test_a_name_that_parents_a_dotted_key_is_an_error(self, tmp_path, nexus):
+        nexus["source"]["files"]["params"]["location"] = r"Ei(?P<instrument>\d+)\.h5$"
+        with pytest.raises(ValueError, match=r"Ei30\.h5: params\.location names "
+                                             r"'instrument', and 'instrument\.Ei' is also "
+                                             r"read inside the file"):
+            run(tmp_path, nexus)
+
+    def test_a_name_also_read_in_the_entity_group_is_an_error(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        cfg["source"]["groups"]["params"]["location"] = r"sample_(?P<tenDq>\d+)$"
+        with pytest.raises(ValueError, match=r"samples\.h5:/samples/sample_0: "
+                                             r"params\.location names 'tenDq', and 'tenDq' "
+                                             r"is also read inside the entity group"):
+            run(tmp_path, cfg)
+
+    @pytest.mark.parametrize("text, value", [
+        ("2011", 2011), ("0042", 42), ("-7", -7), ("+3", 3), ("000", 0),
+        ("0.4", 0.4), ("1e-3", 0.001), ("2.5E+2", 250.0), (".5", 0.5), ("5.", 5.0),
+        ("-0.25", -0.25), ("007.50", 7.5),
+        ("APR", "APR"), ("x0.4", "x0.4"), ("12a", "12a"), ("1_000", "1_000"),
+        ("inf", "inf"), ("nan", "nan"), ("0x1F", "0x1F"), ("1e", "1e"), ("", ""),
+        ("1.2.3", "1.2.3"), (" 12", " 12"), ("20230501", 20230501),
+    ])
+    def test_a_value_is_typed_by_its_text(self, tmp_path, text, value):
+        d = tmp_path / "typed"
+        d.mkdir()
+        with h5py.File(d / f"v={text}.h5", "w") as f:
+            f.create_dataset("spectrum", data=np.zeros(2))
+        cfg = {"label": "Typed", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "v=*.h5",
+                                    "params": {"location": r"^v=(?P<v>.*)\.h5$"}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        ent, _ = run(tmp_path, cfg)
+        found = ent.loc[0, "v"]
+        assert type(found.item() if hasattr(found, "item") else found) is type(value)
+        assert found == value
+
+    def test_a_location_parameter_resolves_a_params_collision(self, tmp_path):
+        cfg = files_dataset(tmp_path, n=3)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["temperature"][...] = 300.0
+                f["run"][...] = 0
+        with pytest.raises(ValueError, match="3 entities share 1 uids"):
+            run(tmp_path, cfg)
+        cfg["source"]["files"]["params"] = {"location": r"run_(?P<file_run>\d+)\.h5$"}
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert list(ent["file_run"]) == [0, 1, 2] and ent["uid"].nunique() == 3
+        assert ent.loc[0, "uid"] == params_uid("FILES_TEST", {
+            "file_run": 0, "run": 0, "temperature": 300.0})
+
+    def test_location_parameters_are_in_the_collision_report(self, tmp_path):
+        cfg = bci_dataset(tmp_path)
+        cfg["source"]["files"]["params"]["location"] = r"BCI_(?P<year>\d{4})"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[0] == "BCI: 2 entities share 1 uids; every entity must be distinct."
+        assert lines[1].endswith(": 2011/BCI_2011APR.h5, 2011/BCI_2011MAY.h5")
+        assert lines[2:] == [
+            "    no parameter differs",
+            '    equal: {"year": 2011, "hgt": 50.0}',
+            "Fix: add a field that distinguishes them (a run number, a seed) to the "
+            "parameters, from inside the container or from its path with "
+            "'params.location', or set 'identity: provenance' under the source.",
+        ]
+
+
 def _files_cfg_for(tmp_path):
     d = tmp_path / "runs"
     return {"label": "Files Test", "metadata": dict(META),

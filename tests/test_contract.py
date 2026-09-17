@@ -5,6 +5,7 @@ trip into a DatasetConfig. The concept budget at the bottom pins the contract's 
 that growth fails a test, not a review.
 """
 
+import re
 from pathlib import Path
 from typing import get_args
 
@@ -100,6 +101,22 @@ class TestAccepted:
             cfg, warnings = load_dataset(raw)
             assert warnings == [] and cfg.source.body.id == id_
 
+    @pytest.mark.parametrize("location", [
+        r"BCI_(?P<year>\d{4})(?P<month>[A-Z]{3})\.h5$",
+        r":(?P<row>\d+)$",
+        r"(\d+)_(?P<member>[^_]+)_",
+    ])
+    def test_params_location_is_a_regex_with_named_groups(self, location):
+        for tag in ("files", "batch", "groups"):
+            raw = files_cfg(source={tag: {"directory": "/d", "params": {"location": location}}})
+            cfg, warnings = load_dataset(raw)
+            assert warnings == [] and cfg.source.body.params.location == location
+            assert cfg.source.identity == Identity.params
+
+    def test_params_location_defaults_to_none(self):
+        cfg, _ = load_dataset(files_cfg())
+        assert cfg.source.body.params.location is None
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -189,6 +206,34 @@ class TestRejected:
         assert "metadata.data_type is required" in errs
         assert "metadata.material is required" in errs
 
+    @pytest.mark.parametrize("location, error", [
+        ("BCI_(?P<year>\\d{4}", "is not a Python regular expression ({}); write it in "
+                                "single quotes so that YAML keeps the backslashes"),
+        ("(?P<1year>x)", "is not a Python regular expression ({}); write it in single "
+                         "quotes so that YAML keeps the backslashes"),
+        (r"BCI_(\d{4})\.h5", "has no named group, so it gives no parameter: write "
+                              "(?P<name>...) around each value"),
+        ("", "has no named group, so it gives no parameter: write (?P<name>...) around each "
+             "value"),
+        (r"(?P<uid>\d+)", "may not name a group uid: 'uid' and 'source_group' are manifest "
+                          "columns; choose another name"),
+        (r"(?P<source_group>\w+):(?P<uid>\d+)", "may not name a group source_group or uid: "
+                                                "'uid' and 'source_group' are manifest "
+                                                "columns; choose another name"),
+    ])
+    def test_params_location_must_name_parameters(self, location, error):
+        if "({})" in error:  # re's own words, e.g. 'missing ), unterminated subpattern ...'
+            with pytest.raises(re.error) as exc:
+                re.compile(location)
+            error = error.format(exc.value)
+        raw = files_cfg()
+        raw["source"]["files"]["params"] = {"location": location}
+        assert errors_of(raw) == [f"source.files.params.location: {error}"]
+
+    def test_params_location_must_be_a_string(self):
+        raw = files_cfg(source={"batch": {"directory": "/d", "params": {"location": 3}}})
+        assert errors_of(raw) == ["source.batch.params.location must be a string"]
+
     def test_unknown_identity(self):
         raw = files_cfg()
         raw["source"]["files"]["identity"] = "content"
@@ -256,6 +301,32 @@ class TestKeyAndFingerprint:
                                                                    expected):
         raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
         raw["source"][stem].update(override)
+        assert source_fingerprint(load_dataset(raw)[0]) == expected
+
+    # params.location is a fact only when set (ADR-0010): model_dump includes defaults,
+    # so an unset location must leave every fingerprint above alone.
+    @pytest.mark.parametrize("stem, params", [
+        ("files", {"location": None}),
+        ("batch", {"group": "/params", "location": None}),
+        ("groups", {"group": "params", "location": None}),
+    ])
+    def test_an_unset_location_keeps_the_b268731_fingerprint(self, stem, params):
+        raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
+        raw["source"][stem]["params"] = params
+        assert source_fingerprint(load_dataset(raw)[0]) == self.GOLDEN[stem]
+
+    GOLDEN_LOCATIONS = [
+        ("files", {"location": r"run_(?P<run>\d+)\.h5$"}, "de222b76e970ac45"),
+        ("files", {"location": r"run_(?P<run>\d+)"}, "63df688425414bcf"),
+        ("batch", {"group": "/params", "location": r":(?P<row>\d+)$"}, "34173690e5acaa23"),
+        ("groups", {"group": "params", "location": r"sample_(?P<sample>\d+)$"}, "a0c5767df7c1ad6c"),
+    ]
+
+    @pytest.mark.parametrize("stem, params, expected", GOLDEN_LOCATIONS,
+                             ids=["files", "files-other-regex", "batch", "groups"])
+    def test_fingerprint_with_a_location_is_pinned(self, stem, params, expected):
+        raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
+        raw["source"][stem]["params"] = params
         assert source_fingerprint(load_dataset(raw)[0]) == expected
 
     # A table's id is a fact only as a list (ADR-0008): a single column leaves the
@@ -378,5 +449,6 @@ def test_concept_budget():
         "groups": common | hdf5 | {"entity_group", "params"},
         "table": common | {"path", "id", "locator"},
     }
-    assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude"}
+    assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude",
+                                 "location"}
     assert _keys(ArtifactSpec) == {"type", "dataset", "optional"}
