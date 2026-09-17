@@ -78,9 +78,9 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   file each → `files`; stacked on axis 0 → `batch`; one group each → `groups`; not HDF5 at
   all, with a sidecar table → `table`), the **artifacts** (the array datasets and good
   `type` names: spaces, dots, brackets and non-ASCII letters are fine, but not `/`, `?`,
-  `#`, a control character or `%` with two hex digits, nor `.` or `..` alone, so keep a
-  dataset's name where you can and replace only those; `optional: true` for one that some
-  entities lack), the **parameters**
+  `#`, an ASCII control character or `%` with two hex digits, nor `.` or `..` alone, so
+  keep a dataset's name where you can and replace only those; `optional: true` for one
+  that some entities lack), the **parameters**
   (`params.group`, or `params.groups` when the scalars are spread over several groups —
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/operator_note` —
