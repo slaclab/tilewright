@@ -131,12 +131,25 @@ class DatasetMetadata(BaseModel):
 # source: the tagged union
 # ---------------------------------------------------------------------------
 
+def climb(path):
+    """Split a params group path into ``(ups, rest)``: the number of leading ``..``
+    segments, which leave a ``groups`` entity group (ADR-0011), and the path below the
+    group they reach. Empty segments are dropped, so ``'/'`` is ``(0, '')``. A ``..``
+    after a name is a ValueError: it may only lead the path."""
+    parts = [p for p in str(path).split("/") if p]
+    ups = next((i for i, p in enumerate(parts) if p != ".."), len(parts))
+    if ".." in parts[ups:]:
+        raise ValueError(f"{path!r}: '..' may only lead the path ('../calibration'), "
+                         f"to leave the entity group")
+    return ups, "/".join(parts[ups:])
+
+
 class ParamsSpec(BaseModel):
     """Where an entity's parameters are read from: within its container, and from its
     location.
 
-    The container is the file (``files``, ``batch``) or the entity group (``groups``).
-    Scalar datasets (or attributes) found there become the entity's queryable metadata;
+    The container is the file (``files``, ``batch``) or the entity group (``groups``),
+    which a ``groups`` path can leave with ``..`` (ADR-0011). Scalar datasets (or attributes) found there become the entity's queryable metadata;
     each field's own HDF5 attributes ride along as ``<field>_<attr>`` labels. ``location``
     adds the values that only the file, directory or group name (or a batch row number)
     holds (ADR-0010).
@@ -149,8 +162,9 @@ class ParamsSpec(BaseModel):
         description="One HDF5 group whose fields become flat metadata keys. '/' is the "
         "container itself: the file for 'files' and 'batch', and for 'groups' the entity "
         "group, not the file root, since every 'groups' path is relative to the entity "
-        "group ('params' and '/params' name the same group). Default '/' when neither "
-        "'group' nor 'groups' is given. With "
+        "group ('params' and '/params' name the same group). Under 'groups' only, a path "
+        "may start with '..' segments to leave the entity group: see 'params' under "
+        "'source.groups'. Default '/' when neither 'group' nor 'groups' is given. With "
         "'from: attrs' it may also name a dataset: that dataset's attributes are then the "
         "parameters. An attribute name with a dot in it ('run.number') is a dotted key, "
         "nested on registration like the keys 'groups' makes (metadata.run.number).",
@@ -159,15 +173,17 @@ class ParamsSpec(BaseModel):
         default=None,
         description="Several groups, keyed by the name each nests under: "
         "{instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, "
-        "metadata.sample.mass; queryable as Key('instrument.Ei').",
+        "metadata.sample.mass; queryable as Key('instrument.Ei'). Each path is read as "
+        "in 'group', '..' included.",
     )
     from_: Literal["datasets", "attrs"] = Field(
         default="datasets",
         alias="from",
         description="'datasets': scalar datasets in the group are parameters, 0-dim or of "
         "size 1 (NeXus writes scalars with shape (1,)); in 'batch', a 1-D dataset of "
-        "length N is one value per entity. 'attrs': the group's HDF5 attributes are the "
-        "parameters.",
+        "length N is one value per entity, and so it is under 'groups' in a group reached "
+        "through '..', with N the number of sibling entity groups. 'attrs': the group's "
+        "HDF5 attributes are the parameters.",
     )
     recursive: bool = Field(
         default=False,
@@ -204,6 +220,12 @@ class ParamsSpec(BaseModel):
         "also read in the container.",
     )
 
+    @property
+    def paths(self):
+        """``{name: group path}`` of the groups read: the one ``group`` (default ``/``)
+        under the name ``''``, or ``groups``."""
+        return self.groups or {"": self.group or "/"}
+
     @model_validator(mode="after")
     def _one_way_to_name_groups(self):
         if self.group and self.groups:
@@ -211,6 +233,11 @@ class ParamsSpec(BaseModel):
                              "group, name it under 'groups'")
         if self.groups is not None and not self.groups:
             raise ValueError("'groups' must name at least one group")
+        for name, path in self.paths.items():
+            try:
+                climb(path)
+            except ValueError as exc:
+                raise ValueError(f"{'groups.' + name if name else 'group'} {exc}") from None
         return self
 
     @field_validator("location")
@@ -268,6 +295,15 @@ class _SourceBase(BaseModel):
         _absolute(self.directory, "directory")
         if self.server_base_dir is not None:
             _absolute(self.server_base_dir, "server_base_dir")
+        params = getattr(self, "params", None)
+        if params is not None and not isinstance(self, GroupsSource):
+            for name, path in params.paths.items():
+                if climb(path)[0]:
+                    field = f"groups.{name}" if name else "group"
+                    raise ValueError(f"params.{field} {path!r} starts with '..', which "
+                                     f"leaves an entity group, and only a 'groups' source "
+                                     f"has one: here a params path is inside the file, "
+                                     f"from its root")
         return self
 
 
@@ -322,14 +358,51 @@ class GroupsSource(_HDF5SourceBase):
     entity_group: str | None = Field(
         default=None,
         description="Group whose subgroups are the entities ('/samples'). Default: the "
-        "file's top-level groups.",
+        "file's top-level groups. Any segment may be a glob, matched with fnmatch against "
+        "the names of the groups at that level: '*' and '?' match within the name, '[...]' "
+        "one character of a set, and case matters. '/*' takes every top-level group, so that each "
+        "subgroup of each of them is an entity (/<site>/<detector>); '/run_*/scans' takes "
+        "the 'scans' group of every run_ group. The matching groups are taken in sorted "
+        "order, and the entities are the subgroups of every one of them. A file in which "
+        "no group matches is an error, and so is one in which the matching groups have no "
+        "subgroup left (see 'exclude_groups').",
+    )
+    exclude_groups: list[str] = Field(
+        default_factory=list,
+        description="Subgroups that are not entities: fnmatch patterns matched against the "
+        "name of each subgroup of the entity group(s), not against its path. "
+        "[calibration] leaves out a group that holds values for the entities beside it; "
+        "['_*'] every name that starts with '_'. Excluded groups are not counted as "
+        "siblings (see 'params').",
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live: relative to each entity group, and with "
         "'location' in its file and group path. Default: the entity group's own scalar "
-        "datasets. 'null' declares none.",
+        "datasets. A group path may start with '..' segments to leave the entity group, "
+        "resolved against its path: '..' is the group that holds the entity group and its "
+        "siblings, '../calibration' a group beside them, '../..' one level higher. A path "
+        "that climbs above the file root is an error. In a group reached through '..', a "
+        "1-D dataset whose length equals the number of sibling entity groups (the "
+        "subgroups of the same group, after 'exclude_groups') gives one value per entity: "
+        "element i goes to the i-th sibling with the names sorted as text. Text is not "
+        "numeric order: scan_10 sorts before scan_2, so scan_1 ... scan_12 do not pair "
+        "with elements 0 ... 11 in order, while scan_01 ... scan_12 do. Scalar datasets "
+        "(0-dim or of size 1) there are given to every sibling, and any other member, a "
+        "1-D dataset of another length included, is skipped without a message, as in "
+        "'batch'. Under 'from: attrs' the attributes of such a group are given to every "
+        "sibling. 'null' declares none.",
     )
+
+    @field_validator("exclude_groups")
+    @classmethod
+    def _names_not_paths(cls, value):
+        bad = [p for p in value if not p or "/" in p]
+        if bad:
+            raise ValueError(f"{', '.join(map(repr, bad))}: each entry is a pattern "
+                             f"matched against the name of a subgroup, so it is not empty "
+                             f"and has no '/'")
+        return value
 
 
 class TableSource(_SourceBase):
@@ -595,8 +668,9 @@ def load_dataset(raw):
 def source_fingerprint(cfg: DatasetConfig):
     """16 hex chars identifying *which data* a YAML describes, independent of its label
     or metadata: the source tag, the directory as the server sees it, the file pattern
-    or table path, the params spec (its ``location`` only when set), the identity mode,
-    and a table's ``id`` when it is a list. Two YAMLs for the same files share it; the
+    or table path, the params spec (its ``location`` only when set), the entity group,
+    ``exclude_groups`` when it names any (ADR-0011), the identity mode, and a table's
+    ``id`` when it is a list. Two YAMLs for the same files share it; the
     same label over different files does not (``tilewright register`` refuses that).
 
     A single-column ``id`` is not hashed, so no table fingerprinted before ADR-0008
@@ -617,6 +691,10 @@ def source_fingerprint(cfg: DatasetConfig):
         "entity_group": getattr(body, "entity_group", None),
         "identity": str(cfg.source.identity),
     }
+    if getattr(body, "exclude_groups", None):
+        # a fact only when non-empty, so no YAML without it is re-fingerprinted; sorted,
+        # since the order of the patterns changes no uid
+        facts["exclude_groups"] = sorted(set(body.exclude_groups))
     if isinstance(getattr(body, "id", None), list):
         facts["id"] = body.id
     return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]
