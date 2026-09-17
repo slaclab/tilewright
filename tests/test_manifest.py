@@ -1187,6 +1187,190 @@ class TestRecursionStaysInTheSubtree:
         assert "run_0.h5:/entry/detector/up links back to /entry, which is already " \
                "being read; skipped" in out
 
+    def test_a_chain_of_links_out_of_the_subtree_is_named_and_skipped(self, tmp_path, capsys):
+        """A link to a link: testing one link's own target places 'hop' inside the group,
+        because '/entry/direct' is, and the walk then descends into what 'direct' names.
+        The chain is followed to its final target, and each member is named once."""
+        d = tmp_path / "chain"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/temperature"] = 300.0
+            f["elsewhere/gain"] = 99.0                        # outside /entry
+            f["entry/direct"] = h5py.SoftLink("/elsewhere")   # one link out
+            f["entry/hop"] = h5py.SoftLink("/entry/direct")   # two
+            f["entry/hop3"] = h5py.SoftLink("/entry/hop")     # three
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Chain", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "temperature"}
+        for name in ("direct", "hop", "hop3"):
+            assert f"run_0.h5:/entry/{name} links to" in out
+        assert out.count("run_0.h5:/elsewhere, outside the group being "
+                         "read (/entry); skipped") == 3
+
+    def test_a_chain_out_of_the_subtree_is_skipped_under_groups(self, tmp_path, capsys):
+        """The same chain under 'groups', where the group the author named lies inside the
+        entity group: 'hop3 -> hop -> mid -> /secret/vault' gave 'day' the vault's gain."""
+        d = tmp_path / "chain_groups"
+        d.mkdir()
+        with h5py.File(d / "station_a.h5", "w") as f:
+            f["secret/vault/gain"] = 99.0
+            for name, gain in (("day", 3.0), ("night", 9.0)):
+                g = f.create_group(f"runs/{name}")
+                g["readout/gain"] = gain
+                g["spectrum"] = np.zeros(4)
+            f["runs/day/readout/mid"] = h5py.SoftLink("/secret/vault")
+            f["runs/day/readout/hop"] = h5py.SoftLink("/runs/day/readout/mid")
+            f["runs/day/readout/hop3"] = h5py.SoftLink("/runs/day/readout/hop")
+        cfg = {"label": "Chain Groups", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "station_*.h5",
+                                     "entity_group": "/runs",
+                                     "params": {"group": "readout", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "source_group", "gain"}
+        assert sorted(ent["gain"]) == [3.0, 9.0]
+        assert out.count("station_a.h5:/secret/vault, outside the group being "
+                         "read (/runs/day/readout); skipped") == 3
+
+    def test_a_chain_out_of_the_subtree_is_skipped_under_batch(self, tmp_path, capsys):
+        """And under 'batch', where the params group is read once for every row of a file:
+        the chain put the outside value in every row."""
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"]["recursive"] = True
+        with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
+            f["outside/v"] = 9.0
+            f["params/mid"] = h5py.SoftLink("/outside")
+            f["params/hop"] = h5py.SoftLink("/params/mid")
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
+        assert out.count("sim.h5:/outside, outside the group being read (/params); "
+                         "skipped") == 2
+
+    def test_a_linked_dataset_below_the_group_is_named_and_skipped(self, tmp_path, capsys):
+        """Recursion holds for datasets as well as subgroups. Below the group the author
+        named, a dataset link out of the subtree took a sibling entity's own value, and a
+        value from a file the 'pattern' does not match, into this entity's uid."""
+        d = tmp_path / "station"
+        d.mkdir()
+        with h5py.File(d / "calibration.dat", "w") as f:   # 'pattern' does not match it
+            f["vault/secret"] = 55.0
+        with h5py.File(d / "station_a.h5", "w") as f:
+            for name, temperature in (("day", 300.0), ("night", 275.0)):
+                g = f.create_group(f"runs/{name}")
+                g["temperature"] = temperature
+                g["sub/own"] = 1.0
+                g["spectrum"] = np.zeros(4)
+            f["runs/day/sub/borrowed"] = h5py.SoftLink("/runs/night/temperature")
+            f["runs/day/sub/fromfile"] = h5py.ExternalLink("calibration.dat", "/vault/secret")
+        cfg = {"label": "Station", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "station_*.h5",
+                                     "entity_group": "/runs",
+                                     "params": {"group": "/", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "source_group", "temperature", "sub.own"}
+        assert ("station_a.h5:/runs/day/sub/borrowed links to" in out
+                and "station_a.h5:/runs/night/temperature, outside the group being read "
+                    "(/runs/day); skipped" in out)
+        assert ("station_a.h5:/runs/day/sub/fromfile links to" in out
+                and "calibration.dat:/vault/secret, outside the group being read "
+                    "(/runs/day); skipped" in out)
+
+    def test_a_member_of_the_group_itself_is_read_wherever_its_link_leads(
+            self, tmp_path, capsys):
+        """The other half of the rule: the group the author named is read as it is without
+        'recursive', so a dataset link written in that group is followed wherever it points
+        -- turning 'recursive' on must not take away a column the author asked for. Below
+        it the same link is skipped (the test above)."""
+        d = tmp_path / "member"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["entry/temperature"] = 300.0
+            f["elsewhere/gain"] = 99.0
+            f["entry/borrowed"] = h5py.SoftLink("/elsewhere/gain")   # a dataset, not a group
+            f["entry/sub/own"] = 1.0
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Member", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "temperature", "borrowed", "sub.own"}
+        assert ent.loc[0, "borrowed"] == 99.0
+        assert "outside the group being read" not in out
+
+    def test_a_soft_link_to_an_external_link_names_that_links_own_file_and_path(
+            self, tmp_path, capsys):
+        """The warning must name a location that exists. A soft link whose target is an
+        external link was reported as the target file paired with the path in the source
+        file ('cal.dat:/meta/extg'); the chain places it at the external link's own file
+        and its own path."""
+        d = tmp_path / "meta"
+        d.mkdir()
+        with h5py.File(d / "cal.dat", "w") as f:     # 'pattern' does not match it
+            f["store/gain"] = 5.0
+        with h5py.File(d / "run_0.h5", "w") as f:
+            f["meta/temperature"] = 300.0
+            f["meta/extg"] = h5py.ExternalLink("cal.dat", "/store")
+            f["meta/hopext"] = h5py.SoftLink("/meta/extg")
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Meta", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/meta", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        out = capsys.readouterr().out
+        assert set(ent.columns) == {"uid", "temperature"}
+        assert "run_0.h5:/meta/hopext links to" in out
+        assert out.count("cal.dat:/store, outside the group being read (/meta); "
+                         "skipped") == 2
+        assert "cal.dat:/meta/extg" not in out
+
+    def test_a_hard_link_into_a_sibling_entity_groups_subgroup_is_read(self, tmp_path):
+        """The residual case ADR-0013 records. A hard link is one of the object's own
+        names, so a second name for a *subgroup* of a sibling entity group is a member of
+        this entity group like any other and is read: 'closed' holds the entity groups and
+        the matched groups, not what is inside them, and the reference-count rule that
+        would catch it lost (it drops a group an author gave two names on purpose)."""
+        d = tmp_path / "sites"
+        d.mkdir()
+        with h5py.File(d / "site_a.h5", "w") as f:
+            for name, own in (("det1", 40.0), ("det2", 41.0)):
+                g = f.create_group(f"siteA/{name}")
+                g["readout/own"] = own
+                g["spectrum"] = np.zeros(4)
+            f["siteA/det1/readout/hardpeek"] = f["siteA/det2/readout"]
+        cfg = {"label": "Sites", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "pattern": "site_*.h5",
+                                     "entity_group": "/*",
+                                     "params": {"group": "/", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        row = ent[ent["source_group"] == "siteA/det1"].iloc[0]
+        assert row["readout.hardpeek.own"] == 41.0 and row["readout.own"] == 40.0
+
 
 # ---------------------------------------------------------------------------
 
