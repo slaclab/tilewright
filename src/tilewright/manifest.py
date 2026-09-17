@@ -36,8 +36,8 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from .contract import (
-    ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec, SharedAxisSpec,
-    climb, load_dataset, slugify_key, source_fingerprint,
+    TYPE_RULE, ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec,
+    SharedAxisSpec, climb, key_problem, load_dataset, slugify_key, source_fingerprint,
 )
 from .utils import ARTIFACT_STANDARD_COLS
 
@@ -598,11 +598,19 @@ class _Walker:
                     except KeyError as e:  # dangling link
                         print(f"  WARNING: {where}: {gpath}/{name} unreadable ({e}); skipped")
                         continue
-                    if isinstance(ds, h5py.Dataset) and ds.shape is not None:
-                        found.append((art.type.format(name=name),
-                                      f"{gpath.rstrip('/')}/{name}", ds,
-                                      f"artifacts[{i}] (type {art.type!r}, group "
-                                      f"{art.group!r}, member {name!r})"))
+                    if not isinstance(ds, h5py.Dataset) or ds.shape is None:
+                        continue
+                    art_type = art.type.format(name=name)
+                    problem = key_problem(art_type)
+                    if problem:
+                        raise ValueError(
+                            f"{where}: artifact type={art.type!r} group {gpath!r}: the member "
+                            f"{name!r} gives the type {art_type!r}, and that type {problem}; "
+                            f"{TYPE_RULE}. Leave the member out with 'members', or rename "
+                            f"it in the file")
+                    found.append((art_type, f"{gpath.rstrip('/')}/{name}", ds,
+                                  f"artifacts[{i}] (type {art.type!r}, group {art.group!r}, "
+                                  f"member {name!r})"))
                 if not found and not art.optional:
                     held = sorted(n for n in group if isinstance(group.get(n), h5py.Dataset))
                     raise ValueError(

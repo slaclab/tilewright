@@ -1,9 +1,12 @@
 # Artifact groups: one `artifacts` entry for every dataset in a group
 
 **Status:** accepted, 2026-09-17. Extends ADR-0006 (two new keys in an `artifacts`
-entry, and a rule the `batch` tag refuses) and ADR-0007 (a new fingerprint fact, hashed
-only when an entry has the new form). Decided in the public comment on
-[#12](https://github.com/slaclab/TileWright/issues/12#issuecomment-5712628229).
+entry, a rule the `batch` tag refuses, and a rule for the characters of every `type`) and
+ADR-0007 (a new fingerprint fact, hashed only when an entry has the new form). Decided in
+the public comment on
+[#12](https://github.com/slaclab/TileWright/issues/12#issuecomment-5712628229); the
+character rule answers [#23](https://github.com/slaclab/TileWright/issues/23), and the
+same change states what [#24](https://github.com/slaclab/TileWright/issues/24) asked.
 
 ## Decision
 
@@ -64,6 +67,33 @@ are not hashed either; the order of the entries is not a fact. Tests pin three
 fingerprints with a group entry (with and without `members`, under `files` and
 `groups`) and that `optional`, the template and the order leave them alone.
 
+**The characters of a type (#23).** A `type`, of an artifact or of a shared axis, is a
+node key, and the Tiled client puts a key into a URL path as written. The contract now
+refuses, naming the entry, a type that
+
+- contains `/`, `?` or `#`;
+- contains an ASCII control character (U+0000 to U+001F, U+007F);
+- contains `%` followed by two hex digits (`%20`, `%2F`);
+- is `.` or `..`.
+
+For a `group` entry the check runs on the template with `{name}` filled in by `_`, so
+only the template's own text can fail there, and `tilewright manifest` runs it again on
+every expanded type, naming the member that made a bad one. Everything else is allowed,
+because a local server served it back: dots anywhere (a locator key such as
+`path_cell.0` is one flat key; registration nests only the entity's parameter columns),
+`-`, `|`, a leading `_` or `.`, spaces (leading and trailing too), brackets, braces, `%`
+without two hex digits, quotes and other punctuation, non-ASCII letters, combining marks,
+no-break and zero-width spaces, C1 control characters. The `type` description states the
+rule; the `shared` description points to it.
+
+**A length limit, documented, not enforced.** With `--upload`, a server that keeps
+arrays as files names a directory after the key, escaped with
+`urllib.parse.quote_plus` (tiled 0.2.18, `adapters/zarr.py`, `init_storage`), and most
+filesystems cap a name at 255 bytes: `x` × 256, `é` × 43 and `a+` × 64 fail at
+registration there with `OSError: [Errno 36] File name too long`, reported as an
+artifact error. Pointer registration serves all of them. The contract cannot tell the
+transport, so the `type` description states the limit instead of refusing the type.
+
 **Documented limit.** Each member becomes an array node of its own, registered with one
 request and read back one step at a time. The `group` description says that thousands of
 per-step datasets register slowly and are better stacked into one array, or into a
@@ -79,6 +109,28 @@ per day: five groups of 14,965 datasets each, in 9 files (osti/1872248, the ATS 
 forcing files). Each `artifacts` entry named one dataset, so full coverage needed 74,827
 entries per entity and a 5.4 MB YAML, and the campaign registered the first 7 days of each
 variable instead. One `group` entry per variable names them all.
+
+**The character rule comes from a server, not from a guess.** A blind onboarding worker
+renamed checkpoint fields such as `pressure.cell.0` and `dupwind_relative_permeability|dpressure.face.0`
+(osti/2007951), and another renamed netCDF variables such as `/_CLDHGH` (zenodo/1246857),
+because the surface did not say which characters work. Every sample in
+`tests/test_node_keys.py` was registered into a local `tiled serve` of the pinned Tiled
+(0.2.18), through both transports, and read back by listing, by key, by path and from its
+locators. The ones that failed, and why:
+
+| Sample | Pointer | Upload | Cause (tiled 0.2.18) |
+|---|---|---|---|
+| `a/b`, `/lead`, `trail/` | registers; read raises `KeyError` | artifact error | `client/container.py`, `Container.__getitem__`: `"/".join(keys).strip("/").split("/")` |
+| `a?b`, `a#b` | registers; read raises `KeyError` | artifact error | same method: `self_link + "".join(f"/{key}" ...)` puts the key into the URL unescaped |
+| `a%20b`, `a%2Fb`, `%41` | registers; read raises `KeyError` | artifact error | the server decodes the escape, so it looks up another key |
+| `.`, `..` | registers; the read returns the entity, not the array | artifact error | a URL drops dot segments |
+| `a	b`, `a
+b`, `ab`, `ab` | registers; read raises `httpx.InvalidURL` | artifact error | httpx refuses a non-printable ASCII character in a URL |
+
+So the rule forbids exactly those, and the integration test asserts that the server
+serves back exactly the samples the rule accepts. A leading `_` was a worry in #23 and
+works; a dot was a worry because dotted parameter columns are nested on registration,
+and the locator keys are not.
 
 **Expansion in the manifest** keeps the contract between the two commands as it is: the
 Parquet manifest is plain rows, so `register` and both read paths need no change and no
@@ -116,6 +168,13 @@ two forms disagree.
 - An author quotes the template, `type: "{name}"`: YAML reads an unquoted `{name}` as a
   mapping (a contract error, "must be a string"), and an unquoted brace inside a flow
   mapping as a syntax error. The `type` description says so.
+- Some types that registered before (with a pointer, never readable) are now contract
+  errors. Such a dataset served nothing for those arrays; renaming the type is the fix,
+  and a `dataset` entry's type is not part of the fingerprint, so the rename registers
+  under the same key once the old nodes are deleted.
+- `tests/test_node_keys.py` holds the samples. Its integration tests start their own
+  server (`pytest -m integration tests/test_node_keys.py`), so a Tiled upgrade can be
+  checked against the rule in about a minute.
 - The `--check` summary counts entries, not expanded artifacts: `artifacts=` there is the
   number of entries. The count after expansion is the one `tilewright manifest` prints.
 - The artifact count formula gains a term: a group entry adds its matching members per
