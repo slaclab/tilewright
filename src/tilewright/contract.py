@@ -740,7 +740,7 @@ class DatasetConfig(BaseModel):
         min_length=1,
         description="Human-readable dataset name. The catalog key is derived from it: "
         "slug(label) keeps A-Z and 0-9 only, so every other character, a non-ASCII "
-        "letter included, becomes '_' ('Fernández Powder' -> FERN_NDEZ_POWDER), and a "
+        "letter included, becomes '_' ('Vanterëk Powder' -> VANTER_K_POWDER), and a "
         "label with no ASCII letter or digit at all is an error. Write the label as the "
         "name should read; the key is allowed to be the plainer spelling.",
     )
