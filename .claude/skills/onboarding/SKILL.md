@@ -111,8 +111,9 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `groups` with a glob `entity_group`, `exclude_groups` and a params path that starts
   with `..`.** `entity_group: "/*"` makes every `/<site>/<detector>` an entity;
   `exclude_groups: [calibration]` leaves out a sibling group that is not one;
-  `params: {groups: {calibration: ../calibration}}` reads it for each detector.
-  `params: {group: ..}` gives each entity its element of a 1-D array beside the groups
+  `params: {groups: {calibration: ../calibration}}` reads it for each detector. Name
+  such a group in its own path: with `recursive: true`, a path above the matching groups
+  (`../..`) reads nothing inside them. `params: {group: ..}` gives each entity its element of a 1-D array beside the groups
   whose length is the number of sibling groups, in sorted name order: check that the
   names are zero-padded (`scan_10` sorts before `scan_2`) and that the length matches
   after `exclude_groups`, or the array is skipped. When siblings read the same values,
