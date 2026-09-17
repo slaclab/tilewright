@@ -447,11 +447,14 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     ``path`` in ``holder``, with keys nested under ``gname``. ``frame`` is the path as
     written in the YAML, against which ``spec.exclude`` is matched.
 
-    ``recursive`` follows only what lies inside the subtree of the group it starts from
-    (ADR-0013): a subgroup whose link leads out of it (``_outside``), one already on the
+    The rule splits at the group the author named (ADR-0013). Its own members are read as
+    they are without ``recursive``, a link there followed wherever it leads; ``recursive``
+    -- descending into a subgroup, and everything read below that group -- follows only
+    what lies inside its subtree, subgroups and datasets alike, a chain of links placed by
+    its final target (``_outside``). A member that leads out, a subgroup already on the
     path being read, which a link back to an ancestor makes (#29) and whose walk would
-    never end, and one ``closed`` names, are each named in a WARNING and skipped. Groups
-    on the path, and those ``closed`` names, are told apart by their HDF5 object id
+    never end, and a subgroup ``closed`` names, are each named in a WARNING and skipped.
+    Groups on the path, and those ``closed`` names, are told apart by their HDF5 object id
     (``Group.id``), which compares equal whichever link opened them.
 
     Under ``from: attrs`` a container that does not hold the group (or dataset) is an
@@ -494,10 +497,10 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
             except KeyError as e:  # dangling link
                 print(f"  WARNING: {g.file.filename}:{g.name}/{name} unreadable ({e}); skipped")
                 continue
+            link = f"{g.file.filename}:{g.name.rstrip('/')}/{name}"
             if isinstance(obj, h5py.Group):
                 if spec.recursive:
-                    link = f"{g.file.filename}:{g.name.rstrip('/')}/{name}"
-                    away = _outside(g, name, obj, root)
+                    away = _outside(g, name, root)
                     back = next((n for i, n in ancestors if i == obj.id), None)
                     if away is not None:
                         print(f"  WARNING: {link} links to {away}, outside the group "
@@ -513,6 +516,12 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
                 continue
             if not isinstance(obj, h5py.Dataset):
                 continue
+            if prefix:    # below the group the author named: recursion, so the same rule
+                away = _outside(g, name, root)
+                if away is not None:
+                    print(f"  WARNING: {link} links to {away}, outside the group being "
+                          f"read ({root[1]}); skipped")
+                    continue
             key = ".".join(p for p in (gname, *rel.split("/")) if p)
             # A scalar is a 0-dim or a size-1 dataset (NeXus writes scalars as shape
             # (1,)). In 'batch' a scalar is broadcast to every row whatever N is, and a
@@ -529,31 +538,58 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     return out, labels
 
 
-def _outside(holder, name, obj, root):
+def _outside(holder, name, root, hops=32):
     """Where the member ``name`` of the group ``holder`` leads when that is not inside the
     subtree recursion stays in, as ``<file>:<path>``; None when it is inside (ADR-0013).
-    ``root`` is ``(id.fileno, path)`` of the group the walk started from, and ``obj`` the
-    member already resolved.
+    ``root`` is ``(id.fileno, path)`` of the group the walk started from.
 
-    An external link resolves in another file, so it never leads inside. A soft link's
-    target path, resolved against the group that holds it when the path is relative, must
-    be that group or one under it (and in its file: a soft link may name an external link
-    in turn). A hard link needs no test: it is one of the object's own names, and that
-    name is inside the group that holds it -- which is why ``closed`` is still needed for
-    an entity group a hard link names from inside another one.
+    A **chain** of links is followed to its final target, so that a link to a link out of
+    the subtree is placed where it really leads (``hop -> direct -> /elsewhere``): a test
+    of one link's own target passes at ``hop`` and lets the outside value in. Each hop is
+    read with ``get(..., getlink=True)``, which reports the link and resolves nothing
+    (``h5py`` reports the *opened* path for a linked object, so ``Group.name`` cannot say
+    where a link led):
+
+    - an **external link** resolves in another file, so it is never inside the subtree.
+      Its own file name -- made absolute against the file that holds it, as HDF5 resolves
+      a relative one -- and its own path are reported, so that a soft link reaching it
+      does not pair the target file with a path in the source file;
+    - a **soft link**'s target path, resolved against the group that holds the link when
+      it is relative, must be the group the walk started from or one under it, in that
+      file; when it is, whatever lies at that path may be a link in turn, and the chain
+      goes on there;
+    - a **hard link** is one of the object's own names, and that name is inside the group
+      that holds it, so it ends the chain inside -- which is why ``closed`` is still
+      needed for an entity group a hard link names from inside another one.
+
+    ``hops`` bounds the chain. HDF5 traverses at most 16 links before it refuses to
+    resolve one (``H5Pset_nlinks``), so twice that never decides for a member the library
+    could open, and a file that manages to loop is named and skipped rather than walked
+    for ever (the guarantee of #29).
     """
     fileno, path = root
-    link = holder.get(name, getlink=True)
-    if isinstance(link, h5py.ExternalLink):
-        return f"{obj.file.filename}:{obj.name}"
-    if isinstance(link, h5py.SoftLink):
-        target = posixpath.normpath(link.path if link.path.startswith("/")
-                                    else f"{holder.name.rstrip('/')}/{link.path}")
-        if obj.id.fileno == fileno and (path == "/" or target == path
-                                        or target.startswith(f"{path}/")):
+    where, member, target = holder, name, None
+    for _ in range(hops):
+        link = where.get(member, getlink=True)
+        if isinstance(link, h5py.ExternalLink):
+            other = link.filename
+            if not posixpath.isabs(other):
+                other = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(where.file.filename), other))
+            return f"{other}:{link.path}"
+        if not isinstance(link, h5py.SoftLink):
             return None
-        return f"{obj.file.filename}:{target}"
-    return None
+        target = posixpath.normpath(link.path if link.path.startswith("/")
+                                    else f"{where.name.rstrip('/')}/{link.path}")
+        if not (where.id.fileno == fileno and (path == "/" or target == path
+                                               or target.startswith(f"{path}/"))):
+            return f"{where.file.filename}:{target}"
+        above, _, base = target.rpartition("/")
+        holds = where.file.get(above or "/")
+        if not base or not isinstance(holds, h5py.Group):
+            return None             # the file root, or nothing to read: the chain ends here
+        where, member = holds, base
+    return f"{where.file.filename}:{target}"
 
 
 # ---------------------------------------------------------------------------

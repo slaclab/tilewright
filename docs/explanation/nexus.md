@@ -27,7 +27,7 @@ generic ways to preserve the useful structure.
 | Attributes on arrays | Automatic capture | Metadata on the artifact node |
 | Several `NXentry` groups per file | `groups` source | One entity per entry |
 | Repeated runs with identical settings | `identity: provenance` | One entity per file, never a collision |
-| HDF5 soft or external links | h5py resolves the link | The configured path is recorded |
+| HDF5 soft or external links | h5py resolves the link; *below* the params group, `recursive: true` follows only what stays inside it ([`recursive`](../reference/dataset-yaml.md#params)) | The configured path is recorded |
 
 The onboarding skill maps a tree using these conventions:
 
