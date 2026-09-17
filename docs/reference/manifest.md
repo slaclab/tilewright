@@ -90,6 +90,23 @@ column `path_length_m`: `locate`, `load`, `query_catalog` and the check at the e
 The dataset container is stamped with `storage`, `fingerprint`, `registered_at`, `label`,
 and one `shared_dataset_<type>` per shared axis.
 
+### Values the transport cannot carry
+
+A float that is not finite — `inf`, `-inf` or NaN — is not a JSON number, and the Tiled
+client writes any of them as null whatever is sent. `tilewright register` stores null for
+such a value, in dataset metadata, entity parameters, labels and artifact metadata alike,
+and prints one note per key, naming where it first met it and how many nodes held it:
+
+```
+  note: SPIN_WAVES/SPIN_WAVES_2b1c0f4e8a77d n_effective = inf is not a JSON number; stored as null (2 entities)
+```
+
+The manifest keeps the value as it was read, so identity is untouched: a uid is hashed
+from the manifest, before any transport, and regenerating or re-registering changes
+nothing. To keep the information in the catalog, write it as a string (`"inf"`) or leave
+the key out of `params`. NaN carries no note: it is also what a manifest row holds where
+it has no value for a column, which is not a lost value but an absent one.
+
 ### Reserved names
 
 The locators and the parameters share one metadata mapping. So, for every artifact `type`
