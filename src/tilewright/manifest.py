@@ -306,10 +306,12 @@ def _uid(payload):
 
 
 def _params_uid(key, params):
-    # Floats are hashed at 12 significant digits: noise past that is not a new entity, and
-    # the rule is scale-free, so SI-unit values (1e-13 s) stay apart. (Rounding to 12
-    # decimal places turned every |v| < 5e-13 into 0.0.)
-    canonical = {k: float(f"{v:.12g}") if isinstance(v, float) else v
+    # A float keeps 12 decimal places or 12 significant digits, whichever is more digits.
+    # From |v| >= 0.1 that is round(v, 12), the rule before #4, so those uids (nan and inf
+    # included) are unchanged. Below 0.1 it is 12 significant digits, so SI-unit values
+    # (1e-13 s) stay apart: 12 decimal places turned every |v| < 5e-13 into 0.0.
+    canonical = {k: (float(f"{v:.12g}") if abs(v) < 0.1 else round(v, 12))
+                 if isinstance(v, float) else v
                  for k, v in sorted(params.items())}
     return _uid(json.dumps({"ns": key, "params": canonical}, sort_keys=True, default=str))
 
