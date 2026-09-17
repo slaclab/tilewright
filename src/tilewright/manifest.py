@@ -297,7 +297,8 @@ def _to_python(val):
     if isinstance(val, np.generic):
         return val.item()
     if isinstance(val, np.ndarray):
-        return val.item() if val.size == 1 else val.tolist()
+        # a size-1 array is a scalar; its item can be bytes (an '|S' array), so convert it too
+        return _to_python(val.item()) if val.size == 1 else val.tolist()
     return val
 
 
@@ -367,7 +368,11 @@ def _read_params(container, spec: ParamsSpec, batch_size=None):
                 if not isinstance(obj, h5py.Dataset):
                     continue
                 key = ".".join(p for p in (gname, *rel.split("/")) if p)
-                if obj.ndim == 0:
+                # A scalar is a 0-dim or a size-1 dataset (NeXus writes scalars as shape
+                # (1,)). In 'batch' a scalar is broadcast to every row whatever N is, and a
+                # 1-D dataset of length N > 1 is one value per row. With N == 1 a length-1
+                # dataset is both, and both readings give the one row the same value.
+                if obj.ndim == 0 or obj.size == 1:
                     val = _to_python(obj[()])
                     out[key] = np.full(batch_size, val) if batch_size else val
                 elif batch_size and obj.ndim == 1 and obj.shape[0] == batch_size:
