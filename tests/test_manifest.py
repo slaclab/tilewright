@@ -11,7 +11,7 @@ import pytest
 from ruamel.yaml import YAML
 
 from tilewright.contract import ContractError
-from tilewright.manifest import generate_manifests, main, manifest_dir
+from tilewright.manifest import _params_uid, generate_manifests, main, manifest_dir
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
 
@@ -351,6 +351,45 @@ class TestIdentity:
         cfg["source"]["files"]["params"] = None
         ent, _ = run(tmp_path, cfg)
         assert len(ent) == 3 and list(ent.columns) == ["uid"]
+
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_si_scale_parameters_stay_distinct(self, tmp_path, identity):
+        # openPMD-style timesteps in seconds: distinct, but all below 5e-13 (#4)
+        ent, _ = run(tmp_path, si_dataset(tmp_path, identity))
+        assert len(ent) == 3 and ent["uid"].nunique() == 3
+        assert sorted(ent["time"]) == SI_TIMES
+        assert (ent["dt"] == SI_DT).all()
+
+    def test_floats_are_hashed_at_12_significant_digits(self):
+        def uid(**params):
+            return _params_uid("K", params)
+        # scale-free: SI-scale values stay apart, down to the 12th significant digit
+        assert len({uid(time=t) for t in (*SI_TIMES, 0.0)}) == 4
+        assert uid(charge=1.602176634e-19) != uid(charge=1.602176635e-19)
+        # noise past the 12th significant digit is still not a new entity, at any scale
+        assert uid(time=SI_TIMES[0]) == uid(time=SI_TIMES[0] * (1 + 1e-14))
+        assert uid(T=300.0) == uid(T=300.0 + 1e-11)
+        # values with few digits hash exactly as they did before the change (b268731)
+        assert uid(T=300.0, run=1) == "2c4f3c84c370721c"
+        assert uid(T=2.5666, label="x") == "75c8ab85fd63385c"
+
+
+SI_TIMES = [8.390153e-14, 1.007e-13, 1.316102e-13]
+SI_DT = 3.290256e-16
+
+
+def si_dataset(tmp_path, identity):
+    """One file per timestep, parameters in seconds (0-dim datasets at the root)."""
+    d = tmp_path / "si"
+    d.mkdir()
+    for i, t in enumerate(SI_TIMES):
+        with h5py.File(d / f"step_{i}.h5", "w") as f:
+            f.create_dataset("time", data=t).attrs["unitSI"] = 1.0
+            f.create_dataset("dt", data=SI_DT)
+            f.create_dataset("signal", data=np.full((2, 3), i, dtype="float32"))
+    return {"label": "SI Test", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*.h5", "identity": identity}},
+            "artifacts": [{"type": "signal", "dataset": "/signal"}]}
 
 
 def _files_cfg_for(tmp_path):
