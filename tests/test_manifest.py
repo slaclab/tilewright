@@ -1859,16 +1859,29 @@ class TestArtifactGroups:
 # under files and groups, only scalars are parameters; the rest is skipped quietly (#24)
 # ---------------------------------------------------------------------------
 
-NON_SCALARS = {"positions": np.arange(6.0), "matrix": np.zeros((2, 3)),
+NON_SCALARS = {"positions": np.arange(7.0), "matrix": np.zeros((3, 4)),
                "column": np.zeros((3, 1)), "nothing": np.zeros(0)}
 
 
 class TestNonScalarParameters:
 
+    @staticmethod
+    def from_doc():
+        return " ".join(ParamsSpec.model_fields["from_"].description.split())
+
     def test_the_from_description_says_so(self):
-        doc = " ".join(ParamsSpec.model_fields["from_"].description.split())
-        assert ("Under 'files' and 'groups' every other dataset, a (6,) array or a (2, 3) "
-                "matrix say, is skipped without a message") in doc
+        assert ("Under 'files' and 'groups' every other dataset, a (7,) array or a (3, 4) "
+                "matrix say, is skipped without a message") in self.from_doc()
+
+    def test_the_from_description_says_what_differs_between_files(self):
+        doc = self.from_doc()
+        assert ("Each file is read on its own, so two more cases pass without a message: a "
+                "dataset of size 1 in some files and an array in others is a parameter only "
+                "where it has size 1, and a group that some files lack (one of 'groups', "
+                "say) gives their entities none of its parameters. Those entities hold null "
+                "in the columns they miss.") in doc
+        assert "'attrs': the group's HDF5 attributes are the parameters, and a group that " \
+               "a file lacks is an error." in doc
 
     def test_files_skips_a_non_scalar_dataset_without_a_message(self, tmp_path, capsys):
         cfg = files_dataset(tmp_path)
@@ -1914,3 +1927,60 @@ class TestNonScalarParameters:
         ent, _ = run(tmp_path, cfg)
         assert set(ent.columns) == {"uid", "source_group", "tenDq", "offset"}
         assert not any(name in capsys.readouterr().out for name in NON_SCALARS)
+
+    # the two cases of #24's second comment: the rule is applied file by file
+
+    def test_a_dataset_of_size_1_in_some_files_only_is_their_parameter(self, tmp_path,
+                                                                        capsys):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["offset"] = [2.5] if i == 1 else np.arange(7.0)
+                f["offset"].attrs["units"] = "mm"
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        rows = ent.set_index("run")
+        assert rows.loc[1, "offset"] == 2.5 and rows.loc[1, "offset_units"] == "mm"
+        assert rows.loc[[0, 2], ["offset", "offset_units"]].isna().all(axis=None)
+        assert "offset" not in capsys.readouterr().out
+
+    def test_a_params_group_some_files_lack_leaves_their_columns_null(self, tmp_path,
+                                                                      capsys):
+        cfg = files_dataset(tmp_path)
+        cfg["source"]["files"]["params"] = {"groups": {"top": "/", "slit": "/slit"}}
+        for i in (0, 2):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["slit/width"] = 0.25 * (i + 1)
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        rows = ent.set_index("top.run")
+        assert rows.loc[0, "slit.width"] == 0.25 and rows.loc[2, "slit.width"] == 0.75
+        assert pd.isna(rows.loc[1, "slit.width"])
+        assert "slit" not in capsys.readouterr().out
+
+    def test_a_params_group_some_entity_groups_lack_leaves_their_columns_null(
+            self, tmp_path, capsys):
+        cfg = groups_dataset(tmp_path)
+        cfg["source"]["groups"]["params"] = {"groups": {"p": "params", "slit": "slit"}}
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            f["samples/sample_2/slit/width"] = 0.5
+        capsys.readouterr()
+        ent, _ = run(tmp_path, cfg)
+        rows = ent.set_index("p.tenDq")
+        assert rows.loc[2.0, "slit.width"] == 0.5
+        assert rows.loc[[0.0, 1.0], "slit.width"].isna().all()
+        assert "slit" not in capsys.readouterr().out
+
+    def test_under_attrs_a_group_a_file_lacks_is_an_error(self, tmp_path):
+        cfg = files_dataset(tmp_path, attrs=True)
+        cfg["source"]["files"]["params"] = {"groups": {"top": "/", "slit": "/slit"},
+                                            "from": "attrs"}
+        for i in (0, 2):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.create_group("slit").attrs["width"] = 0.25 * (i + 1)
+        with pytest.raises(KeyError, match="slit"):
+            run(tmp_path, cfg)
+        with h5py.File(tmp_path / "runs" / "run_1.h5", "a") as f:
+            f.create_group("slit").attrs["width"] = 0.5
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert sorted(ent["slit.width"]) == [0.25, 0.5, 0.75]

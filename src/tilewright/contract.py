@@ -184,9 +184,13 @@ class ParamsSpec(BaseModel):
         "size 1 (NeXus writes scalars with shape (1,)); in 'batch', a 1-D dataset of "
         "length N is one value per entity, and so it is under 'groups' in a group reached "
         "through '..', with N the number of sibling entity groups. Under 'files' and "
-        "'groups' every other dataset, a (6,) array or a (2, 3) matrix say, is skipped "
-        "without a message, attributes and all. 'attrs': the group's HDF5 attributes are "
-        "the parameters.",
+        "'groups' every other dataset, a (7,) array or a (3, 4) matrix say, is skipped "
+        "without a message, attributes and all. Each file is read on its own, so two more "
+        "cases pass without a message: a dataset of size 1 in some files and an array in "
+        "others is a parameter only where it has size 1, and a group that some files lack "
+        "(one of 'groups', say) gives their entities none of its parameters. Those "
+        "entities hold null in the columns they miss. 'attrs': the group's HDF5 "
+        "attributes are the parameters, and a group that a file lacks is an error.",
     )
     recursive: bool = Field(
         default=False,
