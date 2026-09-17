@@ -2303,11 +2303,17 @@ class TestArrayAttributes:
             assert list(row[f"{prefix}DIMENSION_LABELS"]) == ["t", "x"]
 
     def test_hdf5_bookkeeping_attributes_are_still_left_out(self, tmp_path):
-        cfg = self.dataset_with_attrs(tmp_path, lambda f: {
-            "CLASS": "DIMENSION_SCALE", "NAME": "energy", "units": "K"})
+        """HDF5's dimension-scale bookkeeping, and netCDF-4's own two attributes, which
+        tie a variable to its dimensions and mean nothing outside the file that holds
+        them (ADR-0013). They are read as parameters under 'from: attrs', where every
+        attribute is a parameter, and left out of labels and artifact metadata."""
+        internal = {"CLASS": "DIMENSION_SCALE", "NAME": "energy",
+                    "_Netcdf4Coordinates": np.array([0, 1]), "_Netcdf4Dimid": 3}
+        cfg = self.dataset_with_attrs(tmp_path, lambda f: {**internal, "units": "K"})
         ent, art = run(tmp_path, cfg)
-        assert {"CLASS", "NAME"} & set(ent.columns) == set()
-        assert {"CLASS", "NAME"} & set(art.columns) == set()
+        for name in internal:
+            assert name not in ent.columns and f"temperature_{name}" not in ent.columns
+            assert name not in art.columns
         assert art[art["uid"].notna()].iloc[0]["units"] == "K"
 
     def test_a_reference_attribute_is_noted_and_left_out(self, tmp_path, capsys):
