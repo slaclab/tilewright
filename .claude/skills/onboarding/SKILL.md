@@ -74,9 +74,15 @@ say — in **one batched round**, not field-by-field across many turns. Build th
 **dynamically** from what you discover:
 
 - **Inspect the HDF5** with `h5py`: open representative files; list groups/datasets,
-  shapes, dtypes, and attributes. Decide the **source** from how entities are packed (one
+  shapes, dtypes, and attributes (`visititems` walks objects, so a hard-linked field
+  appears under one path only — use `visititems_links(print)` to see every path). Decide
+  the **source** from how entities are packed (one
   file each → `files`; stacked on axis 0 → `batch`; one group each → `groups`; not HDF5 at
-  all, with a sidecar table → `table`), the **artifacts** (the array datasets and good
+  all, with a sidecar table → `table`). When two of those fit at once — one entry per file
+  whose signal also has a short frame axis, or a stack on axis 0 inside each of several
+  groups — break the tie on **what a reader queries**: the unit they would search for is
+  the entity, and an axis they would always want whole stays inside the artifact. Then the
+  **artifacts** (the array datasets and good
   `type` names: spaces, dots, brackets and non-ASCII letters are fine, but not `/`, `?`,
   `#`, an ASCII control character or `%` with two hex digits, nor `.` or `..` alone, so
   keep a dataset's name where you can and replace only those; `optional: true` for one
@@ -85,14 +91,27 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/operator_note` —
   and `recursive` for subgroups), and any **shared axes** (arrays
-  *identical* in every file → `shared:`; an axis that varies per entity is an artifact).
+  *identical* in every file → `shared:`, if you serve them at all — the YAML lists what the
+  dataset serves, not what the file holds, so a constant placeholder nobody would read is
+  simply left out; an axis that varies per entity is an artifact, and an array that is not
+  an axis at all, a lookup or normalization table the whole dataset shares, belongs in
+  `shared:` too).
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
-  array attribute comes through as a list. A
+  array attribute comes through as a list, and `docs/reference/manifest.md` ("Which
+  attribute values are carried") says what is left out instead. A
   size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
-  So does a netCDF-4 dimension of length 1 that has no coordinate variable (a dataset
-  whose `NAME` attribute begins `This is a netCDF dimension`, value `0.0`): `exclude` it.
+  So does a netCDF-4 dimension placeholder that has no coordinate variable (a dataset
+  whose `NAME` attribute begins `This is a netCDF dimension`, value `0.0`): `exclude` it —
+  and leave it out of `shared:` too, at any length, since a placeholder of 8 or 2 is
+  identical in every file and would otherwise pass for an axis. A *real* coordinate
+  variable of length 1 (its own `units`, a `NAME` that is just its name) is the opposite
+  case: a genuine scalar parameter, and if it is identical in every file it hands every
+  entity the same identity — take what varies from the name with `params.location`.
   Any bigger dataset in a params group, a `(7,)` array say, is skipped without a message
-  under `files` and `groups` (in `batch`, a 1-D one of length N is one value per row).
+  under `files` and `groups` (in `batch`, a 1-D one of length N is one value per row); a
+  per-entity log of that shape can still be an **artifact**, but it is then read and not
+  queried, so ask the producer for a scalar summary (a mean, a range) if it must be
+  searchable.
   Every container is judged on its own — each file, and under `groups` each entity group —
   again without a message: a field of size 1 in some of them and a bigger one in others is
   a parameter only where one of the rules above makes it one, and a `params.groups` group
@@ -100,9 +119,22 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `from: attrs`, a missing group is an error naming the container). So check a field's
   shape, and a group's presence, across the containers, not in one.
   `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
-  `type` (`docs/reference/manifest.md`, Reserved names): a parameter with such a name goes
+  `type`, and `uid` and `source_group` always (`docs/reference/manifest.md`, Reserved
+  names): a parameter with such a name goes
   in `exclude`, a `params.location` group gets another name, or pick artifact type names
-  that do not clash.
+  that do not clash. Every other name is free — `index`, `size` and `type` are ordinary
+  parameters — so do not rename a producer's field out of caution.
+- **netCDF-4 and CF files.** A packed variable (`scale_factor` / `add_offset` on an int
+  array) registers as the **stored integers**: nothing unpacks, both factors ride along as
+  artifact metadata, and a reader who does not apply them sees counts — say so in the
+  `description`. A grid-mapping variable (a 0-dim value such as `spatial_ref = 0` whose
+  meaning is entirely in its attributes) is broadcast to every entity as a meaningless
+  parameter under `batch`: `exclude` it and put the projection in the dataset `metadata`.
+  Dataset-level facts kept as root attributes (`@title`, `@source`) never reach `metadata`
+  by themselves; copy the ones worth having into the YAML by hand. And a `.nc`, `.cdf` or
+  `.grd` name is often netCDF-3 classic, which no HDF5 source can read: check the file
+  signature before you plan anything (`docs/reference/errors.md`, the `file signature not
+  found` row).
 - **Many arrays side by side in one group (one dataset per channel or per step) → one
   `group` entry.** `{type: "trace_{name}", group: /channels}` gives one artifact per
   dataset directly in the group (subgroups are not members), typed with `{name}` filled
@@ -144,7 +176,12 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   column is unique (`df[col].is_unique`). If no single column is, list several,
   `id: [specimen, replicate]`, and say in a comment which rows needed the extra column. If no
   set of columns is unique (rows equal in every column), the table needs de-duplicating:
-  that is the user's decision, so ask.
+  that is the user's decision, so ask. Where two columns are both unique, prefer the one
+  that **names the measurement** over one that encodes how the bytes are packed: the key a
+  reader pastes should mean something, and a repacking must not re-key the dataset. A
+  table serves no arrays at all, so arrays stacked beside it (a CSV whose column points
+  into a pack) stay unserved — the choices are in `docs/explanation/sources.md`, "What a
+  `table` can and cannot express", and they are the user's, so put them to them.
 - **If groups carry an `NX_class` attribute, the file is NeXus — map it, don't guess:**
   one `NXentry` per file → `files` (several per file → `groups`); follow `@default` to the
   `NXdata` group — its `@signal` field, the `@axes` fields and any `FIELDNAME_errors` are
@@ -157,11 +194,19 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   (`sample/chemical_formula`, `instrument/name`, `definition`) are candidates for dataset
   `metadata` — propose them as `# TODO confirm — "NiPS3" in all 12 files`, mapped onto
   `vocabulary.yml` ids. See `examples/datasets/files_nexus.yml` and
-  `docs/explanation/nexus.md`.
+  `docs/explanation/nexus.md`. Two shapes that guide does not cover — a file with no
+  `@default` anywhere, whose signal is marked on the field, and one entity spread over a
+  header, a master and an image file — are in that page under "Files that do not follow
+  the modern conventions".
 - **Read the codebase / context** to infer metadata (`method`, `data_type`, `material`,
-  `producer`, `project`, `facility`, `instrument`, `proposal`). Map values onto canonical
-  ids in `vocabulary.yml`; never invent vocabulary. A value with no id is fine — it
-  registers as written with a warning.
+  `producer`, `project`, `facility`, `instrument`, `proposal`). Map each value onto a
+  canonical id in `vocabulary.yml` where one fits, and where none does write the
+  producer's own term: that is not inventing vocabulary, it registers as written with a
+  warning, and the curator sees it later. What you must not do is coin an official-looking
+  id, stretch an unrelated one, or edit `vocabulary.yml`. The facets the data rarely
+  settles — `material` for something that is not a substance, `data_type` for observations,
+  `producer` when a chain of codes made the files — are decided in the field descriptions
+  in `contract.py`.
 
 ## Step 3 — Draft a first-pass YAML (don't blind-guess)
 
@@ -184,9 +229,17 @@ Leave fields you genuinely can't determine as `# TODO fill in` rather than fabri
 them. `material`, `producer`, `project`, `facility`, `contact` are almost never stated
 inside the HDF5 — expect them to be blank until the user fills them in Step 4.
 
+**Say who can confirm what.** `# TODO confirm` asks the data's owner a question they can
+answer: what the material was, which code ran, who to contact. A fact you read out of the
+files — a constant you promoted to a dataset key, a title written in a root attribute —
+has no confirmer, and the owner will not recognize it. Mark those differently
+(`# read from every file: @title = "..."`), say in the description that they come from the
+files, and ask the user only whether they are worth keeping.
+
 **Write a `description`**: one paragraph a reader uses to decide whether to open the
 dataset. Repeat the defining numbers in it freely; every number in it must also exist as a
-metadata key (the key is authoritative, the prose is the summary). Ask the user: *is there
+metadata key — the rule, and what counts as a number, are in the `description` field of
+`contract.py`; nothing checks it, so it is yours to keep. Ask the user: *is there
 anything a reader should know before trusting this data?* — a trust ceiling, a masked
 region, a known artefact. That goes into the description, and any number in it becomes a
 key the author names.
@@ -201,7 +254,9 @@ shared axes"). These are what `tilewright manifest` will be checked against in S
 Show the drafted YAML **and your predicted counts**, and ask the user, in one message, the
 concrete questions it leaves open: each `# TODO fill in`, each `# TODO confirm` (here's my
 inference and why — right?), the `label` (it becomes the key, and on a shared server it
-should carry the surname or group), the `contact`, the identity choice, and the
+should carry the surname or group; show them the key it slugs to, since `slug()` keeps
+A-Z and 0-9 only and an accented name comes out spelled with `_`), the `contact`, the
+identity choice, and the
 artifact/shared `type` names you chose. **Wait for their answers**, apply them, show the
 result, and iterate until they say it's right. Only then move on. Never fill a blank from
 anything other than the data or what the user told you.
@@ -253,7 +308,10 @@ tilewright register .tilewright/datasets/<KEY>.yml --url <URL> --api-key <KEY>
 ```
 
 (or `tilewright register --upload ...` — trial with `-n 5` first, verify, re-run without
-`-n`; `TILED_URL` / `TILED_API_KEY` in the environment replace the flags). Read the summary
+`-n`; `TILED_URL` / `TILED_API_KEY` in the environment replace the flags). Above a few
+thousand entities, tell the user how long the run will take *before* starting it: time
+`-n 100` and multiply out (`docs/ONBOARDING.md` step 4, "How long a pointer run takes").
+Read the summary
 block, not the exit code: `Artifact errors` must be 0, and `Entities` + `Skipped` should
 equal the entity count from Step 5. Any `WARNING ... half-registered` lines mean a
 previous run died mid-entity and this run attached the rest — fine.
@@ -265,8 +323,11 @@ Registration never opens the files: a pointer the server cannot follow registers
 the server**, not the register summary. Run the read-back snippet in
 **`docs/ONBOARDING.md` step 5** with the same URL and key you registered with.
 
-Pass = the entity count matches, one artifact array **and each shared axis** come back
-with the shapes the manifest recorded. Report those numbers. A bare `500` on the read is
+Pass = the entity count matches, and one artifact array **and each shared axis** come back
+with the shapes the manifest recorded, with a small slice read from one of them. Ask the
+array client for `.shape`; never read `[:]` of a multi-gigabyte artifact to prove a
+pointer works. A `table` has no array, so its pass is the entity count, one row's
+metadata, and a `Key` search. Report those numbers. A bare `500` on the read is
 the path/adapter/allowlist problem — `docs/reference/errors.md` decodes it, and every
 other failure you are likely to meet, by symptom; fix the YAML, regenerate,
 **delete the dataset** (`docs/ONBOARDING.md` step 6), re-register — an existing artifact
