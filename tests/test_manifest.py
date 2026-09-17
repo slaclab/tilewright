@@ -361,6 +361,38 @@ class TestGroups:
         _, art = run(tmp_path, cfg)
         assert list(art[art["uid"].isna()]["dataset"]) == ["/axis"]
 
+    def test_every_file_is_compared_in_its_own_entity_groups(self, tmp_path):
+        """#37: the entity groups a copy is looked for in are those of the file being read,
+        not those of the file that holds the path the entry names. A second file whose
+        groups carry other names holds nothing at that path, so comparing it there compares
+        nothing at all and its entities are served an axis that is not theirs."""
+        d = tmp_path / "unlike"
+        d.mkdir()
+
+        def write(name, groups):
+            with h5py.File(d / name, "w") as f:
+                for group, axis in groups.items():
+                    g = f.create_group(f"samples/{group}")
+                    g.create_dataset("spectrum", data=np.ones((3, 3)))
+                    g.create_dataset("axis", data=np.array(axis))
+
+        write("a.h5", {"sample_0": [0.0, 1.0, 2.0], "sample_1": [0.0, 1.0, 2.0]})
+        write("b.h5", {"sample_2": [0.0, 1.0, 2.0]})       # a name a.h5 does not hold
+        cfg = {"label": "Unlike Groups", "metadata": dict(META),
+               "source": {"groups": {"directory": str(d), "entity_group": "/samples",
+                                     "identity": "provenance"}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}],
+               "shared": [{"type": "axis", "dataset": "/samples/sample_0/axis"}]}
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 3
+        assert list(art[art["uid"].isna()]["dataset"]) == ["/samples/sample_0/axis"]
+
+        write("b.h5", {"sample_2": [9.0, 9.0, 9.0]})       # the other file's only copy
+        with pytest.raises(ValueError, match=r"shared axis 'axis'.*differs between "
+                                             r"a\.h5:/samples/sample_0/axis and "
+                                             r"b\.h5:/samples/sample_2/axis"):
+            run(tmp_path, cfg, name="ds2")
+
 
 # ---------------------------------------------------------------------------
 # nested entity groups (ADR-0011, #11)

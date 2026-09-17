@@ -97,9 +97,10 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   not an axis at all, a lookup or normalization table the whole dataset shares, belongs in
   `shared:` too). The entry names one copy by its absolute path, and `manifest` checks
   every copy the source holds against it: under `files`/`batch` that path in each file,
-  under `groups` the same path inside **each entity group**, so one file with four entity
-  groups is checked four times. A differing copy is refused, naming both — you do not have
-  to digest the arrays by hand first.
+  under `groups` the same path inside **each entity group of each file**, so one file with
+  four entity groups is checked four times. A differing copy is refused, naming both — you
+  do not have to digest the arrays by hand first. A group that simply lacks the array is
+  passed over, and its entity is served the copy the entry names.
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
   array attribute comes through as a list, and `docs/reference/manifest.md` says which
   values are left out and what a `batch` row's copy of them describes. A

@@ -706,17 +706,21 @@ class SharedAxisSpec(BaseModel):
         min_length=1,
         description="Absolute HDF5 path of an array identical for all entities. The entry "
         "names one copy; `tilewright manifest` records that one and checks every copy the "
-        "source holds against it, refusing the dataset when two differ. Under 'files', "
-        "'batch' and 'table' the copies are that path in each file. Under 'groups' a path "
-        "inside an entity group (`/scan/point_01/energy`) is one copy per entity group, in "
-        "every file, so one file holding four entity groups holds four copies and all four "
-        "are compared; a path beside the entity groups is one copy per file, as under the "
-        "other tags. A file that does not hold the path at all is passed over silently, so "
+        "source holds against it -- by shape and value, so two copies that differ only in "
+        "dtype agree and the row keeps the named copy's -- refusing the dataset when two "
+        "differ. Under 'files', 'batch' and 'table' the copies are that path in each file. "
+        "Under 'groups' a path inside an entity group (`/scan/point_01/energy`) is one "
+        "copy per entity group, in every file, so one file holding four entity groups "
+        "holds four copies and all four are compared; a path beside the entity groups -- "
+        "or inside a group 'exclude_groups' leaves out, which is then no entity group -- "
+        "is one copy per file, as under the other tags. A place that does not hold the "
+        "path at all is passed over silently, a file or one entity group of one alike, so "
         "one entry cannot reach values kept under a path that carries the entity's own "
         "name ('/<sample>/energy_grid'), however identical: those belong in the dataset "
-        "'metadata'. Nothing else is claimed about the values: an axis that repeats or "
-        "runs backwards is a valid shared axis as long as every copy agrees. A shared "
-        "entry names one array: the 'group' form of 'artifacts' is not available here.",
+        "'metadata', and an entity whose group lacks the copy is served the recorded one. "
+        "Nothing else is claimed about the values: an axis that repeats or runs backwards "
+        "is a valid shared axis as long as every copy agrees. A shared entry names one "
+        "array: the 'group' form of 'artifacts' is not available here.",
     )
 
     @model_validator(mode="after")
