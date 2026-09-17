@@ -42,9 +42,11 @@ number of sibling entity groups: the subgroups of the same matching group, after
   as in `batch`.
 - Under `from: attrs` the group's attributes are given to every sibling; an array
   attribute is not split.
-- With `recursive: true` the reader does not descend into the sibling entity groups,
-  which are subgroups of `..`: their values belong to them, not to every sibling. Other
-  subgroups, excluded ones included, are read.
+- With `recursive: true` the reader does not descend into any entity group of the file:
+  not the siblings, which are subgroups of `..`, and not the entity groups of another
+  matching group, which a path above the matching group (`../..` under `"/*"`) reaches.
+  Their values belong to them, not to every sibling. Other subgroups, excluded ones and
+  the matching groups themselves included, are read.
 - Such a group is read once per sibling set, not once per entity.
 
 **Different parameter sets.** Entities whose groups hold different parameters get null
@@ -132,6 +134,23 @@ whose rows are the siblings.
   `step_XX` is the layout of zenodo/3528199. For the same reason the example YAML and the
   explanation page use `/<site>/<detector>` beside `calibration`, and `scan_01` …
   `scan_12` beside `beam_current`.
+- Two rules go beyond the decision text without contradicting it:
+  - *A size-1 dataset is broadcast like a 0-dim one.* The decision names 0-dim values
+    only. The contract already calls a size-1 dataset a scalar (NeXus writes scalars
+    with shape `(1,)`), and `batch` broadcasts both; one reading of "scalar" for both
+    rules keeps the sibling rule the batch rule.
+  - *`..` may only lead a path, for every tag.* The decision speaks of `..` at the start
+    only. HDF5 has no `..` link, so `run/../calibration` would look for a group named
+    `..`, find none and read nothing without a message; a contract error says so
+    before any file is opened.
+- The recursion rule goes beyond the decision too, which does not mention `recursive`.
+  The review of [#21](https://github.com/slaclab/TileWright/pull/21) found that skipping
+  only the siblings let `../..` with `recursive: true` read the detector groups of the
+  other sites into every entity, and into its uid. Every entity group of the file is
+  skipped, whichever matching group holds it, for the reason the siblings are. Excluded
+  groups are read: the decision's own layout reads its excluded `fixed_params` through
+  `..`, so they are where values shared by the entities live. A group reached through
+  `..` that is itself an entity group, named explicitly, is still read as written.
 - `tests/test_contract.py::test_concept_budget` lists `exclude_groups` among the keys of
   `groups`.
 - The reference page, `examples/datasets/groups.yml` (commented alternatives that
