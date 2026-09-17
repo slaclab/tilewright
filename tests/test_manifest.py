@@ -828,6 +828,15 @@ class TestLocation:
             f"{inside!r} is also read inside the file; rename the group in 'location', or "
             f"leave the other out with 'exclude'")
 
+    def test_a_name_starting_with_an_underscore_is_refused(self, tmp_path):
+        """'_provenance' was hashed into the uid and then silently dropped from
+        entities.parquet (review of #20); a leading '_' is now a contract error."""
+        cfg = bci_dataset(tmp_path)
+        cfg["source"]["files"]["params"]["location"] = r"BCI_(?P<_provenance>\d{4})"
+        with pytest.raises(ContractError, match=r"params\.location: may not name a group "
+                                                r"_provenance: a name that starts with '_'"):
+            run(tmp_path, cfg)
+
     def test_a_name_that_parents_a_dotted_key_is_an_error(self, tmp_path, nexus):
         nexus["source"]["files"]["params"]["location"] = r"Ei(?P<instrument>\d+)\.h5$"
         with pytest.raises(ValueError, match=r"Ei30\.h5: params\.location names "
