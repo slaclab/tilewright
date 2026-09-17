@@ -17,9 +17,9 @@ data is the fingerprint.
 
 `tilewright manifest` hashes the facts that identify *which data* a YAML describes: the
 source tag, the directory as the server sees it, the file pattern or table path, the
-params spec, and the identity mode. Not the label, not the metadata. The hash goes into
-the manifest, and `tilewright register` stamps it on the dataset container as
-`fingerprint`.
+params spec, the identity mode, and a table's `id` when it is a list. Not the label, not
+the metadata. The hash goes into the manifest, and `tilewright register` stamps it on the
+dataset container as `fingerprint`.
 
 When the key already exists on the server:
 
@@ -64,8 +64,19 @@ every column has no identity to find, and has to be de-duplicated.
 Why not the row number, which never collides? Because a table gets edited: re-sorting
 it gives every entity a new key, and inserting or removing a row re-keys every row after
 it, so the next registration would add those entities a second time. The id values stay
-with the row wherever it moves. The manifest still records a table's mode as
-`provenance`, so a table's fingerprint is what it was before tables had their own rule.
+with the row wherever it moves.
+
+Changing `id` gives every entity a new key, so after a change, delete the dataset and
+register again. The fingerprint tells `register` about some of these changes:
+
+- **A list `id` is part of the fingerprint.** Switching `id: run_number` to
+  `id: [run_number, Ei]` changes the fingerprint, and so does a change from a list or
+  between lists. `register` then refuses the old key ("already holds different data")
+  until you delete the dataset. Without the refusal, the new keys would be added beside
+  the old ones.
+- **A single column is not part of it.** This keeps the fingerprint of every table
+  registered before tables had their own rule; the manifest also still records a table's
+  mode as `provenance`. So a change from one single column to another is not refused.
 
 ## What a rerun can and cannot see
 
