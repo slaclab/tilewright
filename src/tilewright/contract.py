@@ -829,9 +829,9 @@ def source_fingerprint(cfg: DatasetConfig):
     A single-column ``id`` is not hashed, so no table fingerprinted before ADR-0008
     changes; a list is, so switching a table to a composite id (which re-keys every
     entity) is refused as different data rather than registered beside the old keys.
-    An ``artifacts`` entry is hashed only in the group form, as its ``group`` and
-    ``members`` (ADR-0012): the spec, which ``register`` can read without opening a file,
-    not the members a manifest found."""
+    An ``artifacts`` entry is hashed only in the group form, as its ``group`` (without a
+    ``/`` at either end) and ``members`` (ADR-0012): the spec, which ``register`` can read
+    without opening a file, not the members a manifest found."""
     body = cfg.source.body
     params = getattr(body, "params", None)
     if params is not None:
@@ -853,7 +853,8 @@ def source_fingerprint(cfg: DatasetConfig):
         facts["exclude_groups"] = sorted(set(body.exclude_groups))
     if isinstance(getattr(body, "id", None), list):
         facts["id"] = body.id
-    groups = sorted([a.group, a.members] for a in cfg.artifacts if a.group)
+    # the group as the manifest reads it: '/frames', 'frames' and '/frames/' are one group
+    groups = sorted([a.group.strip("/"), a.members] for a in cfg.artifacts if a.group)
     if groups:  # a fact only then, so no YAML without a group entry changes
         facts["artifact_groups"] = groups
     return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]

@@ -702,10 +702,11 @@ class TestArtifactGroups:
 
     # A dataset entry was never a fingerprint fact and still is not; a group entry is, as
     # its group and members (not its type, not optional): the spec, not its expansion.
+    # The group is hashed without a '/' at either end, so '/frames' hashes as 'frames'.
     GOLDEN_GROUPS = [
-        ("files", [{"type": "{name}", "group": "/frames"}], "f3bda6203511bfd2"),
+        ("files", [{"type": "{name}", "group": "/frames"}], "74d3f36c871059cf"),
         ("files", [{"type": "{name}", "group": "/frames", "members": "frame_00[0-4]?"}],
-         "3ad8950d37db30f5"),
+         "bb4af104c7af1476"),
         ("groups", [{"type": "trace_{name}", "group": "channels"}], "2abb181af26a665d"),
     ]
 
@@ -729,7 +730,18 @@ class TestArtifactGroups:
         {"optional": True}, {"type": "frame_{name}"}, {"members": "*"}])
     def test_optional_and_the_type_do_not_change_the_fingerprint(self, change):
         entry = {"type": "{name}", "group": "/frames", **change}
-        assert self.fingerprint("files", [entry]) == "f3bda6203511bfd2"
+        assert self.fingerprint("files", [entry]) == "74d3f36c871059cf"
+
+    @pytest.mark.parametrize("group", ["frames", "frames/", "/frames/"])
+    def test_the_slashes_around_a_group_do_not_change_the_fingerprint(self, group):
+        # the manifest reads all three as the group /frames, so they are one fact
+        entry = {"type": "{name}", "group": group}
+        assert (self.fingerprint("files", [entry])
+                == self.fingerprint("files", [{"type": "{name}", "group": "/frames"}]))
+
+    def test_the_root_group_has_one_fingerprint(self):
+        assert (self.fingerprint("files", [{"type": "{name}", "group": "/"}])
+                == self.fingerprint("files", [{"type": "{name}", "group": "//"}]))
 
     def test_the_order_of_group_entries_does_not_change_the_fingerprint(self):
         a = {"type": "a_{name}", "group": "/a"}
