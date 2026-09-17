@@ -75,7 +75,7 @@ Moving the whole directory changes nothing, because the location is relative to
 `directory`.
 
 **A table's identity is its `id` column(s).** A `table` source has no `identity` key. One
-column, `id: run_number`, hashes that column's value; a list, `id: [system_id, tilt]`,
+column, `id: run_number`, hashes that column's value; a list, `id: [specimen, replicate]`,
 hashes the list of values, for a table where no single column is unique. Rows that
 repeat the id values collide like any other entities: the report shows the columns that
 tell them apart, and one of those goes into the list. A table whose rows are equal in

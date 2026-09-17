@@ -173,7 +173,7 @@ class ParamsSpec(BaseModel):
         default_factory=list,
         description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. "
         "Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: "
-        "`/version` skips the root's attribute 'version'.",
+        "`/operator_note` skips the root's attribute 'operator_note'.",
     )
     location: str | None = Field(
         default=None,
@@ -331,7 +331,7 @@ class TableSource(_SourceBase):
     )
     id: str | list[str] = Field(
         description="The entity's identity: one column, or a list of columns when no "
-        "single column is unique ('id: [system_id, tilt]'); together their values must be "
+        "single column is unique ('id: [specimen, replicate]'); together their values must be "
         "unique across rows. Changing it re-keys every entity: delete the registered "
         "dataset, then register again. A list is part of the fingerprint, so 'register' "
         "refuses a change to, from or between lists until you do.",

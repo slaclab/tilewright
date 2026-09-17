@@ -109,7 +109,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   file name too, since every file's rows start again at 0.
 - **A `table` has no `identity` key: its `id` is the identity.** Check that the `id`
   column is unique (`df[col].is_unique`). If no single column is, list several,
-  `id: [system_id, tilt]`, and say in a comment which rows needed the extra column. If no
+  `id: [specimen, replicate]`, and say in a comment which rows needed the extra column. If no
   set of columns is unique (rows equal in every column), the table needs de-duplicating:
   that is the user's decision, so ask.
 - **If groups carry an `NX_class` attribute, the file is NeXus — map it, don't guess:**
