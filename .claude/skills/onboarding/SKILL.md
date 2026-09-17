@@ -82,7 +82,8 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs, `recursive` for subgroups), and any **shared axes** (arrays
   *identical* in every file → `shared:`; an axis that varies per entity is an artifact).
-  Field attributes (`units`, ...) are captured automatically — nothing to declare.
+  Field attributes (`units`, ...) are captured automatically — nothing to declare. A
+  size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
   `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
   `type` (`docs/reference/manifest.md`, Reserved names): a parameter with such a name goes
   in `exclude`, or pick artifact type names that do not clash.
