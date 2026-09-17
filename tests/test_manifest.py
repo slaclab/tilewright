@@ -935,6 +935,51 @@ class TestParameterGroups:
         assert row["monochromator.lambda_units"] == "Angstrom"
         assert row["monochromator.scan_index"] == 1
 
+    def test_a_link_back_to_an_ancestor_is_named_and_skipped(self, tmp_path, capsys):
+        """#29: a link to a group already on the path being read sends the walk round
+        sub/up/sub/up without end. It is named and skipped; the rest of the group is read."""
+        d = tmp_path / "cycle"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            entry = f.create_group("entry")
+            entry["temperature"] = 300.0
+            entry["sub/gain"] = 7
+            entry["sub/up"] = h5py.SoftLink("/entry")
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Cycle Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "temperature", "sub.gain"}
+        assert ent.loc[0, "temperature"] == 300.0 and ent.loc[0, "sub.gain"] == 7
+        out = capsys.readouterr().out
+        assert "WARNING" in out and ("run_0.h5:/entry/sub/up links back to /entry, which "
+                                     "is already being read; skipped") in out
+
+    def test_one_group_linked_twice_beside_the_path_is_read_under_both_names(self, tmp_path):
+        """#29: only the groups on the current path are skipped. A file that holds one
+        group under two names is read under both, and keeps the uid it had before the
+        cycle rule; a global 'visited' set would read it once and change that uid."""
+        d = tmp_path / "twice"
+        d.mkdir()
+        with h5py.File(d / "run_0.h5", "w") as f:
+            entry = f.create_group("entry")
+            entry["temperature"] = 300.0
+            entry["calibration/gain"] = 1.5
+            entry["again"] = entry["calibration"]   # a second hard link to the one group
+            f["spectrum"] = np.zeros(4)
+        cfg = {"label": "Twice Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5",
+                                    "params": {"group": "/entry", "recursive": True}}},
+               "artifacts": [{"type": "spectrum", "dataset": "/spectrum"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "temperature", "calibration.gain", "again.gain"}
+        assert ent.loc[0, "calibration.gain"] == 1.5 and ent.loc[0, "again.gain"] == 1.5
+        assert ent.loc[0, "uid"] == "23e18e1dc8739b6d"   # what main gave this file
+
     def test_links_are_resolved_by_the_library(self, tmp_path):
         d = tmp_path / "links"
         d.mkdir()

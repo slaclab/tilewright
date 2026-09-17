@@ -379,9 +379,12 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None, sk
 def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, skip=()):
     """The parameters and labels of the one group (or, under ``from: attrs``, dataset) at
     ``path`` in ``holder``, with keys nested under ``gname``. ``frame`` is the path as
-    written in the YAML, against which ``spec.exclude`` is matched; ``recursive`` does
-    not descend into the groups whose object ids (``Group.id``) are in ``skip``: an id
-    compares equal whichever link the group was opened through."""
+    written in the YAML, against which ``spec.exclude`` is matched.
+
+    ``recursive`` descends into a subgroup unless its object id (``Group.id``) is in
+    ``skip`` — an id compares equal whichever link the group was opened through — or the
+    group is already on the path being read, which a link back to an ancestor makes
+    (#29): that walk would never end, so the link is named in a WARNING and skipped."""
     frame = frame.strip("/")
     exclude = {p.strip("/") for p in spec.exclude}
     out = OrderedDict()
@@ -396,9 +399,10 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, s
     labels = OrderedDict()
     if path and not (path in holder and isinstance(holder[path], h5py.Group)):
         return out, labels
-    pending = [(holder[path] if path else holder, "")]
+    start = holder[path] if path else holder["/"] if isinstance(holder, h5py.File) else holder
+    pending = [(start, "", ((start.id, start.name),))]   # with the groups above each one
     while pending:
-        g, prefix = pending.pop(0)
+        g, prefix, ancestors = pending.pop(0)
         for name in sorted(g.keys()):
             rel = f"{prefix}/{name}" if prefix else name
             if f"{frame}/{rel}".strip("/") in exclude:
@@ -410,7 +414,12 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, s
                 continue
             if isinstance(obj, h5py.Group):
                 if spec.recursive and obj.id not in skip:
-                    pending.append((obj, rel))
+                    back = next((n for i, n in ancestors if i == obj.id), None)
+                    if back is not None:
+                        print(f"  WARNING: {g.file.filename}:{g.name.rstrip('/')}/{name} "
+                              f"links back to {back}, which is already being read; skipped")
+                    else:
+                        pending.append((obj, rel, ancestors + ((obj.id, obj.name),)))
                 continue
             if not isinstance(obj, h5py.Dataset):
                 continue
