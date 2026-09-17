@@ -506,9 +506,10 @@ class _Walker:
         self.existing = existing_uids
         self.root = Path(self.body.directory)
         # Registration writes each artifact's locators beside the parameters under these
-        # names (reference/manifest.md). A table declares no artifacts, so none for it.
+        # names (reference/manifest.md). A table declares no artifacts, so none for it;
+        # the types of a 'group' entry are added per entity, once expanded (ADR-0012).
         self.reserved = {f"{kind}_{art.type}": art.type for art in cfg.artifacts
-                         for kind in ("path", "dataset", "index")}
+                         if art.dataset for kind in ("path", "dataset", "index")}
 
     def located(self, params, labels, location, where):
         """``params`` with the named groups of ``params.location`` searched in the entity's
@@ -542,20 +543,87 @@ class _Walker:
             return _params_uid(self.key, params)
         return _uid(f"{self.key}:{provenance}")
 
-    def entity(self, uid, params, labels, provenance, source_group=None):
+    def entity(self, uid, params, labels, provenance, source_group=None, artifacts=()):
+        """The entity's row. ``artifacts`` are its expanded ones (``expand``), whose types
+        reserve their locator names too."""
         row = OrderedDict(uid=uid)
         if source_group is not None:
             row["source_group"] = source_group
         row.update(params)
         row.update(labels)
-        if self.reserved:
+        reserved = {**self.reserved, **{f"{kind}_{art_type}": art_type
+                                        for art_type, _, _ in artifacts
+                                        for kind in ("path", "dataset", "index")}}
+        if reserved:
             for name in row:
-                if name.split(".", 1)[0] in self.reserved:  # a dotted name nests under it
-                    raise ValueError(self.reserved_error(name, params, provenance))
+                if name.split(".", 1)[0] in reserved:  # a dotted name nests under it
+                    raise ValueError(self.reserved_error(name, params, provenance, reserved))
         row["_provenance"] = provenance  # dropped before writing; used by collision report
         return row
 
-    def reserved_error(self, name, params, provenance):
+    def expand(self, f, base, where):
+        """One entity's artifacts, as ``(type, dataset path, h5py dataset)``.
+
+        A ``dataset`` entry gives one, or none when optional and absent. A ``group``
+        entry gives one per dataset directly in its group whose name matches ``members``,
+        in sorted name order, with ``{name}`` in its type filled in (ADR-0012). ``base``
+        is the entity group's path, ``''`` for a file. A type that comes twice, from two
+        entries or from an entry and a shared axis, is an error naming both.
+        """
+        out = []
+        given = {ax.type: f"shared[{k}] (dataset {ax.dataset!r})"
+                 for k, ax in enumerate(self.cfg.shared)}
+        for i, art in enumerate(self.artifacts):
+            if art.dataset:
+                path = f"/{base}/{art.dataset.lstrip('/')}" if base else art.dataset
+                ds = _get_artifact(f, path, art, where)
+                found = [] if ds is None else [
+                    (art.type, path, ds, f"artifacts[{i}] (dataset {art.dataset!r})")]
+            else:
+                gpath = "/" + "/".join(p for p in (base, art.group.strip("/")) if p)
+                group = f.get(gpath)
+                if not isinstance(group, h5py.Group):
+                    if group is None and art.optional:
+                        continue
+                    raise KeyError(f"{where}: artifact type={art.type!r} group {gpath!r} "
+                                   + ("is a dataset: name it with 'dataset'" if group
+                                      else "not found (mark it 'optional: true' if some "
+                                           "entities lack it)"))
+                found = []
+                for name in sorted(group):
+                    if not fnmatchcase(name, art.members):
+                        continue
+                    try:
+                        ds = group[name]
+                    except KeyError as e:  # dangling link
+                        print(f"  WARNING: {where}: {gpath}/{name} unreadable ({e}); skipped")
+                        continue
+                    if isinstance(ds, h5py.Dataset) and ds.shape is not None:
+                        found.append((art.type.format(name=name),
+                                      f"{gpath.rstrip('/')}/{name}", ds,
+                                      f"artifacts[{i}] (type {art.type!r}, group "
+                                      f"{art.group!r}, member {name!r})"))
+                if not found and not art.optional:
+                    held = sorted(n for n in group if isinstance(group.get(n), h5py.Dataset))
+                    raise ValueError(
+                        f"{where}: artifact type={art.type!r} group {gpath!r} has no dataset "
+                        f"whose name matches members {art.members!r}; it holds "
+                        f"{len(held)} datasets" + (f" ({', '.join(map(repr, held[:3]))}"
+                                                   f"{', ...' if len(held) > 3 else ''})"
+                                                   if held else "")
+                        + ". Correct 'members' or 'group', or mark the entry 'optional: "
+                          "true' if some entities lack them")
+            for art_type, path, ds, entry in found:
+                if art_type in given:
+                    raise ValueError(f"{where}: {given[art_type]} and {entry} both give the "
+                                     f"type {art_type!r}; types must be unique within an "
+                                     f"entity, since each becomes a node key. Change a "
+                                     f"'type', or narrow 'members'")
+                given[art_type] = entry
+                out.append((art_type, path, ds))
+        return out
+
+    def reserved_error(self, name, params, provenance, reserved):
         """The message for a parameter or label named like a locator. The fix depends on
         where the name came from: a params.location group, a params.groups name, an
         attribute, a dataset, or a dataset's attribute label."""
@@ -583,7 +651,7 @@ class _Walker:
                       if field != name else "")
                    + f", or {rename}.")
         return (f"{self.root / str(provenance)}: {what} is named like a locator: "
-                f"registration writes the locator of artifact '{self.reserved[head]}' under "
+                f"registration writes the locator of artifact '{reserved[head]}' under "
                 f"the name '{head}'. path_<type>, dataset_<type> and index_<type> are "
                 f"reserved for every artifact type.\nFix: {fix}")
 
@@ -601,12 +669,10 @@ class _Walker:
                 if uid in self.existing:
                     continue
                 fsize, fmtime = _file_fingerprint(h5_path)
-                ent_rows.append(self.entity(uid, params, labels, rel))
-                for art in self.artifacts:
-                    ds = _get_artifact(f, art.dataset, art, str(h5_path))
-                    if ds is None:
-                        continue
-                    art_rows.append(_artifact_row(uid, art.type, rel, art.dataset, None,
+                arts = self.expand(f, "", str(h5_path))
+                ent_rows.append(self.entity(uid, params, labels, rel, artifacts=arts))
+                for art_type, path, ds in arts:
+                    art_rows.append(_artifact_row(uid, art_type, rel, path, None,
                                                   fsize, fmtime, ds.shape, str(ds.dtype),
                                                   labels=_attrs(ds, label_of="")))
             if (i + 1) % 1000 == 0:
@@ -700,14 +766,11 @@ class _Walker:
                         uid = self.uid(params, prov, f"{h5_path}:/{gpath}")
                         if uid in self.existing:
                             continue
+                        arts = self.expand(f, gpath, f"{h5_path}:/{gpath}")
                         ent_rows.append(self.entity(uid, params, labels, prov,
-                                                    source_group=gpath))
-                        for art in self.artifacts:
-                            full = f"/{gpath}/{art.dataset.lstrip('/')}"
-                            ds = _get_artifact(f, full, art, f"{h5_path}:/{gpath}")
-                            if ds is None:
-                                continue
-                            art_rows.append(_artifact_row(uid, art.type, rel, full, None,
+                                                    source_group=gpath, artifacts=arts))
+                        for art_type, full, ds in arts:
+                            art_rows.append(_artifact_row(uid, art_type, rel, full, None,
                                                           fsize, fmtime, ds.shape,
                                                           str(ds.dtype),
                                                           labels=_attrs(ds, label_of="")))

@@ -33,7 +33,7 @@ sentence each, as `contract error: <field> <what to do>`.
 | `key` | str | no |  | Catalog key, slug(label); written by 'tilewright manifest'. If present it must equal slug(label). |
 | `metadata` | mapping | **yes** |  | Dataset-level facets; method, data_type and material are required. |
 | `source` | mapping | **yes** |  | Where the entities come from: one tag. |
-| `artifacts` | list | no |  | Arrays each entity exposes; at least one, except for 'table'. |
+| `artifacts` | list | no |  | Arrays each entity exposes; at least one entry, except for 'table'. An entry names one array ('dataset') or every array in a group ('group'). |
 | `shared` | list | no |  | Arrays shared by every entity, registered once under the dataset. |
 
 ## `metadata`
@@ -158,9 +158,11 @@ One array child of every entity per entry.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `type` | str | **yes** |  | Name of the array; becomes its key under the entity. |
-| `dataset` | str | **yes** |  | HDF5 path of the array: absolute for 'files' and 'batch', relative to each entity group for 'groups'. |
-| `optional` | bool | no | `False` | True if some entities lack this array; it is skipped for them. Otherwise a missing array is an error. |
+| `type` | str | **yes** |  | Name of the array; becomes its key under the entity, and names its locators (`path_<type>`, `dataset_<type>`, `index_<type>`). With 'group', a template in which '{name}' stands for each member's name. Quote the template, as in `type: 'trace_{name}'`: YAML reads an unquoted brace as the start of a mapping. A literal brace in it is written '{{' or '}}'. |
+| `dataset` | str | no |  | HDF5 path of the array: absolute for 'files' and 'batch', relative to each entity group for 'groups'. Give either 'dataset' or 'group'. |
+| `group` | str | no |  | HDF5 path of a group, instead of 'dataset': the entry becomes one artifact per dataset directly in the group, in sorted name order. Scalar (0-dim) datasets are included; subgroups, and datasets with no dataspace (h5py.Empty), are skipped. Absolute for 'files', relative to each entity group for 'groups'; a 'batch' source does not take it, because its first artifact sets the batch size. 'type' must hold '{name}', and nothing else in braces: `{type: 'trace_{name}', group: /channels}` gives trace_ch_a ... trace_ch_d for /channels/ch_a ... /channels/ch_d, and `{type: '{name}', group: /frames}` gives frame_0000 ... frame_0099 for /frames/frame_0000 ... /frames/frame_0099. The types must stay unique within an entity after this expansion, shared types included. A group that is absent, or that holds no dataset matching 'members', is an error unless 'optional'. Each member becomes an array node of its own, so thousands of per-step datasets register slowly and read back one step at a time: stack them into one array, or into a 'batch' file, before onboarding. |
+| `members` | str | no | `*` | With 'group' only: an fnmatch pattern that a member's name must match, case-sensitive. '\*' takes every dataset in the group; 'frame_00[0-4]?' takes frame_0000 ... frame_0049. |
+| `optional` | bool | no | `False` | True if some entities lack this array (with 'group': the group, or every member that matches); it is skipped for them. Otherwise a missing array is an error. |
 
 ## `shared`
 
@@ -170,7 +172,7 @@ container and announced on its metadata as `shared_dataset_<type>`.
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `type` | str | **yes** |  | Name of the array; becomes its key under the dataset container. |
-| `dataset` | str | **yes** |  | Absolute HDF5 path (in every source) of an array identical for all entities. Read from the first file that holds it; every other file must agree. |
+| `dataset` | str | **yes** |  | Absolute HDF5 path (in every source) of an array identical for all entities. Read from the first file that holds it; every other file must agree. A shared entry names one array: the 'group' form of 'artifacts' is not available here. |
 
 ## Migration from the `data:` / `parameters:` contract
 

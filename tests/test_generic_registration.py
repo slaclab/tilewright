@@ -378,6 +378,48 @@ class TestGenericBehavior:
         registered = art["data_sources"][0].structure.data_type.to_numpy_dtype()
         assert registered == np.dtype(dtype)
 
+    @pytest.mark.parametrize("upload", [False, True])
+    def test_rows_a_group_entry_expanded_to_register_like_any_other(self, tmp_path,
+                                                                    upload):
+        """A 'group' entry is expanded by `tilewright manifest` (ADR-0012); registration
+        sees plain rows and sends one array node, with its locators, per member."""
+        import h5py
+        import numpy as np
+        from ruamel.yaml import YAML
+        from tilewright.manifest import generate_manifests
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        with h5py.File(data_dir / "e0.h5", "w") as f:
+            f["gain"] = 2.0
+            for c in "abc":
+                f[f"channels/ch_{c}"] = np.full(5, ord(c), dtype="float32")
+        yaml_path = tmp_path / "ds.yml"
+        with open(yaml_path, "w") as fh:
+            YAML().dump({
+                "label": "Group Probe",
+                "metadata": {"method": ["RIXS"], "data_type": "simulation",
+                             "material": "NiPS3"},
+                "source": {"files": {"directory": str(data_dir), "pattern": "*.h5"}},
+                "artifacts": [{"type": "trace_{name}", "group": "/channels"}],
+            }, fh)
+        ent_path, art_path = generate_manifests(str(yaml_path), str(tmp_path / "m"))
+
+        reg = register_entity((pd.read_parquet(ent_path), pd.read_parquet(art_path),
+                               str(data_dir)), upload=upload)
+        types = [f"trace_ch_{c}" for c in "abc"]
+        assert reg.result == (1, 3, 0, 0, 0)
+        sent = reg.uploads if upload else reg.artifacts
+        assert sorted(sent) == types
+        for t, c in zip(types, "abc"):
+            assert reg.metadata[f"path_{t}"] == "e0.h5"
+            assert reg.metadata[f"dataset_{t}"] == f"/channels/ch_{c}"
+            if upload:
+                assert sent[t][0].tolist() == [float(ord(c))] * 5
+            else:
+                assert sent[t]["data_sources"][0].parameters == {
+                    "dataset": f"/channels/ch_{c}"}
+
     def test_manifest_without_shape_dtype_is_rejected(self, vdp_manifests):
         """A manifest predating shape/dtype capture fails loudly, not silently."""
         from tilewright.register import require_shape_dtype

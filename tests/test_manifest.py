@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import math
+import re
 import signal
 from pathlib import Path
 
@@ -1650,3 +1651,193 @@ class TestReservedNames:
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 2 and list(ent["path_p_travel_s"]) == [3.5, 4.25]
         assert len(art) == 0
+
+
+# ---------------------------------------------------------------------------
+# a group of arrays: one artifacts entry, one artifact per member (#12, ADR-0012)
+# ---------------------------------------------------------------------------
+
+def frames_dataset(tmp_path, files=2, frames=4):
+    """Each file: a run number, and /frames holding frame_0000 ... (written out of name
+    order), a scalar 'exposure' and a subgroup."""
+    d = tmp_path / "movies"
+    d.mkdir()
+    for i in range(files):
+        with h5py.File(d / f"movie_{i}.h5", "w") as f:
+            f["run"] = i
+            g = f.create_group("frames")
+            for k in reversed(range(frames)):
+                g.create_dataset(f"frame_{k:04d}", data=np.full((2, 3), 10 * i + k,
+                                                                dtype="int16"))
+                g[f"frame_{k:04d}"].attrs["units"] = "counts"
+            g["exposure"] = 0.5
+            g.create_group("thumbs")["frame_0000"] = np.zeros(1)
+    return {"label": "Frames Test", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*.h5"}},
+            "artifacts": [{"type": "{name}", "group": "/frames"}]}
+
+
+def rows_of(art, uid):
+    rows = art[art["uid"] == uid]
+    return list(zip(rows["type"], rows["dataset"], rows["shape"]))
+
+
+class TestArtifactGroups:
+
+    def test_one_artifact_per_dataset_in_the_group_in_name_order(self, tmp_path):
+        ent, art = run(tmp_path, frames_dataset(tmp_path))
+        assert len(ent) == 2 and len(art) == 10
+        first = ent.loc[ent["run"] == 0, "uid"].item()
+        # the scalar is a member; the subgroup and its dataset are not
+        assert rows_of(art, first) == [("exposure", "/frames/exposure", "[]")] + [
+            (f"frame_{k:04d}", f"/frames/frame_{k:04d}", "[2, 3]") for k in range(4)]
+        # the rows are plain manifest rows: no trace of the entry that gave them
+        assert list(art.columns) == ["uid", "type", "file", "dataset", "index", "file_size",
+                                     "file_mtime", "shape", "dtype", "units"]
+        frame = art[(art["uid"] == first) & (art["type"] == "frame_0002")].iloc[0]
+        assert frame["dtype"] == "int16" and frame["units"] == "counts"
+        assert frame["file"] == "movie_0.h5" and pd.isna(frame["index"])
+
+    def test_members_and_the_type_template(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        cfg["artifacts"] = [
+            {"type": "early_{name}", "group": "/frames", "members": "frame_000[0-1]"},
+            {"type": "cam_{name}", "group": "frames/", "members": "exp*"},
+            {"type": "{{{name}}}", "group": "/frames", "members": "*3"},
+            {"type": "run_number", "dataset": "/run"},
+        ]
+        ent, art = run(tmp_path, cfg)
+        assert rows_of(art, ent["uid"].iloc[0]) == [
+            ("early_frame_0000", "/frames/frame_0000", "[2, 3]"),
+            ("early_frame_0001", "/frames/frame_0001", "[2, 3]"),
+            ("cam_exposure", "/frames/exposure", "[]"),
+            ("{frame_0003}", "/frames/frame_0003", "[2, 3]"),
+            ("run_number", "/run", "[]")]
+
+    def test_members_are_case_sensitive(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        cfg["artifacts"][0]["members"] = "FRAME_*"
+        with pytest.raises(ValueError, match="no dataset whose name matches members "
+                                             "'FRAME_\\*'"):
+            run(tmp_path, cfg)
+
+    def test_the_root_as_the_group(self, tmp_path):
+        cfg = frames_dataset(tmp_path, files=1)
+        cfg["source"]["files"]["params"] = None
+        cfg["artifacts"] = [{"type": "top_{name}", "group": "/"}]
+        _, art = run(tmp_path, cfg)
+        assert list(zip(art["type"], art["dataset"])) == [("top_run", "/run")]
+
+    def test_a_group_relative_to_each_entity_group(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                for c in "ba":
+                    f[f"samples/sample_{i}/channels/ch_{c}"] = np.arange(4.0) * i
+        cfg["artifacts"].append({"type": "trace_{name}", "group": "channels"})
+        ent, art = run(tmp_path, cfg)
+        uid = ent.loc[ent["source_group"] == "samples/sample_1", "uid"].item()
+        assert rows_of(art, uid) == [
+            ("spectrum", "/samples/sample_1/spectrum", "[3, 3]"),
+            ("trace_ch_a", "/samples/sample_1/channels/ch_a", "[4]"),
+            ("trace_ch_b", "/samples/sample_1/channels/ch_b", "[4]")]
+
+    def test_an_absent_group_is_an_error_unless_optional(self, tmp_path, capsys):
+        cfg = frames_dataset(tmp_path)
+        with h5py.File(tmp_path / "movies" / "movie_1.h5", "a") as f:
+            del f["frames"]
+        yaml_path = write_yaml(tmp_path / "ds.yml", cfg)
+        assert main([str(yaml_path)]) == 1
+        err = capsys.readouterr().err
+        assert (f"{tmp_path / 'movies' / 'movie_1.h5'}: artifact type='{{name}}' group "
+                f"'/frames' not found (mark it 'optional: true' if some entities lack "
+                f"it)") in err
+        cfg["artifacts"][0]["optional"] = True
+        ent, art = run(tmp_path, cfg, name="ds2")
+        assert len(ent) == 2 and len(art) == 5
+        assert set(art["file"]) == {"movie_0.h5"}
+
+    def test_a_group_without_a_matching_member_is_an_error_unless_optional(self, tmp_path):
+        cfg = frames_dataset(tmp_path, frames=3)
+        cfg["artifacts"] = [{"type": "{name}", "group": "/frames", "members": "shot_*"},
+                            {"type": "run", "dataset": "/run"}]
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value) == (
+            f"{tmp_path / 'movies' / 'movie_0.h5'}: artifact type='{{name}}' group "
+            f"'/frames' has no dataset whose name matches members 'shot_*'; it holds 4 "
+            f"datasets ('exposure', 'frame_0000', 'frame_0001', ...). Correct 'members' or "
+            f"'group', or mark the entry 'optional: true' if some entities lack them")
+        cfg["artifacts"][0]["optional"] = True
+        _, art = run(tmp_path, cfg, name="ds2")
+        assert list(art["type"]) == ["run", "run"]
+
+    def test_a_group_of_subgroups_only_holds_no_dataset(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        cfg["artifacts"] = [{"type": "{name}", "group": "/nested"}]
+        with h5py.File(tmp_path / "movies" / "movie_0.h5", "a") as f:
+            f.create_group("nested/inner")
+        with pytest.raises(ValueError, match=r"group '/nested' has no dataset whose name "
+                                             r"matches members '\*'; it holds 0 datasets\. "):
+            run(tmp_path, cfg)
+
+    def test_a_dataset_named_as_a_group_is_an_error(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        cfg["artifacts"][0]["group"] = "/run"
+        with pytest.raises(KeyError, match="group '/run' is a dataset: name it with "
+                                           "'dataset'"):
+            run(tmp_path, cfg)
+        cfg["artifacts"][0]["optional"] = True
+        with pytest.raises(KeyError, match="is a dataset"):
+            run(tmp_path, cfg, name="ds2")
+
+    def test_a_dangling_link_is_skipped_with_a_warning(self, tmp_path, capsys):
+        cfg = frames_dataset(tmp_path, files=1)
+        with h5py.File(tmp_path / "movies" / "movie_0.h5", "a") as f:
+            f["frames/frame_9999"] = h5py.SoftLink("/nowhere")
+        _, art = run(tmp_path, cfg)
+        assert len(art) == 5 and "frame_9999" not in set(art["type"])
+        assert "/frames/frame_9999 unreadable" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("second, entry", [
+        ({"type": "frame_0001", "dataset": "/frames/frame_0001"},
+         "artifacts[1] (dataset '/frames/frame_0001')"),
+        ({"type": "{name}", "group": "/frames", "members": "frame_0001"},
+         "artifacts[1] (type '{name}', group '/frames', member 'frame_0001')"),
+    ])
+    def test_a_type_that_comes_twice_names_both_entries(self, tmp_path, second, entry):
+        cfg = frames_dataset(tmp_path)
+        cfg["artifacts"].append(second)
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value) == (
+            f"{tmp_path / 'movies' / 'movie_0.h5'}: artifacts[0] (type '{{name}}', group "
+            f"'/frames', member 'frame_0001') and {entry} both give the type 'frame_0001'; "
+            f"types must be unique within an entity, since each becomes a node key. Change "
+            f"a 'type', or narrow 'members'")
+
+    def test_a_type_that_a_shared_axis_has_is_named(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        cfg["shared"] = [{"type": "exposure", "dataset": "/frames/exposure"}]
+        with pytest.raises(ValueError, match=re.escape(
+                "shared[0] (dataset '/frames/exposure') and artifacts[0] (type '{name}', "
+                "group '/frames', member 'exposure') both give the type 'exposure'")):
+            run(tmp_path, cfg)
+        cfg["artifacts"][0]["members"] = "frame_*"
+        _, art = run(tmp_path, cfg, name="ds2")
+        assert len(art[art["uid"].notna()]) == 8
+        assert list(art.loc[art["uid"].isna(), "type"]) == ["exposure"]
+
+    def test_an_expanded_type_reserves_its_locator_names(self, tmp_path):
+        cfg = frames_dataset(tmp_path)
+        with h5py.File(tmp_path / "movies" / "movie_1.h5", "a") as f:
+            f["dataset_frame_0003"] = 1.0
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert msg.startswith(f"{tmp_path / 'movies' / 'movie_1.h5'}: parameter "
+                              f"'dataset_frame_0003' is named like a locator: registration "
+                              f"writes the locator of artifact 'frame_0003'")
+        cfg["artifacts"][0]["members"] = "frame_000[0-2]"
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert "dataset_frame_0003" in ent.columns
