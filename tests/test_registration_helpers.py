@@ -97,3 +97,28 @@ def test_verify_entity_with_no_artifacts(capsys):
     verify_registration_http(root)
     out = capsys.readouterr().out
     assert "WARNING: no array children" in out
+
+
+def _root_with_one_entity(ent_metadata, ds_key="T"):
+    ent = MagicMock()
+    ent.metadata = ent_metadata
+    ent.keys.return_value = []
+    ds = MagicMock()
+    ds.metadata = {"label": ds_key}
+    ds.keys.return_value = [f"{ds_key}_0"]
+    ds.__getitem__.side_effect = lambda k: ent
+    root = MagicMock()
+    root.keys.return_value = [ds_key]
+    root.__getitem__.side_effect = lambda k: ds
+    return root
+
+
+@pytest.mark.parametrize("ent_metadata, locators", [
+    ({"trace_name": "ev1", "path_p_travel_s": 3.5, "path_s_travel_s": 6.0}, 0),
+    ({"path_length": 1.5, "path_x": "a.h5", "dataset_x": "/x"}, 1),
+], ids=["lone_path_keys", "one_pair_and_a_path_parameter"])
+def test_verify_counts_a_locator_only_as_a_pair(capsys, ent_metadata, locators):
+    """A locator is path_<t> + dataset_<t>; a lone path_* key is a parameter (#18)."""
+    verify_registration_http(_root_with_one_entity(ent_metadata), ["T"])
+    out = capsys.readouterr().out
+    assert f"metadata keys: {len(ent_metadata)} (locators: {locators})" in out

@@ -52,6 +52,7 @@ from tiled.structures.array import ArrayStructure, BuiltinDtype
 from tiled.structures.core import StructureFamily
 from tiled.structures.data_source import Asset, DataSource, Management
 
+from .client import locate
 from .utils import (
     FINGERPRINT_KEY,
     make_artifact_key,
@@ -617,9 +618,8 @@ def _verify_dataset(client, ds_key):
     ent_key = ent_keys[0]
     ent = ds[ent_key]
     ent_meta = dict(ent.metadata)
-    path_keys = [k for k in ent_meta if k.startswith("path_")]
     print(f"\nEntity '{ent_key}':")
-    print(f"  metadata keys: {len(ent_meta)} (locators: {len(path_keys)})")
+    print(f"  metadata keys: {len(ent_meta)} (locators: {len(locate(ent))})")
 
     art_keys = list(ent.keys()) if hasattr(ent, "keys") else []
     print(f"  artifact children: {len(art_keys)}")
