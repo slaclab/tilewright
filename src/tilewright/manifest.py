@@ -469,7 +469,12 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     exclude = {p.strip("/") for p in spec.exclude}
     out = OrderedDict()
     if spec.from_ == "attrs":
-        target = holder.get(path) if path else holder
+        try:
+            target = holder.get(path) if path else holder
+        except (KeyError, RuntimeError) as e:  # a chain HDF5 will not follow (#40)
+            print(f"  WARNING: {holder.file.filename}:"
+                  f"{holder.name.rstrip('/')}/{path} unreadable ({e}); skipped")
+            target = None
         if target is None:
             field = f"params.groups.{gname}" if gname else "params.group"
             where = "/" + "/".join(p for p in (holder.name.strip("/"), path.strip("/")) if p)
@@ -487,8 +492,15 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
             out[key] = np.full(batch_size, val) if batch_size else val
         return out, OrderedDict()
     labels = OrderedDict()
-    if path and not (path in holder and isinstance(holder[path], h5py.Group)):
-        return out, labels
+    if path:
+        try:
+            named = holder[path] if path in holder else None
+        except (KeyError, RuntimeError) as e:  # a chain HDF5 will not follow (#40)
+            print(f"  WARNING: {holder.file.filename}:"
+                  f"{holder.name.rstrip('/')}/{path} unreadable ({e}); skipped")
+            named = None
+        if not isinstance(named, h5py.Group):
+            return out, labels
     start = holder[path] if path else holder["/"] if isinstance(holder, h5py.File) else holder
     root = (start, start.name.rstrip("/") or "/")   # the subtree recursion stays in
     pending = [(start, "", ((start.id, start.name),))]   # with the groups above each one
@@ -682,14 +694,29 @@ def _artifact_row(uid, art_type, rel_path, dataset, index, fsize, fmtime, shape,
 
 
 def _get_artifact(f, path, art: ArtifactSpec, where):
-    """The HDF5 dataset for an artifact, or None if optional and absent."""
+    """The HDF5 dataset for an artifact, or None if optional and absent.
+
+    A path HDF5 cannot resolve at all -- a link that leads nowhere, or a chain it refuses
+    to follow, which a cycle reaches at once -- counts as absent and is named: an optional
+    artifact is skipped with a WARNING and the run finishes, a required one ends the run
+    with the cause in the message rather than with a bare ``RuntimeError`` (#40)."""
     p = path.lstrip("/")
-    if p in f and isinstance(f[p], h5py.Dataset):
-        return f[p]
+    ds, unreadable = None, None
+    try:
+        if p in f:
+            ds = f[p]
+    except (KeyError, RuntimeError) as e:  # dangling, or a chain HDF5 will not follow
+        unreadable = str(e)
+    if isinstance(ds, h5py.Dataset):
+        return ds
     if art.optional:
+        if unreadable:
+            print(f"  WARNING: {where}: artifact type={art.type!r} dataset {path!r} "
+                  f"unreadable ({unreadable}); skipped")
         return None
-    raise KeyError(f"{where}: artifact type={art.type!r} dataset {path!r} not found "
-                   f"(mark it 'optional: true' if some entities lack it)")
+    raise KeyError(f"{where}: artifact type={art.type!r} dataset {path!r} "
+                   + (f"unreadable ({unreadable})" if unreadable else
+                      "not found (mark it 'optional: true' if some entities lack it)"))
 
 
 class _Walker:
@@ -779,7 +806,11 @@ class _Walker:
                     (art.type, path, ds, f"artifacts[{i}] (dataset {art.dataset!r})")]
             else:
                 gpath = "/" + "/".join(p for p in (base, art.group.strip("/")) if p)
-                group = f.get(gpath)
+                try:
+                    group = f.get(gpath)
+                except (KeyError, RuntimeError) as e:  # a chain HDF5 will not follow (#40)
+                    print(f"  WARNING: {where}: {gpath} unreadable ({e}); skipped")
+                    group = None
                 if not isinstance(group, h5py.Group):
                     if group is None and art.optional:
                         continue
@@ -1010,22 +1041,40 @@ class _Walker:
         return ent_rows
 
 
-def _entity_groups(f, pattern, excluded):
+def _entity_groups(f, pattern, excluded, warn=True):
     """One file's entity groups: for each group ``entity_group`` matches, its path and the
-    sorted names of its subgroups that ``exclude_groups`` does not name (ADR-0011)."""
+    sorted names of its subgroups that ``exclude_groups`` does not name (ADR-0011).
+
+    A name HDF5 cannot resolve at all -- a link that leads nowhere, or a chain it refuses
+    to follow, which a cycle reaches at once -- is named and skipped, as it is among the
+    members of a params group or an artifact group: one unreadable name costs its own
+    entity, never the run (#40). ``warn=False`` skips it just as silently, for the second
+    pass a shared axis makes over the same groups, which would otherwise say it twice."""
     parents = []
-    for base in _matching_groups(f, pattern):
+    for base in _matching_groups(f, pattern, warn):
         parent = f[base] if base else f
-        parents.append((base, sorted(
-            k for k in parent.keys() if isinstance(parent[k], h5py.Group)
-            and not any(fnmatchcase(k, x) for x in excluded))))
+        names = []
+        for k in sorted(parent.keys()):
+            if any(fnmatchcase(k, x) for x in excluded):
+                continue
+            try:
+                member = parent[k]
+            except (KeyError, RuntimeError) as e:  # dangling, or a chain HDF5 won't follow
+                if warn:
+                    print(f"  WARNING: {f.filename}:{parent.name.rstrip('/')}/{k} "
+                          f"unreadable ({e}); skipped")
+                continue
+            if isinstance(member, h5py.Group):
+                names.append(k)
+        parents.append((base, names))
     return parents
 
 
-def _matching_groups(f, pattern):
+def _matching_groups(f, pattern, warn=True):
     """The paths (no leading '/') of the groups ``entity_group`` names in ``f``, sorted:
     each segment of ``pattern`` is a group name or an fnmatch glob over the names at that
-    level (ADR-0011). An empty pattern is the root, ``''``."""
+    level (ADR-0011). An empty pattern is the root, ``''``. A name HDF5 cannot resolve at
+    all is named and skipped, as everywhere else the walk resolves one (#40)."""
     found = [""]
     for segment in (s for s in pattern.split("/") if s):
         glob = any(c in segment for c in "*?[")
@@ -1033,8 +1082,18 @@ def _matching_groups(f, pattern):
         for base in found:
             here = f[base] if base else f
             names = sorted(here.keys()) if glob else [segment]
-            deeper += [f"{base}/{n}" if base else n for n in names
-                       if fnmatchcase(n, segment) and isinstance(here.get(n), h5py.Group)]
+            for n in names:
+                if not fnmatchcase(n, segment):
+                    continue
+                try:
+                    member = here.get(n)
+                except (KeyError, RuntimeError) as e:  # a chain HDF5 won't follow
+                    if warn:
+                        print(f"  WARNING: {f.filename}:{here.name.rstrip('/')}/{n} "
+                              f"unreadable ({e}); skipped")
+                    continue
+                if isinstance(member, h5py.Group):
+                    deeper.append(f"{base}/{n}" if base else n)
         found = deeper
     return found
 
@@ -1056,6 +1115,10 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
       does not hold. A path outside the entity groups (a calibration group beside them, or
       one ``exclude_groups`` leaves out) is one copy per file, as under the other tags.
 
+    A copy HDF5 cannot resolve at all -- a chain of links it refuses to follow, which a
+    cycle reaches at once -- is named and passed over, like any other place that does not
+    hold the path (#40).
+
     ``source`` is the YAML's source block; without it every tag reads as ``files``, which
     is what a caller that hands over a file list and nothing else means.
     """
@@ -1068,9 +1131,10 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
         excluded = source.body.exclude_groups
         for h5_path in paths:
             with h5py.File(h5_path, "r") as f:
-                bases[h5_path] = [f"{base}/{n}" if base else n
-                                  for base, names in _entity_groups(f, pattern, excluded)
-                                  for n in names]
+                bases[h5_path] = [
+                    f"{base}/{n}" if base else n
+                    for base, names in _entity_groups(f, pattern, excluded, warn=False)
+                    for n in names]
     # the path the entry names under its entity group, found in whichever file holds that
     # group and then read in the entity groups of every file; None for a path beside them
     # (and under every other tag), which is the one named path, once per file.
@@ -1089,9 +1153,13 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
                                     [p for p in (f"{b}/{tail}" for b in bases[h5_path])
                                      if p != named])
                 for p in copies:
-                    if p not in f or not isinstance(f[p], h5py.Dataset):
+                    try:
+                        ds = f[p] if p in f else None
+                    except (KeyError, RuntimeError) as e:  # a chain HDF5 will not follow
+                        print(f"  WARNING: {rel}:/{p} unreadable ({e}); skipped")
+                        ds = None
+                    if not isinstance(ds, h5py.Dataset):
                         continue
-                    ds = f[p]
                     here = f"{rel}:/{p}"
                     if ax.type in seen:
                         ref_where, ref = seen[ax.type]

@@ -170,6 +170,31 @@ class TestFiles:
         _, art = run(tmp_path, cfg, name="ds2")
         assert (art["type"] == "extra").sum() == 1
 
+    def test_a_link_cycle_at_an_artifact_dataset_is_named_not_a_traceback(self, tmp_path,
+                                                                         capsys):
+        """#40: an artifact's own path can be a link chain HDF5 refuses to follow, which is
+        a RuntimeError and not the KeyError a dangling link raises, so it escaped and
+        killed the command with a traceback naming no file and no artifact. An optional
+        artifact is now named and skipped; a required one ends the run with the file, the
+        type, the path and HDF5's own message."""
+        cfg = files_dataset(tmp_path)
+        cfg["artifacts"].append({"type": "dark", "dataset": "/dark", "optional": True})
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["dark"] = h5py.SoftLink("/dark_2")
+                f["dark_2"] = h5py.SoftLink("/dark")
+        capsys.readouterr()
+        with stops_within(30):
+            ent, art = run(tmp_path, cfg)
+        assert len(ent) == 3 and set(art["type"]) == {"spectrum", "energy"}
+        out = capsys.readouterr().out
+        assert out.count("dataset '/dark' unreadable") == 3, out
+
+        cfg["artifacts"][-1]["optional"] = False       # required: the run ends, with a name
+        with pytest.raises(KeyError, match=r"run_0\.h5: artifact type='dark' dataset "
+                                           r"'/dark' unreadable"):
+            run(tmp_path, cfg, name="ds2")
+
     def test_no_files_match(self, tmp_path):
         cfg = files_dataset(tmp_path)
         cfg["source"]["files"]["pattern"] = "*.nxs"
@@ -392,6 +417,41 @@ class TestGroups:
                                              r"a\.h5:/samples/sample_0/axis and "
                                              r"b\.h5:/samples/sample_2/axis"):
             run(tmp_path, cfg, name="ds2")
+
+    def test_a_link_cycle_among_the_entity_groups_is_named_and_skipped(self, tmp_path, capsys):
+        """#40: two names in the entity groups' parent that link to each other make a chain
+        HDF5 refuses to follow. Deciding whether each name is a group resolved it, so the
+        RuntimeError escaped and killed the command with a traceback naming no file and no
+        group. Each is now named and skipped, and the real entity groups are read."""
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            f["samples/loop_a"] = h5py.SoftLink("/samples/loop_b")
+            f["samples/loop_b"] = h5py.SoftLink("/samples/loop_a")
+        capsys.readouterr()
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
+        assert len(ent) == 3 and sorted(ent["tenDq"]) == [0.0, 1.0, 2.0]
+        out = capsys.readouterr().out
+        for name in ("loop_a", "loop_b"):
+            assert f"samples.h5:/samples/{name} unreadable" in out, out
+
+    def test_a_link_cycle_at_a_shared_axis_copy_is_named_and_passed_over(self, tmp_path,
+                                                                        capsys):
+        """#40: a copy of a shared axis that HDF5 will not resolve is a place that does not
+        hold the path, and is named rather than ending the run."""
+        cfg = groups_dataset(tmp_path)
+        cfg["shared"] = [{"type": "axis", "dataset": "/samples/sample_0/axis"}]
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in (0, 2):
+                f[f"samples/sample_{i}/axis"] = np.array([0.0, 1.0, 2.0])
+            f["samples/sample_1/axis"] = h5py.SoftLink("/samples/sample_1/axis_2")
+            f["samples/sample_1/axis_2"] = h5py.SoftLink("/samples/sample_1/axis")
+        capsys.readouterr()
+        with stops_within(30):
+            ent, art = run(tmp_path, cfg)
+        assert len(ent) == 3
+        assert list(art[art["uid"].isna()]["dataset"]) == ["/samples/sample_0/axis"]
+        assert "samples.h5:/samples/sample_1/axis unreadable" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
