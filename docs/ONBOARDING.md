@@ -79,7 +79,9 @@ Then edit:
   needs more columns in `id`
   ([identity and keys](explanation/identity.md)).
 - **`artifacts`**: one per array an entity exposes; `optional: true` if some entities
-  lack it. Arrays common to *every* entity, like an energy axis, go under `shared`.
+  lack it. A group that holds many arrays takes one entry, `{type: "{name}", group: /frames}`
+  ([many arrays in one group](explanation/sources.md#many-arrays-in-one-group)).
+  Arrays common to *every* entity, like an energy axis, go under `shared`.
 
 NeXus files start from `examples/datasets/files_nexus.yml`. Full field list:
 [the dataset YAML reference](reference/dataset-yaml.md).

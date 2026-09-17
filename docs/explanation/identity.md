@@ -20,7 +20,11 @@ source tag, the directory as the server sees it, the file pattern or table path,
 params spec, the identity mode, and a table's `id` when it is a list. Not the label, not
 the metadata. The params spec's `location` counts only when it is set, so a YAML written
 before `location` existed keeps its fingerprint; adding or changing a `location` gives a
-new one. The hash goes into the manifest, and `tilewright register` stamps it on the
+new one. Of the `artifacts`, only an entry that names a `group` counts, by its `group` and
+`members`: like `pattern`, they are a rule that picks which parts of the files the
+dataset is. The rule is hashed, not the members it found, because `register` checks the
+fingerprint without opening a file. An entry that names a `dataset` does not count, so a
+YAML without a group entry keeps its fingerprint. The hash goes into the manifest, and `tilewright register` stamps it on the
 dataset container as `fingerprint`.
 
 When the key already exists on the server:

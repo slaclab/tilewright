@@ -16,7 +16,9 @@ description). Holds entities. _Avoid_: collection, repo.
 selects. _Avoid_: sample, record, row.
 
 **Artifact**: an array child of an entity (a spectrum, an image). The thing arrays load
-from. _Avoid_: observable (the physics word), output.
+from. An `artifacts` entry names one (`dataset`), or one per dataset in a group
+(`group`), which `tilewright manifest` expands; a group entry's `group` and `members` are
+part of the fingerprint (ADR-0012). _Avoid_: observable (the physics word), output.
 
 **Shared axis**: an array identical for every entity, registered once as an array child of
 the dataset and announced as `shared_dataset_<type>`.

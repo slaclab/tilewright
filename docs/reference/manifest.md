@@ -24,7 +24,9 @@ dataset-agnostic: no parameter name is known to it.
 
 ## `artifacts.parquet`
 
-One row per entity artifact, plus one row per shared axis.
+One row per entity artifact, plus one row per shared axis. A `group` entry in the YAML
+gives one row per dataset it matched in that entity, with `{name}` in its `type` filled in
+and the dataset's full path in `dataset`; no column records the entry itself.
 
 | Column | Required | Description |
 |---|---|---|
@@ -86,4 +88,6 @@ its first part, so that part counts), and the message names it
 
 - A `table` declares no artifacts, so its columns are never refused.
 - A shared axis has no locator on the entity, so its `type` reserves nothing.
+- A `group` entry reserves the names of each type it expands to, in the entities that
+  have that member.
 - Other names with these prefixes, such as `path_length`, are ordinary parameters.
