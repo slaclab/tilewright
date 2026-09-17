@@ -2941,6 +2941,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },
+    { name = "hdf5plugin" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
@@ -2958,6 +2959,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "h5py" },
+    { name = "hdf5plugin" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
