@@ -98,7 +98,7 @@ such a value, in dataset metadata, entity parameters, labels and artifact metada
 and prints one note per key, naming where it first met it and how many nodes held it:
 
 ```
-  note: SPIN_WAVES/SPIN_WAVES_2b1c0f4e8a77d n_effective = inf is not a JSON number; stored as null (2 entities)
+  note: SPIN_WAVES/SPIN_WAVES_2b1c0f4e8a77d damping_ratio = inf is not a JSON number; stored as null (2 entities)
 ```
 
 The manifest keeps the value as it was read, so identity is untouched: a uid is hashed
