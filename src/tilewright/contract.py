@@ -117,7 +117,7 @@ class DatasetMetadata(BaseModel):
     )
     contact: str | None = Field(
         default=None,
-        description="Who to ask about this dataset, as 'Name <email>'.",
+        description="Who to ask about this dataset, as `Name <email>`.",
     )
     description: str | None = Field(
         default=None,
@@ -361,12 +361,11 @@ class GroupsSource(_HDF5SourceBase):
         "file's top-level groups. Any segment may be a glob, matched with fnmatch against "
         "the names of the groups at that level: '*' and '?' match within the name, '[...]' "
         "one character of a set, and case matters. '/*' takes every top-level group, so "
-        "that each subgroup of each of them is an entity (/<site>/<detector>); "
-        "'/run_*/scans' takes "
-        "the 'scans' group of every run_ group. The matching groups are taken in sorted "
-        "order, and the entities are the subgroups of every one of them. A file in which "
-        "no group matches is an error, and so is one in which the matching groups have no "
-        "subgroup left (see 'exclude_groups').",
+        "that each subgroup of each of them is an entity (`/<site>/<detector>`); "
+        "'/run_*/scans' takes the 'scans' group of every run_ group. The matching groups "
+        "are taken in sorted order, and the entities are the subgroups of every one of "
+        "them. A file in which no group matches is an error, and so is one in which the "
+        "matching groups have no subgroup left (see 'exclude_groups').",
     )
     exclude_groups: list[str] = Field(
         default_factory=list,
@@ -392,7 +391,9 @@ class GroupsSource(_HDF5SourceBase):
         "(0-dim or of size 1) there are given to every sibling, and any other member, a "
         "1-D dataset of another length included, is skipped without a message, as in "
         "'batch'. Under 'from: attrs' the attributes of such a group are given to every "
-        "sibling. 'null' declares none.",
+        "sibling. With 'recursive: true' the subgroups of such a group are read too, "
+        "excluded ones included, but never an entity group, of this sibling set or of "
+        "another: each entity's own values stay its own. 'null' declares none.",
     )
 
     @field_validator("exclude_groups")
