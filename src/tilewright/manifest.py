@@ -19,6 +19,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -93,10 +94,15 @@ def stamp_key(yaml_path, raw, key):
         before = None
     if before is not None and "label" in raw and "key" not in raw:
         line, col = raw.lc.key("label")
-        lines = text.split("\n")
-        stamp = " " * col + f"key: {key}" + ("\r" if lines[line].endswith("\r") else "")
+        # Split where the YAML reader counts lines, keeping each line's own break.
+        parts = re.split(r"(\r\n|[\r\n\x85\u2028\u2029])", text)
+        breaks = parts[1::2]
+        lines = [s + b for s, b in zip(parts[0::2], breaks + [""])]
+        eol = breaks[line] if line < len(breaks) else (breaks[0] if breaks else "\n")
+        stamp = " " * col + f"key: {key}"
         for at in (line + 1, line):
-            candidate = "\n".join(lines[:at] + [stamp] + lines[at:])
+            head, tail = "".join(lines[:at]), "".join(lines[at:])
+            candidate = head + stamp + eol + tail if at < len(lines) else head + eol + stamp
             if parses_as_before_plus_key(candidate):
                 with open(yaml_path, "w", newline="") as f:
                     f.write(candidate)
