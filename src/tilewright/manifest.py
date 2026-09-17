@@ -431,6 +431,10 @@ class _Walker:
         self.artifacts = cfg.artifacts
         self.existing = existing_uids
         self.root = Path(self.body.directory)
+        # Registration writes each artifact's locators beside the parameters under these
+        # names (reference/manifest.md). A table declares no artifacts, so none for it.
+        self.reserved = {f"{kind}_{art.type}": art.type for art in cfg.artifacts
+                         for kind in ("path", "dataset", "index")}
 
     def uid(self, params, provenance, where):
         if self.identity == Identity.params:
@@ -447,8 +451,42 @@ class _Walker:
             row["source_group"] = source_group
         row.update(params)
         row.update(labels)
+        if self.reserved:
+            for name in row:
+                if name.split(".", 1)[0] in self.reserved:  # a dotted name nests under it
+                    raise ValueError(self.reserved_error(name, params, provenance))
         row["_provenance"] = provenance  # dropped before writing; used by collision report
         return row
+
+    def reserved_error(self, name, params, provenance):
+        """The message for a parameter or label named like a locator. The fix depends on
+        where the name came from: a params.groups name, an attribute, a dataset, or a
+        dataset's attribute label."""
+        head = name.split(".", 1)[0]
+        what, field, rename = f"parameter '{name}'", name, "rename it in the file"
+        if name not in params:  # a '<field>_<attr>' label
+            field = max((k for k in params if name.startswith(f"{k}_")), key=len,
+                        default=name)
+            attr = name[len(field) + 1:]
+            what = f"label '{name}' (attribute '{attr}' of parameter '{field}')"
+            rename = f"rename the attribute '{attr}' in the file"
+        spec = self.body.params
+        if spec.groups:
+            fix = f"rename '{head}' under params.groups."
+        elif spec.from_ == "attrs":
+            fix = (f"rename the attribute '{name}' in the file; params.exclude skips "
+                   f"datasets, not attributes.")
+        else:
+            path = "/" + "/".join(p for p in ((spec.group or "").strip("/"),
+                                              field.split(".", 1)[0]) if p)
+            fix = (f"add '{path}' to params.exclude under the source"
+                   + (f" (this also leaves out the parameter '{field}')"
+                      if field != name else "")
+                   + f", or {rename}.")
+        return (f"{self.root / str(provenance)}: {what} is named like a locator: "
+                f"registration writes the locator of artifact '{self.reserved[head]}' under "
+                f"the name '{head}'. path_<type>, dataset_<type> and index_<type> are "
+                f"reserved for every artifact type.\nFix: {fix}")
 
     # -- files ---------------------------------------------------------------
 

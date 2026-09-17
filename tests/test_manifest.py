@@ -605,3 +605,115 @@ class TestKeyStamp:
         cfg, _, notes = read_yaml(tmp_path / "ds.yml")
         assert cfg.metadata.method == ["RIXS"]
         assert "metadata.method: alias 'EDRIXS' -> 'RIXS'" in notes
+
+
+# ---------------------------------------------------------------------------
+# names reserved for the locators registration writes beside the parameters (#18)
+# ---------------------------------------------------------------------------
+
+class TestReservedNames:
+
+    @pytest.mark.parametrize("name", ["path_spectrum", "dataset_spectrum", "index_spectrum"])
+    def test_a_files_parameter_named_like_a_locator_is_refused(self, tmp_path, name):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f[name] = f"calib_{i}"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert f"run_0.h5: parameter '{name}' is named like a locator" in msg
+        assert "artifact 'spectrum'" in msg
+        assert f"Fix: add '/{name}' to params.exclude under the source, or rename it" in msg
+        cfg["source"]["files"]["params"] = {"exclude": [f"/{name}"]}
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert name not in ent.columns and len(ent) == 3
+
+    def test_the_cli_names_the_parameter_and_exits_1(self, tmp_path, capsys):
+        cfg = files_dataset(tmp_path)
+        with h5py.File(tmp_path / "runs" / "run_1.h5", "a") as f:
+            f["path_spectrum"] = "calib_A"
+        yaml_path = write_yaml(tmp_path / "ds.yml", cfg)
+        assert main([str(yaml_path)]) == 1
+        err = capsys.readouterr().err
+        assert "run_1.h5: parameter 'path_spectrum'" in err and "params.exclude" in err
+        assert not (tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").exists()
+
+    def test_a_batch_parameter_in_a_group(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
+            f["params/index_spectrum"] = np.arange(3)
+        with pytest.raises(ValueError, match=r"parameter 'index_spectrum'(.|\n)*"
+                                             r"add '/params/index_spectrum' to params.exclude"):
+            run(tmp_path, cfg)
+
+    def test_a_groups_parameter(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            f["samples/sample_2/params/dataset_spectrum"] = "x"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert "samples.h5:/samples/sample_2: parameter 'dataset_spectrum'" in msg
+        assert "add '/params/dataset_spectrum' to params.exclude" in msg
+
+    def test_an_attribute_parameter(self, tmp_path):
+        cfg = files_dataset(tmp_path, attrs=True)
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            f.attrs["path_spectrum"] = "calib_A"
+        with pytest.raises(ValueError, match=r"parameter 'path_spectrum'(.|\n)*Fix: rename the "
+                                             r"attribute 'path_spectrum' in the file; "
+                                             r"params.exclude skips datasets"):
+            run(tmp_path, cfg)
+
+    def test_a_params_groups_name(self, tmp_path, nexus):
+        groups = nexus["source"]["files"]["params"]["groups"]
+        groups["path_E"] = groups.pop("sample")
+        with pytest.raises(ValueError, match=r"parameter 'path_E.chemical_formula'(.|\n)*"
+                                             r"under the name 'path_E'(.|\n)*"
+                                             r"Fix: rename 'path_E' under params.groups"):
+            run(tmp_path, nexus)
+
+    def test_a_subgroup_read_recursively(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        cfg["source"]["files"]["params"] = {"recursive": True}
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            f["path_spectrum/gain"] = 2.0
+        with pytest.raises(ValueError, match=r"parameter 'path_spectrum.gain'(.|\n)*"
+                                             r"add '/path_spectrum' to params.exclude"):
+            run(tmp_path, cfg)
+
+    def test_an_attribute_label(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            f.create_dataset("path", data=1.0).attrs["spectrum"] = "a label"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert ("label 'path_spectrum' (attribute 'spectrum' of parameter 'path') is named "
+                "like a locator") in msg
+        assert ("add '/path' to params.exclude under the source (this also leaves out the "
+                "parameter 'path'), or rename the attribute 'spectrum' in the file") in msg
+
+    def test_other_names_with_a_locator_prefix_are_parameters(self, tmp_path):
+        cfg = files_dataset(tmp_path)  # artifact 'spectrum', shared axis 'energy'
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["path_length"] = 1.5 + i
+                f["path_energy"] = "a shared axis has no locator on the entity"
+                f["index_spectrum_2"] = i
+        ent, _ = run(tmp_path, cfg)
+        assert {"path_length", "path_energy", "index_spectrum_2"} <= set(ent.columns)
+
+    def test_a_table_declares_no_artifacts_so_its_columns_never_collide(self, tmp_path):
+        d = tmp_path / "picks"
+        d.mkdir()
+        pd.DataFrame({"trace_name": ["ev1", "ev2"], "path_p_travel_s": [3.5, 4.25],
+                      "path_x": ["a.h5", "b.h5"], "dataset_x": ["/x", "/x"],
+                      "index_x": [0, 1]}).to_csv(d / "meta.csv", index=False)
+        cfg = {"label": "Picks", "metadata": dict(META),
+               "source": {"table": {"directory": str(d), "path": "meta.csv",
+                                    "id": "trace_name"}}}
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 2 and list(ent["path_p_travel_s"]) == [3.5, 4.25]
+        assert len(art) == 0
