@@ -238,6 +238,16 @@ def register_main():
                   f"    tilewright delete {dataset_key}\n"
                   f"    tilewright register {config_path}", file=sys.stderr)
             stale_datasets.append(dataset_key)
+        if summary.broken:
+            # A node that serves nothing is not a registered artifact, so the run does not
+            # report the dataset complete (#38). Each one is named above with its key.
+            print(f"\nERROR: {summary.broken} artifact(s) of '{dataset_key}' are on the "
+                  f"server but serve nothing; each is named above. Delete those nodes and "
+                  f"register again:\n"
+                  f"    tilewright delete {dataset_key} <ENTITY> <ARTIFACT>\n"
+                  f"    tilewright register {config_path}", file=sys.stderr)
+            if dataset_key not in stale_datasets:
+                stale_datasets.append(dataset_key)
 
     verify_registration_http(client, [cfg.catalog_key for _, cfg in datasets],
                              artifact_rows=artifact_rows)

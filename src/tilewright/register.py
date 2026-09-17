@@ -33,6 +33,12 @@ present on the server is skipped, so a re-run resumes rather than duplicates. An
 entity a crashed run left without some of its artifacts gets the missing ones
 registered into its existing container (with a WARNING); an artifact that exists
 is never rewritten, so a changed path means delete + re-register.
+
+A key's presence is not proof that it reads (#38). A creation that fails drops
+whatever the server kept for that key, so a run leaves nothing half-created; and a
+node already there that does not hold the source its manifest row names is counted
+apart from the artifacts that failed, named with its key, and left alone -- the run
+does not report the dataset complete.
 Per-entity work runs on a ThreadPoolExecutor (see _DEFAULT_MAX_WORKERS).
 """
 
@@ -53,6 +59,7 @@ from dask.array.core import normalize_chunks
 from tiled.structures.array import ArrayStructure, BuiltinDtype
 from tiled.structures.core import StructureFamily
 from tiled.structures.data_source import Asset, DataSource, Management
+from tiled.utils import path_from_uri
 
 from .client import locate
 from .utils import (
@@ -237,12 +244,14 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
     the main thread can aggregate across futures without shared state.
 
     Returns:
-        (ent_added, art_added, skipped, art_failed, stale) — exactly one of
+        (ent_added, art_added, skipped, art_failed, stale, broken) — exactly one of
         ent_added or skipped is 1; art_added counts artifacts successfully
         registered (for a skipped entity: the ones a crashed earlier run left
-        missing), art_failed counts artifacts that raised during register, and
+        missing), art_failed counts artifacts that raised during register,
         stale counts existing artifacts whose source file changed on disk since
-        they were registered (see ``_changed_on_disk``).
+        they were registered (see ``_changed_on_disk``), and broken counts
+        existing artifacts whose node cannot serve its manifest row at all
+        (see ``_unserved``).
     """
     if inherited is None:
         inherited = {}
@@ -261,17 +270,33 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
         # existing container. (A *changed* path is not detected here: an
         # existing artifact is never rewritten — delete and re-register.)
         ent_container = parent_client[ent_key]
-        present = {key: node.metadata for key, node in ent_container.items()}
-        stale = 0
+        # The listing carries each child's data sources, so what a node would read costs
+        # no request of its own; a key's presence is not proof that it reads (#38).
+        present = {key: node for key, node in ent_container.include_data_sources().items()}
+        stale = broken = 0
+        missing = []
         for row in art_rows:
-            if _changed_on_disk(present.get(make_artifact_key(row)), row):
+            art_key = make_artifact_key(row)
+            node = present.get(art_key)
+            if node is None:
+                missing.append(row)
+                continue
+            if _changed_on_disk(node.metadata, row):
                 stale += 1
-                print(f"  WARNING ent={ent_key} art={make_artifact_key(row)}: file changed "
+                print(f"  WARNING ent={ent_key} art={art_key}: file changed "
                       f"on disk since registration (manifest {row.get('file_mtime')}, "
-                      f"server {present[make_artifact_key(row)].get('file_mtime')})")
-        art_rows = [row for row in art_rows if make_artifact_key(row) not in present]
+                      f"server {node.metadata.get('file_mtime')})")
+            why = _unserved(node, row, base_dir, server_base_dir, upload)
+            if why is not None:
+                broken += 1
+                print(f"  WARNING ent={ent_key} art={art_key}: the node on the server "
+                      f"cannot serve this artifact ({why}); an existing artifact is never "
+                      f"rewritten, so it is left as it is. Fix: delete the node "
+                      f"{dataset_key}/{ent_key}/{art_key} with 'tilewright delete', then "
+                      f"register again")
+        art_rows = missing
         if not art_rows:
-            return (0, 0, 1, 0, stale)
+            return (0, 0, 1, 0, stale, broken)
         print(f"  WARNING ent={ent_key} half-registered: {len(present)} of "
               f"{len(present) + len(art_rows)} artifacts on the server; "
               f"registering the {len(art_rows)} missing")
@@ -304,7 +329,7 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
             key=ent_key, metadata=metadata,
         )
         ent_added = 1
-        stale = 0
+        stale = broken = 0
 
     art_added = 0
     art_failed = 0
@@ -316,9 +341,11 @@ def _register_one_entity(ent_row, ent_columns, art_grouped, art_columns,
             art_added += 1
         except Exception as e:
             art_failed += 1
-            print(f"  ERROR ent={ent_key} art={make_artifact_key(art_row)}: {e}")
+            print(f"  ERROR ent={ent_key} art={make_artifact_key(art_row)}: {e}. "
+                  f"Fix the cause and register again; this run leaves nothing on the "
+                  f"server for it")
 
-    return (ent_added, art_added, 1 - ent_added, art_failed, stale)
+    return (ent_added, art_added, 1 - ent_added, art_failed, stale, broken)
 
 
 def _changed_on_disk(node_metadata, art_row):
@@ -339,6 +366,51 @@ def _changed_on_disk(node_metadata, art_row):
     return False
 
 
+def _unserved(node, art_row, base_dir, server_base_dir, upload):
+    """Why the artifact node already on the server cannot serve ``art_row``, as a phrase
+    for the WARNING, or None when nothing says it cannot.
+
+    An incremental run skips an artifact whose key is a child of the entity already. The
+    key is not proof (#38): a POST that fails partway can leave a node that is listed but
+    that no read opens, and a later run then reports the dataset complete while that
+    artifact serves nothing. What a pointer node will read is in the listing that lists
+    the keys — each child's data sources come with it — so it is compared with what the
+    manifest names: the file, through the same ``path_from_uri`` the adapter opens an
+    asset with, and the HDF5 path inside it. Uploaded artifacts hold the server's own
+    bytes rather than a pointer at the manifest's file, so for those only the presence of
+    a data source is checked.
+
+    This answers a different question from ``_changed_on_disk``, which asks whether the
+    file under a node that does read has changed since; both are asked of the same node in
+    the same loop. A listing that carries no data sources proves nothing, and says so by
+    returning None: the check never invents a problem it could not see.
+    """
+    attributes = node.item.get("attributes") if isinstance(node.item, Mapping) else None
+    sources = attributes.get("data_sources") if isinstance(attributes, Mapping) else None
+    if not isinstance(sources, list):
+        return None
+    if not sources:
+        return "it holds no data source"
+    if upload:
+        return None
+    source = sources[0] if isinstance(sources[0], Mapping) else {}
+    assets = source.get("assets")
+    if not isinstance(assets, list) or not assets or not isinstance(assets[0], Mapping):
+        return "its data source holds no asset"
+    try:
+        reads = path_from_uri(assets[0].get("data_uri"))
+    except Exception:
+        return f"its asset {assets[0].get('data_uri')!r} is not a file"
+    wants = os.path.join(server_base_dir or base_dir, art_row["file"])
+    if os.path.normpath(str(reads)) != os.path.normpath(wants):
+        return f"it reads {reads}, not {wants}"
+    parameters = source.get("parameters")
+    inside = parameters.get("dataset") if isinstance(parameters, Mapping) else None
+    if inside is not None and inside != art_row["dataset"]:
+        return f"it reads {inside} in that file, not {art_row['dataset']}"
+    return None
+
+
 def _register_artifact(container, art_row, art_columns, base_dir, server_base_dir,
                        inherited, upload, extra=None, notes=None, parent=""):
     """Register one artifact-manifest row as an array child of ``container``.
@@ -351,6 +423,12 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
     transport is a DataSource pointing at the file, or with ``upload`` the
     array read locally and written through the server. Raises on failure;
     the caller counts.
+
+    A creation that fails partway can still leave the node on the server, listed among
+    the children but opening for no one, and a later incremental run would skip that key
+    for ever (#38). So a failed creation drops whatever the server kept for the key before
+    the exception goes up, and the run leaves nothing half-created behind it. Only a
+    removal that itself fails changes the exception, to say the node is still there.
     """
     art_key = make_artifact_key(art_row)
     data_shape = json.loads(art_row["shape"])
@@ -371,32 +449,49 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
     for k, v in inherited.items():
         art_metadata.setdefault(k, v)
 
-    if upload:
-        data = read_artifact_array(art_row, base_dir)
-        if list(data.shape) != list(data_shape) or data.dtype != data_dtype:
-            raise ValueError(
-                f"manifest records shape={data_shape} dtype={data_dtype} "
-                f"but the file holds shape={list(data.shape)} "
-                f"dtype={data.dtype}; re-run `tilewright manifest`"
+    try:
+        if upload:
+            data = read_artifact_array(art_row, base_dir)
+            if list(data.shape) != list(data_shape) or data.dtype != data_dtype:
+                raise ValueError(
+                    f"manifest records shape={data_shape} dtype={data_dtype} "
+                    f"but the file holds shape={list(data.shape)} "
+                    f"dtype={data.dtype}; re-run `tilewright manifest`"
+                )
+            container.write_array(data, key=art_key, metadata=art_metadata)
+        else:
+            data_source = create_data_source(
+                art_row, base_dir=base_dir, server_base_dir=server_base_dir,
             )
-        container.write_array(data, key=art_key, metadata=art_metadata)
-    else:
-        data_source = create_data_source(
-            art_row, base_dir=base_dir, server_base_dir=server_base_dir,
-        )
-        container.new(
-            structure_family=StructureFamily.array,
-            data_sources=[data_source],
-            key=art_key,
-            metadata=art_metadata,
-        )
+            container.new(
+                structure_family=StructureFamily.array,
+                data_sources=[data_source],
+                key=art_key,
+                metadata=art_metadata,
+            )
+    except Exception as e:
+        try:
+            if art_key in container:
+                container[art_key].delete(recursive=True, external_only=not upload)
+        except Exception as undo:
+            raise RuntimeError(
+                f"{e}; and the node it left on the server could not be removed ({undo}), "
+                f"so a later run would skip that key. Fix: delete the node "
+                f"{'/'.join(p for p in (parent, art_key) if p)} with 'tilewright delete', "
+                f"then register again"
+            ) from e
+        raise
 
 
 class RegisterSummary(namedtuple(
-        "RegisterSummary", "entities artifacts skipped failed shared_added shared_skipped stale")):
+        "RegisterSummary",
+        "entities artifacts skipped failed shared_added shared_skipped stale broken")):
     """What one ``register_dataset_http`` run did. ``stale`` counts artifacts already on
     the server whose source file changed on disk since registration; nothing is
-    rewritten for them and the caller says how to rebuild."""
+    rewritten for them and the caller says how to rebuild. ``broken`` counts the ones
+    whose node serves nothing at all (``_unserved``) — an artifact that failed, and an
+    artifact left behind by one that failed, are two different states and are counted
+    apart."""
 
     @property
     def changed(self):
@@ -517,6 +612,7 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     skip_count = 0
     art_fail_count = 0
     stale_count = 0
+    broken_count = 0
 
     # Values loaded from a YAML are ruamel subclasses (ScalarFloat, ...), which the
     # Tiled client cannot serialize; everything below sends plain JSON types.
@@ -538,13 +634,22 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     # an axis whose key already exists is skipped.
     shared_added = shared_skipped = shared_failed = 0
     shared_rows = art_df[art_df["uid"].isna()]
+    listed = parent_client.include_data_sources() if len(shared_rows) else parent_client
     for _, row in shared_rows.iterrows():
         key = make_artifact_key(row)
         if key in parent_client:
             shared_skipped += 1
-            if _changed_on_disk(parent_client[key].metadata, row):
+            node = listed[key]
+            if _changed_on_disk(node.metadata, row):
                 stale_count += 1
                 print(f"  WARNING shared axis '{key}': file changed on disk since registration")
+            why = _unserved(node, row, base_dir, server_base_dir, upload)
+            if why is not None:
+                broken_count += 1
+                print(f"  WARNING shared axis '{key}': the node on the server cannot serve "
+                      f"it ({why}); an existing artifact is never rewritten, so it is left "
+                      f"as it is. Fix: delete the node {dataset_key}/{key} with "
+                      f"'tilewright delete', then register again")
             continue
         try:
             _register_artifact(
@@ -581,12 +686,13 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
         ]
 
         for i, future in enumerate(as_completed(futures)):
-            ent_added, art_added, skipped, art_failed, stale = future.result()
+            ent_added, art_added, skipped, art_failed, stale, broken = future.result()
             ent_count += ent_added
             art_count += art_added
             skip_count += skipped
             art_fail_count += art_failed
             stale_count += stale
+            broken_count += broken
 
             if (i + 1) % 5 == 0 or (i + 1) == n:
                 elapsed = time.time() - start_time
@@ -609,10 +715,13 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
               f"{shared_skipped} skipped, {shared_failed} errors")
     if stale_count:
         print(f"  Changed on disk: {stale_count} (the catalog serves stale data for these)")
+    if broken_count:
+        print(f"  Broken nodes:    {broken_count} (present but serving nothing; delete each "
+              f"and register again)")
     print(f"  Time:            {elapsed_total:.1f} seconds")
 
     return RegisterSummary(ent_count, art_count, skip_count, art_fail_count,
-                           shared_added, shared_skipped, stale_count)
+                           shared_added, shared_skipped, stale_count, broken_count)
 
 
 def verify_registration_http(client, dataset_keys=None, artifact_rows=None):
