@@ -337,27 +337,26 @@ def _attrs(obj, label_of=None, skip=()):
     return out
 
 
-def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
+def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None, skip=()):
     """One entity's (or one batch file's) parameters from its container.
 
     Returns ``(params, labels)``. ``params`` maps dotted keys (``instrument.Ei``) to values,
     or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
 
-    ``siblings`` is ``(i, n, closed, memo)`` for a ``groups`` entity: its position among
-    the n entity groups beside it, the groups of the file that recursion never enters
-    (every matched group and every entity group), and a dict the n share. A group path
-    that starts with ``..`` leaves the entity group (ADR-0011); such a group is read once
-    for the n siblings, by the batch rule with N = n, and the entity takes element i.
-    Recursion from it enters no group in ``closed``: a path above the matched group would
-    otherwise reach the groups of other sibling sets, whose arrays follow their own names.
+    ``siblings`` is ``(i, n, memo)`` for a ``groups`` entity: its position among the n
+    entity groups beside it, and a dict the n share. A group path that starts with ``..``
+    leaves the entity group (ADR-0011); such a group is read once for the n siblings, by
+    the batch rule with N = n, and the entity takes element i. The contract refuses
+    ``recursive`` on such a path. ``skip`` holds the object ids of the groups that
+    recursion never enters, whatever link leads to them (see ``_read_group``).
     """
     out, labels = OrderedDict(), OrderedDict()
     for gname, gpath in spec.paths.items():
         ups, rest = climb(gpath)
         if not ups:
-            found = _read_group(container, rest, gname, gpath, spec, batch_size)
+            found = _read_group(container, rest, gname, gpath, spec, batch_size, skip)
         else:
-            i, n, closed, memo = siblings
+            i, n, memo = siblings
             above = [p for p in container.name.split("/") if p]
             if ups > len(above):
                 field = f"groups.{gname}" if gname else "group"
@@ -368,8 +367,7 @@ def _read_params(container, spec: ParamsSpec, batch_size=None, siblings=None):
             if gname not in memo:
                 where = "/".join(above[:len(above) - ups] + [rest]).strip("/")
                 memo[gname] = _read_group(container.file, where, gname, gpath, spec,
-                                          None if spec.from_ == "attrs" else n,
-                                          skip=closed)
+                                          None if spec.from_ == "attrs" else n)
             found = memo[gname]
             if spec.from_ == "datasets":
                 found = ({k: _to_python(v[i]) for k, v in found[0].items()}, found[1])
@@ -390,8 +388,8 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, s
     if spec.from_ == "attrs":
         target = holder[path] if path else holder
         # an attribute's exclude path is '<group path>/<name>': '/version' at the root
-        skip = {n for n in target.attrs if f"{frame}/{n}".strip("/") in exclude}
-        for name, val in _attrs(target, skip=skip).items():
+        left_out = {n for n in target.attrs if f"{frame}/{n}".strip("/") in exclude}
+        for name, val in _attrs(target, skip=left_out).items():
             key = f"{gname}.{name}" if gname else name
             out[key] = np.full(batch_size, val) if batch_size else val
         return out, OrderedDict()
@@ -684,8 +682,8 @@ class _Walker:
                                      f"to treat as entities"
                                      + (" (after exclude_groups)" if excluded else ""))
                 # every matched group and every entity group of the file, as HDF5 objects,
-                # so that a link to one is the same group: recursion from a group reached
-                # through '..' enters none of them
+                # so that a link to one is the same group: recursion inside an entity group
+                # enters none of them, so no entity reads another's values through a link
                 closed = {f[base or "/"].id for base, _ in parents} | {
                     f[base or "/"][n].id for base, names in parents for n in names}
                 for base, names in parents:
@@ -693,8 +691,9 @@ class _Walker:
                     gpaths = [f"{base}/{n}" if base else n for n in names]
                     for i, gpath in enumerate(gpaths):
                         g = f[gpath]
-                        siblings = (i, len(gpaths), closed, memo)
-                        params, labels = (_read_params(g, spec, siblings=siblings)
+                        siblings = (i, len(gpaths), memo)
+                        params, labels = (_read_params(g, spec, siblings=siblings,
+                                                       skip=closed)
                                           if spec is not None else ({}, {}))
                         prov = f"{rel}:/{gpath}"
                         params = self.located(params, labels, prov, f"{h5_path}:/{gpath}")

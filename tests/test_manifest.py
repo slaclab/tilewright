@@ -1,9 +1,11 @@
 """``tilewright manifest`` against synthetic HDF5: every source tag, parameter reading,
 labels, shared axes, identity, collisions, key stamping and where the output lands."""
 
+import contextlib
 import hashlib
 import json
 import math
+import signal
 from pathlib import Path
 
 import h5py
@@ -32,6 +34,20 @@ def run(tmp_path, cfg, name="ds", **kw):
     yaml_path = write_yaml(tmp_path / f"{name}.yml", cfg)
     ent_path, art_path = generate_manifests(str(yaml_path), **kw)
     return pd.read_parquet(ent_path), pd.read_parquet(art_path)
+
+
+@contextlib.contextmanager
+def stops_within(seconds):
+    """Fail, instead of hanging the test run, when the block does not finish in time."""
+    def stop(signum, frame):
+        raise TimeoutError(f"not finished after {seconds} s")
+    previous = signal.signal(signal.SIGALRM, stop)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def files_dataset(tmp_path, n=3, attrs=False):
@@ -485,56 +501,19 @@ class TestNestedGroups:
         assert set(ent["run.operator"]) == {"rm"} and len(ent) == 12
         assert all(list(v) == list(np.arange(12.0)) for v in ent["run.thresholds"])
 
-    def test_recursing_from_dotdot_skips_the_entity_groups(self, tmp_path):
-        """The group '..' holds the entity groups themselves; 'recursive' reads the other
-        subgroups (here the excluded 'calibration'), never a sibling's own values."""
-        cfg = scans_dataset(tmp_path)
-        with h5py.File(tmp_path / "scans" / "run.h5", "a") as f:
-            f.create_dataset("run/calibration/offset", data=0.5)
-            for i in range(1, 13):
-                f.create_dataset(f"run/scan_{i:02d}/exposure", data=float(i))
-        cfg["source"]["groups"]["params"] = {"groups": {"run": "..", "own": "/"},
-                                             "recursive": True}
-        ent, _ = run(tmp_path, cfg)
-        assert list(ent.columns) == [
-            "uid", "source_group", "run.beam_current", "run.energy", "run.mode",
-            "run.calibration.offset", "own.exposure", "run.beam_current_units"]
-        assert list(ent["own.exposure"]) == [float(i) for i in range(1, 13)]
-        assert set(ent["run.calibration.offset"]) == {0.5}
-
-    def test_recursing_above_the_matched_groups_skips_every_entity_group(self, tmp_path):
-        """'../..' under '/*' is the file root, which holds the matched site groups and
-        their detector groups. 'recursive' reads the root, but goes into no site group,
-        and so into no detector group of either site: no detector takes another site's
-        values into its parameters or its uid (reviews of #21)."""
-        cfg = sites_dataset(tmp_path)
-        with h5py.File(tmp_path / "sites" / "detectors.h5", "a") as f:
-            f["beamline"] = 7
-            for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a",
-                                       "south/det_c"]):
-                del f[f"{group}/temperature"]
-                f[f"{group}/temperature"] = 70.0 + n
-        cfg["source"]["groups"]["params"] = {
-            "groups": {"top": "../..", "own": "/"}, "recursive": True,
-            "location": SITE_LOCATION, "exclude": ["../../created"]}
-        ent, _ = run(tmp_path, cfg)
-        assert set(ent.columns) == {"uid", "source_group", "site", "detector",
-                                    "top.beamline", "own.temperature"}
-        assert list(ent["own.temperature"]) == [70.0, 71.0, 72.0, 73.0]
-        assert list(ent["top.beamline"]) == [7] * 4
-        assert ent.loc[0, "uid"] == params_uid("DETECTORS", {
-            "site": "north", "detector": "det_a", "top.beamline": 7,
-            "own.temperature": 70.0})
+    # The YAMLs of the rounds-1-3 tests that recursed from '..' are contract errors now:
+    # tests/test_contract.py::TestRejected::test_recursive_takes_no_path_that_starts_with_dotdot
 
     @pytest.mark.parametrize("south", [["det_a", "det_b"], ["det_a", "det_b", "det_c"]],
                              ids=["same-size", "other-size"])
     def test_recursing_above_the_matched_groups_reads_no_other_sets_array(self, tmp_path,
                                                                            south):
         """Each site's calibration holds one offset per detector of that site, in the
-        order of that site's names. From '../..' the reader goes into no matched group, so
-        no site reads another site's offsets, which it would pair with its own detectors
-        when the sizes agree (review 2 of #21). A site reads its own through a path that
-        names it, '../calibration', and there element i is its own i-th detector."""
+        order of that site's names. With 'recursive: true', '../..' read the other site's
+        offsets too, and paired them with this site's detectors when the sizes agreed
+        (review 2 of #21): the contract refuses it now. Named without 'recursive', as the
+        Fix line says, '../calibration' gives element i to the site's own i-th detector,
+        and '../..' reads the datasets of the root only."""
         d = tmp_path / "sites"
         d.mkdir()
         sets = {"north": (["det_a", "det_b"], 1.5, [0.25, 0.5]),
@@ -547,15 +526,19 @@ class TestNestedGroups:
                 for k, det in enumerate(detectors):
                     f[f"{site}/{det}/temperature"] = 70.0 + k
                     f[f"{site}/{det}/spectrum"] = np.zeros(4)
+        params = {"groups": {"top": "../..", "cal": "../calibration", "own": "/"},
+                  "location": SITE_LOCATION}
         cfg = {"label": "Detectors", "metadata": dict(META),
                "source": {"groups": {
                    "directory": str(d), "entity_group": "/*",
                    "exclude_groups": ["calibration"],
-                   "params": {"groups": {"top": "../..", "cal": "../calibration",
-                                         "own": "/"},
-                              "recursive": True, "location": SITE_LOCATION}}},
+                   "params": {**params, "recursive": True}}},
                "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
-        ent, _ = run(tmp_path, cfg)
+        with pytest.raises(ContractError, match=r"params\.groups\.top '\.\./\.\.' starts "
+                                                r"with '\.\.', and 'recursive: true'"):
+            run(tmp_path, cfg)
+        cfg["source"]["groups"]["params"] = params
+        ent, _ = run(tmp_path, cfg, name="named")
         assert set(ent.columns) == {"uid", "source_group", "site", "detector",
                                     "top.beamline", "cal.gain", "cal.offset",
                                     "own.temperature"}
@@ -567,32 +550,42 @@ class TestNestedGroups:
             "site": "north", "detector": "det_b", "top.beamline": 7, "cal.gain": 1.5,
             "cal.offset": 0.5, "own.temperature": 71.0})
 
-    def test_recursion_skips_a_matched_or_entity_group_reached_through_a_link(self,
-                                                                             tmp_path):
-        """The reader tells groups apart by HDF5 object, not by the path it opened them
-        through: a soft link to an entity group or to a matched group, or a second hard
-        link to an entity group, is not read from above either (review 2 of #21)."""
+    @pytest.mark.parametrize("link", ["peer", "copy", "far", "up"])
+    def test_recursion_inside_an_entity_group_follows_no_link_to_an_entity_or_matched_group(
+            self, tmp_path, link):
+        """Recursion stays for paths inside the entity group, where another entity can be
+        reached only through an HDF5 link. The reader knows a group by its HDF5 object,
+        not by the path it opened it through, so it goes through none of these links:
+        'peer' (a soft link to a sibling detector), 'copy' (a second hard link to another
+        site's detector), 'far' (a soft link to another site) and 'up' (a soft link back
+        to its own site, which a walk that follows it never leaves). A plain subgroup is
+        read (reviews 2 and 3 of #21)."""
         d = tmp_path / "sites"
         d.mkdir()
         with h5py.File(d / "detectors.h5", "w") as f:
             for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a"]):
                 f[f"sites/{group}/temperature"] = 70.0 + n
                 f[f"sites/{group}/spectrum"] = np.zeros(4)
-            f["meta/beamline"] = 7
-            f["meta/alias"] = h5py.SoftLink("/sites/north/det_a")
-            f["meta/site"] = h5py.SoftLink("/sites/south")
-            f["meta/copy"] = f["sites/north/det_b"]
+            for site, gain in (("north", 1.5), ("south", 2.0)):
+                f[f"sites/{site}/calibration/gain"] = gain
+            f["sites/north/det_a/local/gain"] = 0.5
+            f["sites/north/det_a"][link] = {
+                "peer": h5py.SoftLink("/sites/north/det_b"), "copy": f["sites/south/det_a"],
+                "far": h5py.SoftLink("/sites/south"), "up": h5py.SoftLink("/sites/north"),
+            }[link]
         cfg = {"label": "Detectors", "metadata": dict(META),
                "source": {"groups": {
                    "directory": str(d), "entity_group": "/sites/*",
-                   "params": {"groups": {"top": "../../..", "own": "/"},
-                              "recursive": True,
+                   "exclude_groups": ["calibration"],
+                   "params": {"group": "/", "recursive": True,
                               "location": r"/(?P<site>[^/]+)/(?P<detector>[^/]+)$"}}},
                "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
-        ent, _ = run(tmp_path, cfg)
+        with stops_within(30):
+            ent, _ = run(tmp_path, cfg)
         assert set(ent.columns) == {"uid", "source_group", "site", "detector",
-                                    "top.meta.beamline", "own.temperature"}
-        assert list(ent["own.temperature"]) == [70.0, 71.0, 72.0]
+                                    "temperature", "local.gain"}
+        assert list(ent["temperature"]) == [70.0, 71.0, 72.0]
+        assert ent["local.gain"].tolist()[0] == 0.5
 
     def test_a_dotdot_path_that_names_an_entity_group_is_read_by_the_sibling_rule(
             self, tmp_path):
@@ -615,47 +608,38 @@ class TestNestedGroups:
         assert list(ent["ref.temperature"]) == [70.0, 70.0, 72.0, 72.0]
         assert list(ent["ref.offsets"]) == [0.25, 0.5, 0.1, 0.2]
 
-    @pytest.mark.parametrize("path, above", [
-        ("../../..", ["campaign.beamtime", "campaign.sites.count"]),
-        ("../../../..", ["campaign.c1.beamtime", "campaign.c1.sites.count",
-                         "campaign.c2.beamtime", "campaign.c2.sites.count"]),
-    ])
-    def test_recursing_from_a_deeper_glob_skips_every_entity_group(self, tmp_path, path,
-                                                                   above):
-        """Under '/*/sites/*' the entity groups hang below three matched groups. A path to
-        a run, or to the root, reads the groups above the matched groups ('sites'), but
-        no matched group, so neither its excluded 'calibration' group nor an entity group
-        of any sibling set."""
+    def test_recursing_above_a_branch_of_the_glob_is_refused(self, tmp_path):
+        """Review 3 of #21: under '/run_*/scans', '../../..' with 'recursive: true' read
+        each run's per-scan array beside its 'scans' group into the scans of the other
+        run, split by their N. The contract refuses it before a file is read. Named
+        without 'recursive', '../..' gives each scan its own run's element."""
         d = tmp_path / "runs"
         d.mkdir()
-        with h5py.File(d / "r.h5", "w") as f:
-            for run_, beamtime, count in (("c1", 5, 2), ("c2", 6, 1)):
-                f[f"{run_}/beamtime"] = beamtime
-                f[f"{run_}/sites/count"] = count
-            for group, gain, temperatures in (
-                    ("c1/sites/north", 1.0, {"det_a": 10.0, "det_b": 11.0}),
-                    ("c1/sites/south", 2.0, {"det_a": 20.0}),
-                    ("c2/sites/north", 3.0, {"det_a": 30.0})):
-                f[f"{group}/calibration/gain"] = gain
-                for det, temperature in temperatures.items():
-                    f[f"{group}/{det}/temperature"] = temperature
-                    f[f"{group}/{det}/spectrum"] = np.zeros(4)
+        with h5py.File(d / "runs.h5", "w") as f:
+            for run_, energies in (("run_1", [8.0, 9.0]), ("run_2", [5.0, 6.0])):
+                f[f"{run_}/scan_energy"] = np.array(energies)
+                for scan in ("scan_01", "scan_02"):
+                    f[f"{run_}/scans/{scan}/image"] = np.zeros(2)
+        location = r":/(?P<run>[^/]+)/scans/(?P<scan>[^/]+)$"
         cfg = {"label": "Runs", "metadata": dict(META),
                "source": {"groups": {
-                   "directory": str(d), "entity_group": "/*/sites/*",
-                   "exclude_groups": ["calibration"],
-                   "params": {"groups": {"campaign": path, "own": "/"}, "recursive": True,
-                              "location": r":/(?P<run>[^/]+)/sites/(?P<site>[^/]+)/"
-                                          r"(?P<detector>[^/]+)$"}}},
-               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
-        ent, art = run(tmp_path, cfg)
-        assert list(ent["source_group"]) == ["c1/sites/north/det_a", "c1/sites/north/det_b",
-                                             "c1/sites/south/det_a", "c2/sites/north/det_a"]
-        assert set(ent.columns) == {"uid", "source_group", "run", "site", "detector",
-                                    *above, "own.temperature"}
-        assert list(ent["own.temperature"]) == [10.0, 11.0, 20.0, 30.0]
-        assert list(ent[above[0]])[:3] == [5, 5, 5] and len(art) == 4
-        assert list(ent[above[1]])[:3] == [2, 2, 2]
+                   "directory": str(d), "entity_group": "/run_*/scans",
+                   "params": {"groups": {"up": "../../..", "own": "/"}, "recursive": True,
+                              "location": location}}},
+               "artifacts": [{"type": "image", "dataset": "image"}]}
+        with pytest.raises(ContractError) as exc:
+            run(tmp_path, cfg)
+        assert str(exc.value).splitlines() == [
+            "contract error: source.groups: params.groups.up '../../..' starts with '..', "
+            "and 'recursive: true' is for paths inside the entity group only: from a group "
+            "outside it the reader would reach values that belong to other entities",
+            "Fix: name each group you need under params.groups, without recursive"]
+        cfg["source"]["groups"]["params"] = {"groups": {"up": "../.."},
+                                             "location": location}
+        ent, _ = run(tmp_path, cfg, name="named")
+        assert list(zip(ent["source_group"], ent["up.scan_energy"])) == [
+            ("run_1/scans/scan_01", 8.0), ("run_1/scans/scan_02", 9.0),
+            ("run_2/scans/scan_01", 5.0), ("run_2/scans/scan_02", 6.0)]
 
     def test_climbing_above_the_file_root_names_the_entity(self, tmp_path):
         cfg = scans_dataset(tmp_path)
