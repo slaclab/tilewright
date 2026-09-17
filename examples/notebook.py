@@ -244,12 +244,21 @@ def _(ARTIFACT_KEY, ds, mo, shared_axes):
             f"Available: {list(entity)}"
         )
 
-    # Split metadata into categories
+    # Split metadata into categories. A locator is the pair path_<type> +
+    # dataset_<type> (index_<type> optional); `locate` applies that rule, so
+    # a lone path_* key, such as a table column, stays a parameter.
+    from tilewright.client import locate as _locate
+
+    _locator_keys = {
+        f"{_kind}_{_t}"
+        for _t in _locate(entity)
+        for _kind in ("path", "dataset", "index")
+    }
     physics_params = {}
     locators = {}
     _internal = {}
     for _k, _v in ent_meta.items():
-        if _k.startswith(("path_", "dataset_", "index_")):
+        if _k in _locator_keys:
             locators[_k] = _v
         elif _k in ("key", "uid", "amsc_public"):
             _internal[_k] = _v
