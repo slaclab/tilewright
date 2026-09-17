@@ -134,6 +134,17 @@ def test_verify_entity_of_a_dataset_without_artifacts_does_not_warn(capsys, ent_
     assert "no artifacts declared" in out
 
 
+@pytest.mark.parametrize("ent_metadata, locators", [
+    ({"trace_name": "ev1", "path_p_travel_s": 3.5, "path_s_travel_s": 6.0}, 0),
+    ({"path_length": 1.5, "path_x": "a.h5", "dataset_x": "/x"}, 1),
+], ids=["lone_path_keys", "one_pair_and_a_path_parameter"])
+def test_verify_counts_a_locator_only_as_a_pair(capsys, ent_metadata, locators):
+    """A locator is path_<t> + dataset_<t>; a lone path_* key is a parameter (#18)."""
+    verify_registration_http(_root_with_one_entity(ent_metadata), ["T"])
+    out = capsys.readouterr().out
+    assert f"metadata keys: {len(ent_metadata)} (locators: {locators})" in out
+
+
 def test_verify_entity_of_a_dataset_with_artifacts_and_no_children_warns(capsys):
     """The manifest declares artifacts but the entity has no array children: warn, even
     though no metadata key looks like a locator."""

@@ -49,6 +49,8 @@ def query_catalog(client, artifact_type, limit=None):
             the root client.
         artifact_type: Artifact type string (e.g. "mh_powder_30T", "rixs").
             Must match the 'type' column used when the manifest was generated.
+            An entity is included when ``locate`` finds this type on it, so a
+            parameter that merely starts with ``path_`` does not count.
         limit: If set, stop after collecting this many rows. Useful for
             testing or previewing large catalogs.
 
@@ -58,12 +60,11 @@ def query_catalog(client, artifact_type, limit=None):
         index_{type}) are included alongside physics parameters.
         Returns an empty DataFrame if no matching entities are found.
     """
-    path_col = f"path_{artifact_type}"
     rows = []
     for ent_key, node in client.items():
-        meta = dict(node.metadata)
-        if path_col not in meta:
+        if artifact_type not in locate(node):
             continue
+        meta = dict(node.metadata)
         meta["ent_key"] = ent_key
         rows.append(meta)
         if limit is not None and len(rows) >= limit:
@@ -112,12 +113,16 @@ def locate(entity):
     registration stamps on every entity. ``file`` is relative to the dataset's directory
     (the caller knows where that is mounted); ``index`` is the row for batch sources,
     else None.
+
+    A locator is the pair ``path_<type>`` and ``dataset_<type>``; ``index_<type>`` is
+    optional. A ``path_*`` key without its ``dataset_*`` is an ordinary parameter (a
+    table column such as ``path_p_travel_s``) and is not returned.
     """
     meta = dict(entity.metadata)
     out = {}
     for k, v in meta.items():
-        if k.startswith("path_"):
-            t = k[len("path_"):]
+        t = k[len("path_"):]
+        if k.startswith("path_") and f"dataset_{t}" in meta:
             idx = meta.get(f"index_{t}")
             out[t] = {"file": v, "dataset": meta[f"dataset_{t}"],
                       "index": None if idx is None else int(idx)}

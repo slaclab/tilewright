@@ -53,6 +53,7 @@ from tiled.structures.array import ArrayStructure, BuiltinDtype
 from tiled.structures.core import StructureFamily
 from tiled.structures.data_source import Asset, DataSource, Management
 
+from .client import locate
 from .utils import (
     FINGERPRINT_KEY,
     make_artifact_key,
@@ -627,9 +628,8 @@ def _verify_dataset(client, ds_key, artifact_rows=None):
     ent_key = ent_keys[0]
     ent = ds[ent_key]
     ent_meta = dict(ent.metadata)
-    path_keys = [k for k in ent_meta if k.startswith("path_")]
     print(f"\nEntity '{ent_key}':")
-    print(f"  metadata keys: {len(ent_meta)} (locators: {len(path_keys)})")
+    print(f"  metadata keys: {len(ent_meta)} (locators: {len(locate(ent))})")
     if artifact_rows == 0:
         # The manifest has no entity artifacts (a table source, by contract), so there
         # are no array children to probe. A metadata key's name decides nothing here: a
