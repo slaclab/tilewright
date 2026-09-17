@@ -391,9 +391,16 @@ class GroupsSource(_HDF5SourceBase):
         "(0-dim or of size 1) there are given to every sibling, and any other member, a "
         "1-D dataset of another length included, is skipped without a message, as in "
         "'batch'. Under 'from: attrs' the attributes of such a group are given to every "
-        "sibling. With 'recursive: true' the subgroups of such a group are read too, "
-        "excluded ones included, but never an entity group, of this sibling set or of "
-        "another: each entity's own values stay its own. 'null' declares none.",
+        "sibling. With 'recursive: true' the subgroups of such a group are read too, but "
+        "the reader never goes into a group that 'entity_group' matched or into an entity "
+        "group, whichever sibling set it belongs to: their values belong to their own "
+        "entities, in the order of their own names. So '../..' under '/*' reads what lies "
+        "above the matched groups and nothing inside them, and a group inside a matched "
+        "group is read only through a path that starts at that matched group or inside it "
+        "('..', '../calibration'). The group a path names is read whatever it is, an "
+        "entity group included: under a path to one detector (`../<detector>`), its "
+        "scalars go to every sibling, and each of its 1-D datasets whose length is the "
+        "number of siblings is split among them. 'null' declares none.",
     )
 
     @field_validator("exclude_groups")
