@@ -141,6 +141,46 @@ Why `..` and not a path from the file root: each site has its own `calibration`,
 fixed path can name only one of them. Why a glob and not a number of levels: a depth
 cannot leave out `calibration`, which sits at the same level as the detectors.
 
+## What a `table` can and cannot express
+
+A `table` registers rows. Each row is an entity carrying every column as metadata, and
+that is all: **no array under a table is served through the catalog**, whoever stores it.
+
+That matters for the layout where a per-row table sits beside arrays stacked in HDF5, one
+row of a pack per entity, with a column that names the pack and the row
+(`waveform_ref: pack_02#391`). None of the four sources serves it: `batch` reads the pack
+but not the table that indexes it, and `table` reads the table but serves no array. What
+you can do:
+
+- **Register the table and keep the pointer column.** Readers query the metadata, then
+  open the pack themselves; name the pack directory in the dataset `metadata` so they know
+  where to look.
+- **Restack first**, one entity per file (`files`) or one entity per leading-axis row
+  (`batch`), and the arrays come with the parameters.
+
+Serving those arrays from the table itself — a locator template per row, as the read paths
+already understand `path_`/`dataset_`/`index_` — would need a contract change, and is not
+in this one.
+
+### Writing the table yourself
+
+The producer usually ships the table. When there is none, and the data is not HDF5, the
+author writes one, and it is an ordinary part of the dataset:
+
+- **What it needs:** one column whose values are unique per entity (or a few columns that
+  are unique together, `id: [specimen, replicate]`), whatever a reader must be able to
+  query, and a column naming the file or object each row stands for, which `locator` turns
+  into a URL.
+- **Where it may live:** anywhere under `directory`; `path` names it relative to that
+  root. Beside the data is the usual choice, because the YAML lives there too, under
+  `.tilewright/`.
+- **What it costs:** a file the producer does not maintain. It is data you have derived, so
+  say in `description` that you wrote it and from what, and regenerate it when the data
+  changes — nothing checks that the table still matches the files.
+
+The rest of a table's rules — every column kept, an empty header cell, a null cell in a
+composite `id` — is in [the `table` fields](../reference/dataset-yaml.md#sourcetable).
+
 ## Why the tag owns the keys
 
 The source is written as one tagged block, `source: {batch: {...}}`, and each tag accepts

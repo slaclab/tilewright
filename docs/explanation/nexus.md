@@ -51,6 +51,34 @@ For `params.groups`, names become metadata prefixes. A field `Ei` in the group n
 Nothing in this mapping names a NeXus class. A plain HDF5 file with scalars in
 `/settings/` and `/sample/` receives the same treatment.
 
+## Files that do not follow the modern conventions
+
+The mapping above assumes `@default` attributes and a group-level `@signal`. Two shapes
+common in published files do not have them.
+
+**The signal is marked on the field.** Older writers set no `@default` anywhere and mark
+the signal on the dataset instead: `<field>@signal = "1"`, with `<field>@axes` a single
+colon-separated string of the axis field names, `"frame:row:column"`. Read the
+group's datasets, take the one whose own `signal` attribute is set as the artifact, and
+split its `axes` string on `:` for the axis fields. Nothing in TileWright reads either
+convention — the YAML names HDF5 paths — so the file registers exactly as a modern one
+does once you have found the paths.
+
+**One entity, several files.** A header file, a master file and image files joined by
+external links and a virtual dataset are one measurement. Make the **file the `pattern`
+matches** the entity — the one from which every path resolves, usually the header — and
+write the artifact and params paths as that file sees them: h5py follows an external link
+when `tilewright manifest` scans, so a sibling file's group can be a `params.groups` entry
+like any other. Two things to check:
+
+- **Only the matched file is stamped.** `file_size` and `file_mtime` describe it alone, so
+  a regenerated image file is not reported as
+  [changed on disk](../reference/manifest.md#snapshot-semantics).
+- **A virtual dataset has its own dtype.** It can be narrower than the sources it maps
+  (a `uint16` layout over `uint32` images clips every value above 65535), and that dtype is
+  what the manifest records and every read returns. `dset.is_virtual` and
+  `dset.virtual_sources()` show what a signal is really made of.
+
 ## Deliberate boundaries
 
 - **`NXdata` is not a catalog container.** Its signal, axes, and error arrays are sibling
