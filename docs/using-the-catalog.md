@@ -24,7 +24,7 @@ c = from_uri("<URL>", api_key="<API_KEY>")
 list(c)                                   # dataset keys: ['BROAD_SIGMA', 'LCLS_RIXS_STATIC', ...]
 ds = c["BROAD_SIGMA"]                     # a dataset container
 dict(ds.metadata)                         # facets: method, material, contact, description, ...
-len(ds)                                   # entity count (+ one child per shared axis)
+len(ds)                                   # children: the entities + one array per shared axis
 ```
 
 Dataset containers sit at the root and everything else is beneath one, so always index
@@ -41,7 +41,16 @@ as array children of the dataset, keyed by their `type` and listed in its metada
 shared = {k.removeprefix("shared_dataset_") for k in ds.metadata if k.startswith("shared_dataset_")}
 eloss = ds["eloss"][:]                    # (151,), one read, not one per entity
 entities = [k for k in ds if k not in shared]
+len(entities)                             # the entity count
 ```
+
+Count entities from that list rather than with `len(ds)`. `len()` is exact when it is the
+first thing you ask a container, but the Tiled client (0.2.18) caches the *lower bound*
+that a search page reports — 101, its exact-count limit — for a second after the container
+has been iterated or its `keys()` listed. A script that walks the keys and then calls
+`len(ds)` can read 101 for a dataset of eighteen hundred entities, and the same call a
+second later is right again. `len(entities)` is counted from keys you already hold, so it
+never lies.
 
 ## Search
 
