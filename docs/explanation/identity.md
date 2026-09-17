@@ -39,14 +39,20 @@ the source's `identity`:
 
 **`params`** (the default): a hash of the parameter *values*. The same physics is the same
 entity across re-registration and file moves, which is what a simulation sweep wants and
-what makes re-running `register` safe. A float is hashed at 12 significant digits, so
-noise past the twelfth digit is not a new entity, and values at any scale stay apart:
-times of 1e-13 s are as distinct as temperatures of 300 K. (A fixed number of decimal
-places would depend on the units an author chose: at 12 places, every value below 5e-13
-would hash as 0.0.) The cost is that two entities with identical parameters would
-collide, so `tilewright manifest` refuses that, names the colliding entities, what differs
-between them and the parameters they share, and offers the two fixes: add a
-distinguishing parameter, or switch identity.
+what makes re-running `register` safe. The cost is that two entities with identical
+parameters would collide, so `tilewright manifest` refuses that, names the colliding
+entities, what differs between them and the parameters they share, and offers the two
+fixes: add a distinguishing parameter, or switch identity.
+
+A float is hashed at 12 decimal places, or at 12 significant digits when that keeps more
+digits, which is below 0.1. So float noise such as `0.1 + 0.2` is not a new entity, times
+of 1e-13 s are as distinct as temperatures of 300 K, and timestamps in seconds a
+millisecond apart stay apart. (At 12 decimal places alone, every value below 5e-13 would
+hash as 0.0.) From about 1e4 up, 12 decimal places are more digits than a float64 holds,
+so there any difference in the stored value is a new entity. Two floats that are equal at
+the kept precision are one entity: `2.0` and `2.0000000000001`, or `4e-15` and
+`4.0000000000001e-15`. Entities that differ only in such values collide, and the report
+lists those values as what differs; the fixes are the same two.
 
 **`provenance`**: a hash of where the entity came from, the file path relative to the
 directory plus its row or group. It never collides unless `pattern` or `entity_group`
