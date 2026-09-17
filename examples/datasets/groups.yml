@@ -4,6 +4,7 @@
 #   └── /samples/
 #       ├── sample_000/
 #       │   ├── spectrum      (151, 40)   → artifact; `dataset` is relative to the entity group
+#       │   ├── energy        (151,)      → a copy per sample; shared axis if they all agree
 #       │   └── params/
 #       │       ├── tenDq     ()          → parameter
 #       │       └── F2_dd     ()
@@ -48,3 +49,11 @@ source:
 
 artifacts:
   - {type: spectrum, dataset: spectrum}
+
+# An axis every sample holds its own copy of. The path is absolute, so it names one of
+# those copies; `tilewright manifest` checks the copy in every other entity group, in
+# every file, against it, and refuses the dataset when two differ — an energy that varies
+# per sample is an artifact, not a shared axis. A path beside the entity groups
+# (/samples/energy) is one copy per file instead. Uncomment for a layout that holds it:
+# shared:
+#   - {type: energy, dataset: /samples/sample_000/energy}

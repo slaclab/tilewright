@@ -327,6 +327,40 @@ class TestGroups:
             assert list(ent.columns) == ["uid", "source_group",
                                          "gain" if group == "/" else "tenDq"]
 
+    def test_shared_axis_copies_in_every_entity_group_must_agree(self, tmp_path):
+        """#37: the entity groups of one file each hold their own copy, and a shared entry
+        can name only one of them. Comparing files alone compares none of the copies, so a
+        wrong claim of sharedness registered silently and every other entity was served an
+        axis that was not its own."""
+        cfg = groups_dataset(tmp_path)
+        cfg["shared"] = [{"type": "axis", "dataset": "/samples/sample_0/axis"}]
+        samples = tmp_path / "grouped" / "samples.h5"
+        with h5py.File(samples, "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}"]["axis"] = np.array([0.0, 1.0, 2.0])
+
+        ent, art = run(tmp_path, cfg)
+        shared = art[art["uid"].isna()]
+        assert len(ent) == 3 and len(shared) == 1
+        assert shared.iloc[0]["dataset"] == "/samples/sample_0/axis"
+
+        with h5py.File(samples, "a") as f:            # a sibling copy that is not the same
+            f["samples/sample_1/axis"][...] = np.array([9.0, 9.0, 9.0])
+        with pytest.raises(ValueError, match=r"shared axis 'axis'.*differs between "
+                                             r"samples\.h5:/samples/sample_0/axis and "
+                                             r"samples\.h5:/samples/sample_1/axis"):
+            run(tmp_path, cfg, name="ds2")
+
+    def test_a_shared_axis_beside_the_entity_groups_is_one_copy_per_file(self, tmp_path):
+        """A path outside the entity groups is not multiplied by them: one copy per file,
+        as under the other tags."""
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            f["axis"] = np.array([0.0, 1.0, 2.0])
+        cfg["shared"] = [{"type": "axis", "dataset": "/axis"}]
+        _, art = run(tmp_path, cfg)
+        assert list(art[art["uid"].isna()]["dataset"]) == ["/axis"]
+
 
 # ---------------------------------------------------------------------------
 # nested entity groups (ADR-0011, #11)

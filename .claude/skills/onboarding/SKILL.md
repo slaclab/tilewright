@@ -91,11 +91,15 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/operator_note` —
   and `recursive` for subgroups), and any **shared axes** (arrays
-  *identical* in every file → `shared:`, if you serve them at all — the YAML lists what the
-  dataset serves, not what the file holds, so a constant placeholder nobody would read is
-  simply left out; an axis that varies per entity is an artifact, and an array that is not
-  an axis at all, a lookup or normalization table the whole dataset shares, belongs in
-  `shared:` too).
+  *identical for every entity* → `shared:`, if you serve them at all — the YAML lists what
+  the dataset serves, not what the file holds, so a constant placeholder nobody would read
+  is simply left out; an axis that varies per entity is an artifact, and an array that is
+  not an axis at all, a lookup or normalization table the whole dataset shares, belongs in
+  `shared:` too). The entry names one copy by its absolute path, and `manifest` checks
+  every copy the source holds against it: under `files`/`batch` that path in each file,
+  under `groups` the same path inside **each entity group**, so one file with four entity
+  groups is checked four times. A differing copy is refused, naming both — you do not have
+  to digest the arrays by hand first.
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
   array attribute comes through as a list, and `docs/reference/manifest.md` says which
   values are left out and what a `batch` row's copy of them describes. A
