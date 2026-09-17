@@ -185,6 +185,11 @@ two forms disagree.
   number of entries. The count after expansion is the one `tilewright manifest` prints.
 - The artifact count formula gains a term: a group entry adds its matching members per
   entity (`reference/errors.md`, Expected counts).
+- A string member is included like any scalar, and registration refuses a
+  variable-length string with an artifact error (Tiled serves no `object` arrays; a
+  local server refused one through both transports), as it always did for a `dataset`
+  entry naming one. The `group` description tells the author to leave it out with
+  `members`; skipping strings silently was not part of the decision.
 - A member whose name gives a type that another entry also gives stops the manifest
   rather than dropping one; the fix is a prefix in the template (`dark_{name}`) or a
   narrower `members`.
