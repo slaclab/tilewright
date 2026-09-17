@@ -69,8 +69,8 @@ identity appears in their YAML unless you write `identity: provenance`.
 **Parameters from the location count too.** A value taken from an entity's path with
 `params.location` ([sources](sources.md#parameters-from-the-location)) is a parameter
 like the ones read inside the file, and `params` identity hashes it with them. Two files
-with the same contents whose names carry different years are two entities. The value
-follows the name, though: renaming a file changes it, and with it the entity's key.
+with the same contents whose names carry different run numbers are two entities. The
+value follows the name, though: renaming a file changes it, and with it the entity's key.
 Moving the whole directory changes nothing, because the location is relative to
 `directory`.
 

@@ -16,6 +16,7 @@ from tilewright.contract import (
     SOURCE_TAGS, TOP_LEVEL_KEYS, ArtifactSpec, ContractError, DatasetConfig, Identity,
     ParamsSpec, Source, load_dataset, slugify_key, source_fingerprint,
 )
+from tilewright.manifest import _from_text
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
@@ -112,6 +113,30 @@ class TestAccepted:
             cfg, warnings = load_dataset(raw)
             assert warnings == [] and cfg.source.body.params.location == location
             assert cfg.source.identity == Identity.params
+
+    def test_params_location_description_examples_do_what_it_says(self):
+        """The examples in the description are the ones authors copy: each validates, and
+        each gives the values the description states, on the locations it shows."""
+        doc = ParamsSpec.model_fields["location"].description
+        examples = re.findall(r"`location: '([^']+)'`", doc)
+        assert len(examples) == 3
+        for location in examples:
+            raw = files_cfg(source={"batch": {"directory": "/d",
+                                              "params": {"location": location}}})
+            assert load_dataset(raw)[0].source.body.params.location == location
+
+        def found(location, text):
+            return {k: _from_text(v) for k, v in re.search(location, text).groupdict().items()}
+
+        files, one_batch, several = examples
+        assert "`cell07/sweep_250mV.h5`" in doc and "gives cell 7 and bias_mV 250" in doc
+        assert found(files, "cell07/sweep_250mV.h5") == {"cell": 7, "bias_mV": 250}
+        assert "`shots/part_03.h5:41`" in doc and "matches several files" in doc
+        assert found(one_batch, "shots/part_03.h5:41") == {"shot": 41}
+        assert found(several, "shots/part_03.h5:41") == {"part": 3, "shot": 41}
+        # the row alone is the same in two files; with the file part it is not
+        assert found(one_batch, "part_00.h5:0") == found(one_batch, "part_01.h5:0")
+        assert found(several, "part_00.h5:0") != found(several, "part_01.h5:0")
 
     def test_params_location_defaults_to_none(self):
         cfg, _ = load_dataset(files_cfg())

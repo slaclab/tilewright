@@ -757,6 +757,30 @@ class TestLocation:
         assert list(zip(ent["batch"], ent["row"])) == [(b, i) for b in range(2)
                                                        for i in range(3)]
 
+    def test_several_batch_files_need_the_file_part_too(self, tmp_path):
+        """Every file's rows start again at 0. With nothing else per row and nothing that
+        differs per file, the row number alone gives two files' rows the same parameters;
+        capturing part of the file path as well tells them apart. The location description
+        says so."""
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                del f["params"]
+        cfg["source"]["batch"]["params"] = {"location": r":(?P<shot>\d+)$"}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[0] == ("BATCH_TEST: 6 entities share 3 uids; every entity must be "
+                            "distinct.")
+        assert lines[1].endswith(": batch_0/sim.h5:0, batch_1/sim.h5:0")
+        assert '    equal: {"shot": 0}' in lines
+        cfg["source"]["batch"]["params"]["location"] = (
+            r"batch_(?P<part>\d+)/sim\.h5:(?P<shot>\d+)$")
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert list(ent.columns) == ["uid", "part", "shot"]
+        assert list(ent["uid"]) == [params_uid("BATCH_TEST", {"part": b, "shot": i})
+                                    for b in range(2) for i in range(3)]
+
     def test_an_entity_whose_location_does_not_match_is_named(self, tmp_path):
         cfg = bci_dataset(tmp_path)
         (tmp_path / "bci" / "2012").mkdir()
