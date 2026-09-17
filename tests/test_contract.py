@@ -5,15 +5,20 @@ trip into a DatasetConfig. The concept budget at the bottom pins the contract's 
 that growth fails a test, not a review.
 """
 
+from pathlib import Path
+from typing import get_args
+
 import pytest
+from ruamel.yaml import YAML
 
 from tilewright.contract import (
-    SOURCE_TAGS, TOP_LEVEL_KEYS, ContractError, DatasetConfig, Identity, load_dataset,
-    slugify_key, source_fingerprint,
+    SOURCE_TAGS, TOP_LEVEL_KEYS, ArtifactSpec, ContractError, DatasetConfig, Identity,
+    ParamsSpec, Source, load_dataset, slugify_key, source_fingerprint,
 )
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
+EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
 
 
 def files_cfg(**over):
@@ -197,6 +202,34 @@ class TestKeyAndFingerprint:
         b, _ = load_dataset(raw)
         assert source_fingerprint(a) != source_fingerprint(b)
 
+    # Computed on origin/main b268731. A contract change must not re-fingerprint an
+    # existing YAML: a changed value here means registered datasets would be refused.
+    GOLDEN = {"batch": "2577590f34841be2", "files": "5dd61ef0e916076d",
+              "files_nexus": "05ba87a48b5c5ce7", "groups": "983ce13fccafbc8e",
+              "table": "fb36ed8c86a417f5"}
+    GOLDEN_VARIANTS = [
+        ("files", {"identity": "provenance"}, "612f65facb4ab85c"),
+        ("files", {"params": None}, "3fdd1ec6ea7990f5"),
+        ("batch", {"identity": "provenance"}, "e53377692c4c971d"),
+        ("groups", {"identity": "provenance"}, "26489812688e5df3"),
+        ("groups", {"params": None}, "6e9343c078db0fbd"),
+        ("files", {"server_base_dir": "/srv/data"}, "65515a648b79b940"),
+    ]
+
+    def test_fingerprint_of_every_example_is_pinned(self):
+        found = {}
+        for path in sorted(EXAMPLES.glob("*.yml")):
+            cfg, _ = load_dataset(YAML().load(path.read_text()))
+            found[path.stem] = source_fingerprint(cfg)
+        assert found == self.GOLDEN
+
+    @pytest.mark.parametrize("stem, override, expected", GOLDEN_VARIANTS)
+    def test_fingerprint_of_identity_and_params_variants_is_pinned(self, stem, override,
+                                                                   expected):
+        raw = YAML(typ="safe").load((EXAMPLES / f"{stem}.yml").read_text())
+        raw["source"][stem].update(override)
+        assert source_fingerprint(load_dataset(raw)[0]) == expected
+
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()
         raw["source"]["files"]["server_base_dir"] = "/mnt/runs"
@@ -248,7 +281,22 @@ class TestVocabulary:
 # concept budget: growing the contract is a deliberate act
 # ---------------------------------------------------------------------------
 
+def _keys(model):
+    return {field.alias or name for name, field in model.model_fields.items()}
+
+
 def test_concept_budget():
     assert set(DatasetConfig.model_fields) == TOP_LEVEL_KEYS == {
         "label", "key", "metadata", "source", "artifacts", "shared"}
     assert SOURCE_TAGS == ("files", "batch", "groups", "table")
+    tags = {tag: next(a for a in get_args(Source.model_fields[tag].annotation)
+                      if a is not type(None)) for tag in SOURCE_TAGS}
+    common = {"directory", "server_base_dir", "identity"}
+    assert {tag: _keys(model) for tag, model in tags.items()} == {
+        "files": common | {"pattern", "params"},
+        "batch": common | {"pattern", "params"},
+        "groups": common | {"pattern", "entity_group", "params"},
+        "table": common | {"path", "id", "locator"},
+    }
+    assert _keys(ParamsSpec) == {"group", "groups", "from", "recursive", "exclude"}
+    assert _keys(ArtifactSpec) == {"type", "dataset", "optional"}
