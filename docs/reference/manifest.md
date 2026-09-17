@@ -51,23 +51,24 @@ one note naming it, and the run finishes. A query on that key then compares text
 parameter that lands there is usually worth fixing in the data
 ([the note](errors.md#tilewright-manifest-the-data)).
 
-## Which attribute values are carried
+## What an attribute describes
 
-An array's own attributes become that artifact node's metadata, and a parameter field's
-attributes become its `<field>_<attr>` labels. Both keep **text and numbers only**: a
-`str`, an `int` or a `float` value is carried, and an array-valued attribute, a boolean and
-an empty attribute (a null dataspace) are dropped without a message, as is HDF5's
-dimension-scale bookkeeping (`CLASS`, `NAME`, `DIMENSION_LIST`, `DIMENSION_LABELS`,
-`REFERENCE_LIST`). Nothing interprets a value: a netCDF-4 writer's `_Netcdf4Dimid` is an
-int, so it is carried like any other number, and a CF `scale_factor` is carried beside the
-stored integers it would scale, unapplied.
+The two tables above say which attribute *values* are carried. Two things about what they
+*mean* are nowhere checked, and an author reads them the wrong way round easily:
 
-So an attribute that lists an array's dimensions or bin edges does not reach the catalog,
-while a `long_name` does. Under a `batch` source the attributes are the **stacked**
-dataset's, one copy on every row, so one that describes its shape describes the stack, not
-the per-entity `shape` in the row beside it. Parameters read with
-[`params.from: attrs`](dataset-yaml.md#params) are the exception: there every attribute is
-a parameter, whatever its value holds.
+- **Nothing interprets a value.** A CF `scale_factor` / `add_offset` pair rides along
+  beside the stored integers it would scale, unapplied, and a `valid_range` is carried
+  without anything ever being compared with it. An attribute is a label the catalog keeps,
+  never an instruction it follows.
+- **Under a `batch` source the attributes are the stacked dataset's.** One array is split
+  into one row per entity, but its attributes are read once, from the array that was split,
+  and the same copy lands on every row. So an attribute naming the stack's dimensions
+  (`["shot", "row", "col"]` on a stack whose rows are `(4, 3)`) describes the stack, not
+  the `shape` in the row beside it, which has already lost the leading axis.
+
+An attribute with no value at all — a null dataspace, which netCDF writers use for an
+empty one — is left out of a label and of an artifact's metadata. Under
+[`params.from: attrs`](dataset-yaml.md#params) it is a parameter whose value is null.
 
 ## Types and nulls
 
