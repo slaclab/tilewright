@@ -1050,8 +1050,11 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
     - ``groups``: the named path lies inside one entity group, so each entity group of
       each file holds its own copy, at the same path relative to its own group. One file
       with four entity groups holds four copies, and comparing files alone would compare
-      none of them. A path outside the entity groups (a calibration group beside them) is
-      one copy per file, as under the other tags.
+      none of them. The entity groups of **every** file are read before the first copy, so
+      the path under the group is found once and read in each file's own groups: a second
+      file whose groups carry other names is compared in those, not at a named path it
+      does not hold. A path outside the entity groups (a calibration group beside them, or
+      one ``exclude_groups`` leaves out) is one copy per file, as under the other tags.
 
     ``source`` is the YAML's source block; without it every tag reads as ``files``, which
     is what a caller that hands over a file list and nothing else means.
@@ -1059,22 +1062,32 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
     rows, seen, recorded = [], {}, set()
     if not shared:
         return rows
-    grouped = source is not None and source.tag == "groups"
-    pattern = (source.body.entity_group or "").strip("/") if grouped else ""
-    excluded = source.body.exclude_groups if grouped else ()
+    bases = {}  # each file's entity groups, all of them read before any copy is compared
+    if source is not None and source.tag == "groups":
+        pattern = (source.body.entity_group or "").strip("/")
+        excluded = source.body.exclude_groups
+        for h5_path in paths:
+            with h5py.File(h5_path, "r") as f:
+                bases[h5_path] = [f"{base}/{n}" if base else n
+                                  for base, names in _entity_groups(f, pattern, excluded)
+                                  for n in names]
+    # the path the entry names under its entity group, found in whichever file holds that
+    # group and then read in the entity groups of every file; None for a path beside them
+    # (and under every other tag), which is the one named path, once per file.
+    tails = []
+    for ax in shared:
+        named = ax.dataset.lstrip("/")
+        inside = next((b for groups in bases.values() for b in groups
+                       if named.startswith(f"{b}/")), None)
+        tails.append(named[len(inside) + 1:] if inside else None)
     for h5_path in paths:
         rel = h5_path.relative_to(root).as_posix()
         with h5py.File(h5_path, "r") as f:
-            bases = [f"{base}/{n}" if base else n
-                     for base, names in _entity_groups(f, pattern, excluded)
-                     for n in names] if grouped else []
-            for ax in shared:
+            for ax, tail in zip(shared, tails):
                 named = ax.dataset.lstrip("/")
-                # the entity group the entry names a copy in, and the same path in each of
-                # its siblings; outside them (and under every other tag) the one named path
-                inside = next((b for b in bases if named.startswith(f"{b}/")), None)
-                copies = ([named] + [f"{b}/{named[len(inside) + 1:]}"
-                                     for b in bases if b != inside]) if inside else [named]
+                copies = [named] + ([] if tail is None else
+                                    [p for p in (f"{b}/{tail}" for b in bases[h5_path])
+                                     if p != named])
                 for p in copies:
                     if p not in f or not isinstance(f[p], h5py.Dataset):
                         continue
