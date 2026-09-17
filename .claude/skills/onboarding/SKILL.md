@@ -97,8 +97,8 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   an axis at all, a lookup or normalization table the whole dataset shares, belongs in
   `shared:` too).
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
-  array attribute comes through as a list, and `docs/reference/manifest.md` ("Which
-  attribute values are carried") says what is left out instead. A
+  array attribute comes through as a list, and `docs/reference/manifest.md` says which
+  values are left out and what a `batch` row's copy of them describes. A
   size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
   So does a netCDF-4 dimension placeholder that has no coordinate variable (a dataset
   whose `NAME` attribute begins `This is a netCDF dimension`, value `0.0`): `exclude` it —
