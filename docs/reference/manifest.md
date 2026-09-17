@@ -51,12 +51,52 @@ one note naming it, and the run finishes. A query on that key then compares text
 parameter that lands there is usually worth fixing in the data
 ([the note](errors.md#tilewright-manifest-the-data)).
 
+## Which attribute values are carried
+
+An array's own attributes become that artifact node's metadata, and a parameter field's
+attributes become its `<field>_<attr>` labels. Both keep **text and numbers only**: a
+`str`, an `int` or a `float` value is carried, and an array-valued attribute, a boolean and
+an empty attribute (a null dataspace) are dropped without a message, as is HDF5's
+dimension-scale bookkeeping (`CLASS`, `NAME`, `DIMENSION_LIST`, `DIMENSION_LABELS`,
+`REFERENCE_LIST`). Nothing interprets a value: a netCDF-4 writer's `_Netcdf4Dimid` is an
+int, so it is carried like any other number, and a CF `scale_factor` is carried beside the
+stored integers it would scale, unapplied.
+
+So an attribute that lists an array's dimensions or bin edges does not reach the catalog,
+while a `long_name` does. Under a `batch` source the attributes are the **stacked**
+dataset's, one copy on every row, so one that describes its shape describes the stack, not
+the per-entity `shape` in the row beside it. Parameters read with
+[`params.from: attrs`](dataset-yaml.md#params) are the exception: there every attribute is
+a parameter, whatever its value holds.
+
+## Types and nulls
+
+Each column has one type across every row, so the widest value in it wins:
+
+- **Floats are `float64`.** A `float32` dataset is written as `float64`; the uid is
+  computed from the value as read, before the table exists.
+- **A null widens a column of integers to floats**, the same rule as for an entity that
+  lacks a parameter ([the data model](../explanation/data-model.md#entities-with-different-parameters)).
+  Two cases are easy to miss. `index` is an integer row number, but a dataset that also
+  declares a `shared` axis has rows with no `index`, so the column is `float` (`0.0`,
+  `1.0`); registration writes `index_<type>` back as an `int`, and slices land on the row
+  it names. And an attribute that only some arrays carry — an `int64` on one artifact type
+  and absent on another — becomes a float column, so it reads back as `7.0`.
+
 ## Schema metadata
 
 Both files carry the same keys in their Parquet schema metadata: `generated_at`,
 `generator`, `key`, `source`, `identity`, `fingerprint`, `config_hash`, `entity_count`,
 `artifact_count`, `shared_count`. `register` compares `fingerprint` with the YAML's before
 it connects, so a manifest generated from a source block the YAML no longer has is refused.
+
+`config_hash` is the sha256 of the YAML file as it was when the manifest was built. Nothing
+compares it: it is a record of which text produced these rows. So editing a comment, or any
+line outside `source`, does not oblige a new manifest — the fingerprint is unchanged and
+`register` proceeds. What does need one is a change to the data or to the `source` block
+(the three procedures are in
+[How to publish a dataset](../ONBOARDING.md#4-register-the-dataset)); a changed
+`description` or facet is picked up by `register --update` from the YAML, not from here.
 
 ## Snapshot semantics
 
@@ -68,6 +108,11 @@ The manifest is therefore a snapshot, and registration trusts it.
   surfaces as HTTP 500 on read rather than as silently wrong data. `tilewright manifest`
   rebuilds the snapshot; it is idempotent.
 - A manifest with no `shape`/`dtype` columns is rejected at registration.
+- `file_size` and `file_mtime` describe the file in the `file` column — the one the source
+  matched. An array that lives in another file, reached through an external link or as a
+  virtual dataset, is not stamped, so the `changed on disk` check
+  ([`register`](cli.md#tilewright-register)) never notices a change to it. Where one entity
+  spans several files, rebuild the dataset after the linked files change.
 
 ## Entity metadata written at registration
 
@@ -121,3 +166,19 @@ its first part, so that part counts), and the message names it
 - A `group` entry reserves the names of each type it expands to, in the entities that
   have that member.
 - Other names with these prefixes, such as `path_length`, are ordinary parameters.
+
+Two more names belong to the manifest itself, in every dataset: **`uid` and
+`source_group`**, the columns of `entities.parquet` that are not parameters. The contract
+refuses them as a named group of `params.location`, and so a name that starts with `_`,
+which the manifest keeps for its own bookkeeping. A field of that name read out of a file
+takes the column rather than sitting beside it, so rename it in the file or leave it out
+with `params.exclude`.
+
+Nothing else is reserved for an entity parameter. A parameter called `index`, `size`,
+`type`, `shape`, `dtype`, `file`, `dataset` or `event` is an ordinary column of
+`entities.parquet` and reads back under its own name. Those names are reserved one level
+down, for an **array's** attributes: an attribute called `uid`, `type`, `file`, `dataset`,
+`index`, `shape`, `dtype`, `file_size` or `file_mtime` would overwrite its own row in
+`artifacts.parquet`, so it is dropped with one warning
+([the message](errors.md#tilewright-manifest-the-data)) and the array is registered
+without it.
