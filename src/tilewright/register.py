@@ -433,7 +433,10 @@ def _register_artifact(container, art_row, art_columns, base_dir, server_base_di
     the children but opening for no one, and a later incremental run would skip that key
     for ever (#38). So a failed creation drops whatever the server kept for the key before
     the exception goes up, and the run leaves nothing half-created behind it. Only a
-    removal that itself fails changes the exception, to say the node is still there.
+    removal that itself fails changes the exception, to say the node is still there. That
+    removal is safe because it only ever runs for a key this call was asked to create: a
+    caller registers an artifact whose key the entity does not hold yet, so what the undo
+    drops is what this call left. Keep it that way if a caller ever stops filtering.
     """
     art_key = make_artifact_key(art_row)
     data_shape = json.loads(art_row["shape"])
