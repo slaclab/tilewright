@@ -112,13 +112,14 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   with `..`.** `entity_group: "/*"` makes every `/<site>/<detector>` an entity;
   `exclude_groups: [calibration]` leaves out a sibling group that is not one;
   `params: {groups: {calibration: ../calibration}}` reads it for each detector. Name
-  such a group in its own path: with `recursive: true`, a path above the matching groups
-  (`../..`) reads nothing inside them. `params: {group: ..}` gives each entity its element of a 1-D array beside the groups
-  whose length is the number of sibling groups, in sorted name order: check that the
-  names are zero-padded (`scan_10` sorts before `scan_2`) and that the length matches
-  after `exclude_groups`, or the array is skipped. When siblings read the same values,
-  capture the group names with `params.location`. Entities that lack a parameter get
-  null for it. Count = the subgroups of every matching group, less the excluded ones.
+  each such group in its own path: `recursive: true` and a path that starts with `..`
+  are a contract error in one params block. `params: {group: ..}` gives each entity its
+  element of a 1-D array beside the groups whose length is the number of sibling groups,
+  in sorted name order: check that the names are zero-padded (`scan_10` sorts before
+  `scan_2`) and that the length matches after `exclude_groups`, or the array is skipped.
+  When siblings read the same values, capture the group names with `params.location`.
+  Entities that lack a parameter get null for it. Count = the subgroups of every
+  matching group, less the excluded ones.
 - **A `table` has no `identity` key: its `id` is the identity.** Check that the `id`
   column is unique (`df[col].is_unique`). If no single column is, list several,
   `id: [specimen, replicate]`, and say in a comment which rows needed the extra column. If no

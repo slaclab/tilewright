@@ -42,22 +42,27 @@ number of sibling entity groups: the subgroups of the same matching group, after
   as in `batch`.
 - Under `from: attrs` the group's attributes are given to every sibling; an array
   attribute is not split.
-- With `recursive: true` the reader starts at the group the path names and never goes
-  into a matching group or an entity group of the file, whichever sibling set it
-  belongs to. A group is known by the HDF5 object it is (`h5py` object ids), not by the
-  path it was opened through, so a soft link or a second hard link to such a group is
-  not followed either.
-  - `../..` under `"/*"` reads what lies above the matching groups and nothing inside
-    any of them: no detector group, and no `calibration` group, of any site.
-  - A group inside a matching group is read only through a path that starts at that
-    matching group or inside it: `..` with `recursive: true` reads the excluded groups
-    beside the entities, and `../calibration` reads one.
-- The group a path names is read as written, whatever it is: an excluded group, a
-  matching group of another set (`../../south`), or an entity group (`../det_a`). It is
+- The group a path names is read as written, whatever it is: an excluded group, a group
+  of another set (`../../south/calibration`), or an entity group (`../det_a`). It is
   read by the rule of every group reached through `..`: its scalars go to every sibling,
   and its 1-D datasets of length N are split among them, so under `../det_a` the
   detector `det_b` takes element 1 of `det_a`'s per-detector array.
 - Such a group is read once per sibling set, not once per entity.
+
+**No recursion from a `..` group.** A `groups` params block with `recursive: true` may
+hold no path that starts with `..`: a contract error that names the path, with the line
+`Fix: name each group you need under params.groups, without recursive`. `recursive` is
+one flag for the whole block (`ParamsSpec.recursive`), so recursion inside the entity
+group and a `..` group cannot be combined in one block either: the author names the
+entity group's subgroups too (`{own: /, readout: readout, calibration: ../calibration}`).
+Under `files` and `batch` the error for `..` itself comes first.
+
+**Recursion inside the entity group** stays. It never goes into an entity group or a
+matching group of the file, of any sibling set. A group is known by the HDF5 object it
+is (`h5py` object ids), not by the path it was opened through, so a soft link or a
+second hard link inside an entity group does not lead the reader into another entity,
+into another set's matching group, or back into its own entity group or matching
+group.
 
 **Different parameter sets.** Entities whose groups hold different parameters get null
 for the ones they lack. This is how `entities.parquet` always behaved, and it is now
@@ -109,6 +114,30 @@ granularity or with nothing to query:
 the reader gains no new reading mode: a group beside the entities is a small batch file
 whose rows are the siblings.
 
+**Why recursion from a `..` group is refused.** The decision does not mention
+`recursive`, and neither of its layouts sets it. Three reviews of
+[#21](https://github.com/slaclab/TileWright/pull/21) each found one more way for
+recursion from a `..` group to read another sibling set's values into an entity, and so
+into its uid, which cannot change once the entity is registered:
+
+1. *Round 1* (review 5236326435): the reader skipped only this set's siblings, so `../..`
+   under `"/*"` read the detector groups of the other sites into every entity.
+2. *Round 2* (review 5236686072): the reader skipped every entity group of the file, but
+   `../..` still read the other sites' `calibration` groups and split their 1-D arrays
+   by *this* site's N. An array in `/south/calibration` is ordered by south's detector
+   names, yet its element *i* went to north's *i*-th detector whenever the two sites had
+   as many detectors.
+3. *Round 3* (review 5237492552): the reader entered no matching group, but under
+   `"/run_*/scans"` a path above the point where two runs branch (`../../..`) still read
+   `/run_2/scan_energy`, beside run 2's matching group, and split it among run 1's scans.
+
+Each fix drew the boundary one level higher, and the next review found the case above
+it. The decision pairs an element with an entity "by position among the sibling group
+names", and only the author knows which group beside or above the entities holds values
+in that order; recursion cannot know it. Naming each group can. Inside the entity group
+no other entity is reached except through a link, and the object-id rule above closes
+that.
+
 **The arguments that lost.**
 
 - *An absolute params path* (`params: {group: /fixed_params}` resolved from the file
@@ -124,17 +153,27 @@ whose rows are the siblings.
   correctly. It lost because it has to guess where a number starts in a name
   (`run2_scan10`), text order is what `h5py` and every file browser show, and the entity
   order is the same text order everywhere else. The description warns instead.
-- *Recursion into this set's own matching group only* (skip every entity group and the
-  other sets' matching groups), as the second review of #21 suggested. `../..` would then
-  read this site's `calibration` too. It lost because the columns would differ per set
-  for one kind of value (`top.north.calibration.offset` on north, `top.south...` on
-  south, each null on the other), while `../calibration` gives every set the same
-  column; and "never into a matching group" is the same boundary for every set, where
-  "never into another set's" makes each set read a different subtree of one path.
-- *Refusing `recursive: true` on a path that starts with `..`.* It closes the leak with
-  no boundary to explain. It lost because `..` with `recursive: true` reads every
-  excluded group beside the entities without naming each one, and the boundary keeps
-  that safe; the decision's two layouts work under either rule.
+- *Recursion from a `..` group with a boundary.* It saves the author from naming each
+  group of a deep calibration tree. Each boundary below was tried or proposed on #21 and
+  lost to the refusal, because the next review found values it let through:
+  - *Skip every entity group of the file* (round 2). It still read the other sets'
+    excluded groups and split their arrays by this set's N (finding 2).
+  - *Also skip every matching group* (round 3). One boundary for every set, and it
+    closed finding 2, but it still read a branch above the matching groups that leads to
+    another set's matching group, and the arrays beside it (finding 3).
+  - *Also skip every group that holds a matching group* (the suggestion of review 3). It
+    closes finding 3, but it also stops `..` of a single-match pattern (`/entry/data`)
+    from reading `/entry`, where nothing can be mispaired; its refinement (skip the
+    groups that hold some matching groups but not all) is one more rule to explain, for
+    a use the decision never asked for.
+  - *Recurse into this set's own matching group only* (the suggestion of review 2). The
+    columns would differ per set for one kind of value (`top.north.calibration.offset`
+    on north, `top.south...` on south, each null on the other), while
+    `../calibration` gives every set the same column.
+
+  The refusal costs an author with a deep tree beside the entities one `groups` entry
+  per group. Nobody asked for recursion there, and three rounds showed that it cannot be
+  made safe cheaply.
 
 ## Consequences
 
@@ -164,30 +203,32 @@ whose rows are the siblings.
     only. HDF5 has no `..` link, so `run/../calibration` would look for a group named
     `..`, find none and read nothing without a message; a contract error says so
     before any file is opened.
-- The recursion rule goes beyond the decision too, which does not mention `recursive`.
-  The reviews of [#21](https://github.com/slaclab/TileWright/pull/21) found the leak it
-  closes in two steps, and each time the leaked values entered uids, which cannot change
-  once entities are registered:
-  - skipping only the siblings let `../..` read the detector groups of the other sites
-    into every entity;
-  - skipping every entity group still let `../..` read the other sites' `calibration`
-    groups and split their 1-D arrays by *this* site's N. An array in
-    `/south/calibration` is ordered by south's detector names, yet its element *i* went
-    to north's *i*-th detector whenever the two sites had as many detectors.
-
-  One boundary closes both: recursion never goes into a matching group or an entity
-  group. The decision pairs an element with an entity "by position among the sibling
-  group names", and those names are known only inside the matching group that holds
-  the entity, so nothing inside a matching group can be paired from above. The
-  decision's two layouts read the same as before, since neither sets `recursive`:
-  osti/1972213 names its excluded group (`../fixed_params`), which is the way to read
-  such a group, and zenodo/3528199 reads `..` itself.
+- The two recursion rules go beyond the decision too, which does not mention
+  `recursive`:
+  - *No recursion from a `..` group* (the Why section has the three findings behind it).
+    The decision's two layouts read the same as before, since neither sets
+    `recursive`: osti/1972213 names its excluded group (`../fixed_params`), and
+    zenodo/3528199 reads `..` itself. Tests turn every YAML that recursed from `..` in
+    the earlier rounds, and the case of the third review, into contract errors; two of
+    them also check that the Fix line's YAML gives each entity its own set's values.
+  - *Recursion inside an entity group follows no link to an entity group or a matching
+    group.* On `main` before this change, such a walk followed every link. A link to a
+    sibling entity group read that entity's values under the link's name, and now it
+    reads nothing; the uids of an already registered `groups` dataset with
+    `recursive: true` and such a link change. A link back to the entity's own group, or
+    to the group that holds it, made that walk run until it was killed, so no dataset
+    with one was ever manifested with `recursive: true`. A link cycle that passes
+    through no entity group or matching group still does not end; that is
+    [#29](https://github.com/slaclab/TileWright/issues/29), for `files` and `batch` too.
 - The group a path names is not checked. The path is the author's explicit choice, and
-  knowing that it names an entity group or another set's matching group needs the file,
-  so it could not be a contract error. The sharp edge is written down here: `../../south`
-  with `recursive: true` reads south's `calibration` for north's detectors, split by
-  north's N, as `../../south/calibration` would. A test pins how `../det_a` is read, so
-  the choice cannot change unnoticed.
+  knowing that it names an entity group or a group of another set needs the file, so it
+  could not be a contract error. The sharp edge is written down here:
+  `../../south/calibration` reads south's `calibration` for north's detectors, split by
+  north's N. The third review of #21 suggested a warning for it: the manifest could tell
+  that a named `..` group is, or lies inside, another set's matching group. It is not
+  added: without recursion, only a path that names the other set reaches it, and the
+  field description says that the group a path names is read whatever it is. A test
+  pins how `../det_a` is read, so the choice cannot change unnoticed.
 - `tests/test_contract.py::test_concept_budget` lists `exclude_groups` among the keys of
   `groups`.
 - The reference page, `examples/datasets/groups.yml` (commented alternatives that

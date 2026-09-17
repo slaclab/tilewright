@@ -501,8 +501,8 @@ class TestNestedGroups:
         assert set(ent["run.operator"]) == {"rm"} and len(ent) == 12
         assert all(list(v) == list(np.arange(12.0)) for v in ent["run.thresholds"])
 
-    # The YAMLs of the rounds-1-3 tests that recursed from '..' are contract errors now:
-    # tests/test_contract.py::TestRejected::test_recursive_takes_no_path_that_starts_with_dotdot
+    # The YAMLs of the rounds-1-3 tests that recursed from '..' are contract errors now,
+    # in tests/test_contract.py: test_recursive_takes_no_path_that_starts_with_dotdot.
 
     @pytest.mark.parametrize("south", [["det_a", "det_b"], ["det_a", "det_b", "det_c"]],
                              ids=["same-size", "other-size"])
