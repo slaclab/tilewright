@@ -502,6 +502,78 @@ class TestNestedGroups:
         assert list(ent["own.exposure"]) == [float(i) for i in range(1, 13)]
         assert set(ent["run.calibration.offset"]) == {0.5}
 
+    def test_recursing_above_the_matched_groups_skips_every_entity_group(self, tmp_path):
+        """'../..' under '/*' is the file root, which holds the detector groups of both
+        sites. 'recursive' reads each site's calibration (excluded, so not an entity), but
+        no detector group of either site: no detector takes another site's values into
+        its parameters or its uid (review of #21)."""
+        cfg = sites_dataset(tmp_path)
+        with h5py.File(tmp_path / "sites" / "detectors.h5", "a") as f:
+            for n, group in enumerate(["north/det_a", "north/det_b", "south/det_a",
+                                       "south/det_c"]):
+                del f[f"{group}/temperature"]
+                f[f"{group}/temperature"] = 70.0 + n
+        cfg["source"]["groups"]["params"] = {
+            "groups": {"top": "../..", "own": "/"}, "recursive": True,
+            "location": SITE_LOCATION, "exclude": ["../../created"]}
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {
+            "uid", "source_group", "site", "detector", "top.empty_site.status",
+            "top.north.calibration.channels", "top.north.calibration.gain",
+            "top.north.calibration.notes", "top.north.calibration.offset",
+            "top.south.calibration.gain", "top.south.calibration.notes",
+            "top.north.calibration.gain_units", "top.south.calibration.gain_units",
+            "own.temperature"}
+        assert list(ent["own.temperature"]) == [70.0, 71.0, 72.0, 73.0]
+        assert list(ent["top.south.calibration.gain"]) == [2.0] * 4
+        assert ent.loc[0, "uid"] == params_uid("DETECTORS", {
+            "site": "north", "detector": "det_a", "top.empty_site.status": 0,
+            "top.north.calibration.channels": 8, "top.north.calibration.gain": 1.5,
+            "top.north.calibration.notes": "bench 4", "top.north.calibration.offset": 0.25,
+            "top.south.calibration.gain": 2.0, "top.south.calibration.notes": "bench 4",
+            "own.temperature": 70.0})
+
+    @pytest.mark.parametrize("path, above", [
+        ("../../..", ["campaign.beamtime", "campaign.sites.north.calibration.gain",
+                      "campaign.sites.south.calibration.gain"]),
+        ("../../../..", ["campaign.c1.beamtime", "campaign.c1.sites.north.calibration.gain",
+                         "campaign.c1.sites.south.calibration.gain", "campaign.c2.beamtime",
+                         "campaign.c2.sites.north.calibration.gain"]),
+    ])
+    def test_recursing_from_a_deeper_glob_skips_every_entity_group(self, tmp_path, path,
+                                                                   above):
+        """Under '/*/sites/*' the entity groups hang below three matched groups. A path to
+        a run, or to the root, reaches the matched groups themselves and their excluded
+        'calibration' groups, never an entity group of another sibling set."""
+        d = tmp_path / "runs"
+        d.mkdir()
+        with h5py.File(d / "r.h5", "w") as f:
+            for run_, beamtime in (("c1", 5), ("c2", 6)):
+                f[f"{run_}/beamtime"] = beamtime
+            for group, gain, temperatures in (
+                    ("c1/sites/north", 1.0, {"det_a": 10.0, "det_b": 11.0}),
+                    ("c1/sites/south", 2.0, {"det_a": 20.0}),
+                    ("c2/sites/north", 3.0, {"det_a": 30.0})):
+                f[f"{group}/calibration/gain"] = gain
+                for det, temperature in temperatures.items():
+                    f[f"{group}/{det}/temperature"] = temperature
+                    f[f"{group}/{det}/spectrum"] = np.zeros(4)
+        cfg = {"label": "Runs", "metadata": dict(META),
+               "source": {"groups": {
+                   "directory": str(d), "entity_group": "/*/sites/*",
+                   "exclude_groups": ["calibration"],
+                   "params": {"groups": {"campaign": path, "own": "/"}, "recursive": True,
+                              "location": r":/(?P<run>[^/]+)/sites/(?P<site>[^/]+)/"
+                                          r"(?P<detector>[^/]+)$"}}},
+               "artifacts": [{"type": "spectrum", "dataset": "spectrum"}]}
+        ent, art = run(tmp_path, cfg)
+        assert list(ent["source_group"]) == ["c1/sites/north/det_a", "c1/sites/north/det_b",
+                                             "c1/sites/south/det_a", "c2/sites/north/det_a"]
+        assert set(ent.columns) == {"uid", "source_group", "run", "site", "detector",
+                                    *above, "own.temperature"}
+        assert list(ent["own.temperature"]) == [10.0, 11.0, 20.0, 30.0]
+        assert list(ent[above[0]])[:3] == [5, 5, 5] and len(art) == 4
+
     def test_climbing_above_the_file_root_names_the_entity(self, tmp_path):
         cfg = scans_dataset(tmp_path)
         cfg["source"]["groups"]["params"] = {"groups": {"up": "../../../calibration"}}
