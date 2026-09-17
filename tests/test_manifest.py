@@ -1126,6 +1126,35 @@ class TestReservedNames:
         assert ("add '/path' to params.exclude under the source (this also leaves out the "
                 "parameter 'path'), or rename the attribute 'spectrum' in the file") in msg
 
+    @pytest.mark.parametrize("case", ["files", "attrs", "batch", "groups", "params.groups"])
+    def test_a_params_location_name(self, tmp_path, nexus, case):
+        """A named group of params.location is renamed in the YAML: neither exclude nor
+        renaming something in the file can help, whatever else params says."""
+        if case in ("files", "attrs"):
+            cfg = files_dataset(tmp_path, attrs=case == "attrs")
+            cfg["source"]["files"].setdefault("params", {})["location"] = (
+                r"run_(?P<path_spectrum>\d+)\.h5$")
+            where, name = "runs/run_0.h5", "path_spectrum"
+        elif case == "batch":
+            cfg = batch_dataset(tmp_path)
+            cfg["source"]["batch"]["params"]["location"] = r":(?P<index_spectrum>\d+)$"
+            where, name = "sim/batch_0/sim.h5:0", "index_spectrum"
+        elif case == "groups":
+            cfg = groups_dataset(tmp_path)
+            cfg["source"]["groups"]["params"]["location"] = r"_(?P<dataset_spectrum>\d+)$"
+            where, name = "grouped/samples.h5:/samples/sample_0", "dataset_spectrum"
+        else:
+            cfg = nexus
+            cfg["source"]["files"]["params"]["location"] = r"Ei(?P<path_E>\d+)\.h5$"
+            where, name = "nexus/Ei30.h5", "path_E"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert msg.startswith(f"{tmp_path / where}: parameter '{name}' is named like a "
+                              f"locator")
+        assert msg.splitlines()[-1] == (f"Fix: rename the named group '{name}' in "
+                                        f"params.location.")
+
     def test_other_names_with_a_locator_prefix_are_parameters(self, tmp_path):
         cfg = files_dataset(tmp_path)  # artifact 'spectrum', shared axis 'energy'
         for i in range(3):

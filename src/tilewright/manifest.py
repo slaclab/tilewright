@@ -521,8 +521,8 @@ class _Walker:
 
     def reserved_error(self, name, params, provenance):
         """The message for a parameter or label named like a locator. The fix depends on
-        where the name came from: a params.groups name, an attribute, a dataset, or a
-        dataset's attribute label."""
+        where the name came from: a params.location group, a params.groups name, an
+        attribute, a dataset, or a dataset's attribute label."""
         head = name.split(".", 1)[0]
         what, field, rename = f"parameter '{name}'", name, "rename it in the file"
         if name not in params:  # a '<field>_<attr>' label
@@ -534,7 +534,9 @@ class _Walker:
         spec = self.body.params
         if spec.from_ == "attrs":
             rename = f"rename the attribute '{name}' in the file"
-        if spec.groups:
+        if spec.location is not None and name in re.compile(spec.location).groupindex:
+            fix = f"rename the named group '{name}' in params.location."
+        elif spec.groups:
             fix = f"rename '{head}' under params.groups."
         else:
             # exclude names an attribute by its whole name, a dataset by its first part
