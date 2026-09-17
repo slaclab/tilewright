@@ -1799,6 +1799,18 @@ class TestArtifactGroups:
         assert len(art) == 5 and "frame_9999" not in set(art["type"])
         assert "/frames/frame_9999 unreadable" in capsys.readouterr().out
 
+    def test_a_dangling_link_in_the_root_group_is_named_by_its_path(self, tmp_path,
+                                                                     capsys):
+        cfg = frames_dataset(tmp_path, files=1)
+        cfg["source"]["files"]["params"] = None
+        cfg["artifacts"] = [{"type": "top_{name}", "group": "/"}]
+        with h5py.File(tmp_path / "movies" / "movie_0.h5", "a") as f:
+            f["frame_9999"] = h5py.SoftLink("/nowhere")
+        _, art = run(tmp_path, cfg)
+        assert list(art["type"]) == ["top_run"]
+        out = capsys.readouterr().out
+        assert f"{tmp_path / 'movies' / 'movie_0.h5'}: /frame_9999 unreadable" in out, out
+
     @pytest.mark.parametrize("second, entry", [
         ({"type": "frame_0001", "dataset": "/frames/frame_0001"},
          "artifacts[1] (dataset '/frames/frame_0001')"),
