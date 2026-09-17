@@ -34,7 +34,7 @@ sentence each, as `contract error: <field> <what to do>`.
 | `metadata` | mapping | **yes** |  | Dataset-level facets; method, data_type and material are required. |
 | `source` | mapping | **yes** |  | Where the entities come from: one tag. |
 | `artifacts` | list | no |  | Arrays each entity exposes; at least one entry, except for 'table'. An entry names one array ('dataset') or every array in a group ('group'). The list says what the dataset serves, not what the files hold: an array no reader would ask for, a constant placeholder whose meaning is in its own attributes say, is left out, and nothing checks the files for arrays nobody named. |
-| `shared` | list | no |  | Arrays shared by every entity, registered once under the dataset. |
+| `shared` | list | no |  | Arrays shared by every entity, registered once under the dataset, each an array child of the dataset container under its 'type'. 'Axis' names the common case, not the rule: an array that belongs to the dataset rather than to an entity goes here whether or not it is a coordinate -- a normalization or lookup table, a detector mask, a response curve. Nothing of an axis is required of it, not a rank, a dtype or an order; the whole test is the one under 'dataset', that every file holding that path agrees. An array that differs between entities is an artifact, not a shared entry. |
 
 ## `metadata`
 
