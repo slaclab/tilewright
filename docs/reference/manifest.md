@@ -69,8 +69,8 @@ Registration stamps locator keys onto each entity's metadata, one set per artifa
 They make provenance searchable and are what `tilewright.client.locate` reads
 ([How to read a registered catalog](../using-the-catalog.md#read-the-files-directly)).
 A locator is the pair `path_<type>` and `dataset_<type>`; `index_<type>` is optional. A
-`path_*` key without its `dataset_*` key is an ordinary parameter, such as the table
-column `path_p_travel_s`: `locate`, `load`, `query_catalog` and the check at the end of
+`path_*` key without its `dataset_*` key is an ordinary parameter, such as a table
+column `path_length_m`: `locate`, `load`, `query_catalog` and the check at the end of
 `tilewright register` pass over it.
 The dataset container is stamped with `storage`, `fingerprint`, `registered_at`, `label`,
 and one `shared_dataset_<type>` per shared axis.
