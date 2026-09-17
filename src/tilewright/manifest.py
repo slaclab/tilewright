@@ -386,12 +386,25 @@ def _read_group(holder, path, gname, frame, spec: ParamsSpec, batch_size=None, c
     the group is already on the path being read, which a link back to an ancestor makes
     (#29): that walk would never end, so the link is named in a WARNING and skipped.
     Groups are told apart by their HDF5 object id (``Group.id``), which compares equal
-    whichever link opened them."""
-    frame = frame.strip("/")
+    whichever link opened them.
+
+    Under ``from: attrs`` a container that does not hold the group (or dataset) is an
+    error naming both, since there its attributes are the parameters."""
+    written, frame = frame, frame.strip("/")
     exclude = {p.strip("/") for p in spec.exclude}
     out = OrderedDict()
     if spec.from_ == "attrs":
-        target = holder[path] if path else holder
+        target = holder.get(path) if path else holder
+        if target is None:
+            field = f"params.groups.{gname}" if gname else "params.group"
+            where = "/" + "/".join(p for p in (holder.name.strip("/"), path.strip("/")) if p)
+            raise KeyError(
+                f"{holder.file.filename}:{where}: {field} {written!r} names no group or "
+                f"dataset there, and under 'from: attrs' a group that a container lacks "
+                f"is an error, since its attributes are the parameters. Fix: narrow "
+                f"'pattern' (and 'entity_group') to the containers that hold it, name a "
+                f"group every one of them has, or read the parameters with "
+                f"'from: datasets', where a missing group leaves null columns")
         # an attribute's exclude path is '<group path>/<name>': '/version' at the root
         left_out = {n for n in target.attrs if f"{frame}/{n}".strip("/") in exclude}
         for name, val in _attrs(target, skip=left_out).items():
