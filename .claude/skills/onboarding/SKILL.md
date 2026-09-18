@@ -102,8 +102,12 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   every copy the source holds against it: under `files`/`batch` that path in each file,
   under `groups` the same path inside **each entity group of each file**, so one file with
   four entity groups is checked four times. A differing copy is refused, naming both — you
-  do not have to digest the arrays by hand first. A group that simply lacks the array is
-  passed over, and its entity is served the copy the entry names.
+  do not have to digest those arrays by hand first. The check is deliberately off in two
+  shapes, and there you do: a path **beside** the entity groups (a calibration group above
+  them, say), and one inside a group `exclude_groups` leaves out, are each one copy per
+  file, so copies that differ from entity group to entity group under such a path pass.
+  A group that simply lacks the array is passed over, and its entity is served the copy
+  the entry names.
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
   array attribute comes through as a list, and `docs/reference/manifest.md` says which
   values are left out and what a `batch` row's copy of them describes. A

@@ -1193,7 +1193,9 @@ def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec], source=None):
                     try:
                         ds = f[p] if p in f else None
                     except (KeyError, RuntimeError) as e:  # a chain HDF5 will not follow
-                        print(f"  WARNING: {rel}:/{p} unreadable ({e}); skipped")
+                        # the file's own name, as every other unreadable-name warning
+                        # prints it; the rows below keep the root-relative 'file' column
+                        print(f"  WARNING: {f.filename}:/{p} unreadable ({e}); skipped")
                         ds = None
                     if not isinstance(ds, h5py.Dataset):
                         continue

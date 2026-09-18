@@ -246,6 +246,23 @@ class TestBatch:
         with pytest.raises(KeyError, match="shared axis 'nope'"):
             run(tmp_path, cfg)
 
+    def test_shared_axis_nan_agrees_with_nan_only_between_float_copies(self, tmp_path):
+        """The recorded copy decides how the values are compared: two floating-point
+        copies with NaN in the same place agree, while an integer copy compared with a
+        floating-point one holding NaN differs -- no integer array holds NaN."""
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                del f["eloss"]
+                f["eloss"] = np.array([0.0, np.nan, 1.0])
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 6 and list(art[art["uid"].isna()]["dtype"]) == ["float64"]
+        with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
+            del f["eloss"]                      # the recorded copy: the first file's
+            f["eloss"] = np.array([0, 1, 2])
+        with pytest.raises(ValueError, match="shared axis 'eloss'.*differs"):
+            run(tmp_path, cfg, name="ds2")
+
     def test_params_null_gives_provenance_uids(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         cfg["source"]["batch"]["params"] = None
@@ -451,7 +468,9 @@ class TestGroups:
             ent, art = run(tmp_path, cfg)
         assert len(ent) == 3
         assert list(art[art["uid"].isna()]["dataset"]) == ["/samples/sample_0/axis"]
-        assert "samples.h5:/samples/sample_1/axis unreadable" in capsys.readouterr().out
+        # named with the file's own name, as every other unreadable-name warning is
+        assert (f"{tmp_path / 'grouped' / 'samples.h5'}:/samples/sample_1/axis unreadable"
+                in capsys.readouterr().out)
 
 
 # ---------------------------------------------------------------------------
