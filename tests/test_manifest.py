@@ -247,9 +247,11 @@ class TestBatch:
             run(tmp_path, cfg)
 
     def test_shared_axis_nan_agrees_with_nan_only_between_float_copies(self, tmp_path):
-        """The recorded copy decides how the values are compared: two floating-point
-        copies with NaN in the same place agree, while an integer copy compared with a
-        floating-point one holding NaN differs -- no integer array holds NaN."""
+        """The copy the run meets first decides how the values are compared: two
+        floating-point copies with NaN in the same place agree, while an integer copy
+        compared with a floating-point one holding NaN differs -- no integer array holds
+        NaN. Under 'batch' the first file's copy is both the first met and the recorded
+        one; under 'groups' the two need not be the same copy."""
         cfg = batch_dataset(tmp_path)
         for b in range(2):
             with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
@@ -258,7 +260,7 @@ class TestBatch:
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 6 and list(art[art["uid"].isna()]["dtype"]) == ["float64"]
         with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
-            del f["eloss"]                      # the recorded copy: the first file's
+            del f["eloss"]                      # the copy met first: the first file's
             f["eloss"] = np.array([0, 1, 2])
         with pytest.raises(ValueError, match="shared axis 'eloss'.*differs"):
             run(tmp_path, cfg, name="ds2")
@@ -2435,6 +2437,13 @@ class TestReservedNames:
         assert msg.startswith(f"{tmp_path / 'runs' / 'run_0.h5'}: parameter '{name}' is "
                               f"named like a manifest column")
         assert f"'{name}' is a column entities.parquet already has" in msg
+        # the rationale says what the name would really do under *this* tag: a 'files'
+        # source writes a uid column, never a source_group one
+        assert ("so this value would take that column rather than sit beside it."
+                if name == "uid" else
+                "Both names are the manifest's own under every source tag, so a "
+                "'source_group' is refused here too, where no such column is written."
+                ) in msg
         assert (f"Fix: add '/{name}' to params.exclude under the source, or rename it in "
                 f"the file. To keep the value, read its group under a name of your own "
                 f"with params.groups ({{meta: /}} nests it as 'meta.{name}')") in msg
@@ -2486,6 +2495,8 @@ class TestReservedNames:
         msg = str(exc.value)
         assert ("samples.h5:/samples/sample_0: parameter 'source_group' is named like a "
                 "manifest column") in msg
+        # under 'groups', and only there, the value really would take that column
+        assert "so this value would take that column rather than sit beside it." in msg
         assert "add '/params/source_group' to params.exclude" in msg
 
     @pytest.mark.parametrize("name", ["uid", "source_group"])
@@ -2530,10 +2541,12 @@ class TestReservedNames:
         assert ("add '/source' to params.exclude under the source (this also leaves out "
                 "the parameter 'source'), or rename the attribute 'group' in the file.") in msg
 
-    @pytest.mark.parametrize("name", ["uid", "source_group"])
+    @pytest.mark.parametrize("name", ["uid", "source_group", "uid.raw", "source_group.x"])
     def test_a_table_column_named_like_a_manifest_column_is_refused(self, tmp_path, name):
         """A table's columns are its parameters, so the same two names are its own too;
-        no locator name is reserved for it, since it declares no artifacts."""
+        no locator name is reserved for it, since it declares no artifacts. A dotted
+        column counts as its first part, the one registration nests it under, and the
+        message quotes the column as the table spells it so the header can be found."""
         d = tmp_path / "specimens"
         d.mkdir()
         pd.DataFrame({"specimen": ["s1", "s2"], name: ["ZZZ", "ZZZ"]}).to_csv(
@@ -2544,8 +2557,35 @@ class TestReservedNames:
         with pytest.raises(ValueError) as exc:
             run(tmp_path, cfg)
         msg = str(exc.value)
-        assert msg.startswith(f"{d / 'meta.csv'}: '{name}' is a reserved column name")
-        assert "Fix: rename the column in the table, or drop it" in msg
+        assert msg.startswith(f"{d / 'meta.csv'}: column {name!r} is named like a "
+                              f"manifest column")
+        assert ("a dotted name counts as its first part" in msg) == ("." in name)
+        # a table writes a uid column, never a source_group one
+        assert ("so the value would take that column rather than sit beside it"
+                if name.startswith("uid") else
+                "Both names are the manifest's own under every source tag, so a "
+                "'source_group' is refused here too, where no such column is written"
+                ) in msg
+        assert msg.endswith("\nFix: rename the column in the table, or drop it.")
+
+    @pytest.mark.parametrize("name", ["uid", "source_group.x"])
+    def test_a_table_locator_key_named_like_a_manifest_column_is_refused(self, tmp_path,
+                                                                        name):
+        """A table's 'locator' keys are parameters too, and no column carries them, so the
+        table's own check is the only thing that can name the file and the key."""
+        d = tmp_path / "specimens"
+        d.mkdir()
+        pd.DataFrame({"specimen": ["s1", "s2"]}).to_csv(d / "meta.csv", index=False)
+        cfg = {"label": "Specimens", "metadata": dict(META),
+               "source": {"table": {"directory": str(d), "path": "meta.csv",
+                                    "id": "specimen",
+                                    "locator": {name: "{specimen}.h5"}}}}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert msg.startswith(f"{d / 'meta.csv'}: locator key {name!r} is named like a "
+                              f"manifest column")
+        assert msg.endswith("\nFix: rename the key under 'locator'.")
 
     def test_a_table_declares_no_artifacts_so_its_columns_never_collide(self, tmp_path):
         d = tmp_path / "picks"

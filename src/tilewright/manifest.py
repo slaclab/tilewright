@@ -889,14 +889,18 @@ class _Walker:
             attr = name[len(field) + 1:]
             what = f"label '{name}' (attribute '{attr}' of parameter '{field}')"
             rename = f"rename the attribute '{attr}' in the file"
-        spec = self.body.params
-        if spec.from_ == "attrs":
-            rename = f"rename the attribute '{name}' in the file"
-        if spec.location is not None and name in re.compile(spec.location).groupindex:
+        # A 'table' source has no params block at all, and 'params: null' leaves none; both
+        # give a name no 'exclude' path and no group to nest, so the fix is the source's own
+        spec = getattr(self.body, "params", None)
+        if spec is None:
+            fix = f"rename '{name}' where the source reads it, or leave it out."
+        elif spec.location is not None and name in re.compile(spec.location).groupindex:
             fix = f"rename the named group '{name}' in params.location."
         elif spec.groups:
             fix = f"rename '{head}' under params.groups."
         else:
+            if spec.from_ == "attrs":
+                rename = f"rename the attribute '{name}' in the file"
             # exclude names an attribute by its whole name, a dataset by its first part
             leaf = name if spec.from_ == "attrs" else field.split(".", 1)[0]
             path = "/" + "/".join(p for p in ((spec.group or "").strip("/"), leaf) if p)
@@ -914,10 +918,16 @@ class _Walker:
                      f"the name '{head}'. path_<type>, dataset_<type> and index_<type> are "
                      f"reserved for every artifact type.")
         else:
+            # 'uid' is written under every tag; 'source_group' only under 'groups', so say
+            # what the name would really do here rather than assert a column that is not
+            # written under this tag
             claim = (f"'{head}' is a column entities.parquet already has: "
                      f"'uid' is the identity computed for the entity and 'source_group' "
-                     f"the HDF5 group it was read from, so this value would take that "
-                     f"column rather than sit beside it.")
+                     f"the HDF5 group a 'groups' entity was read from"
+                     + (", so this value would take that column rather than sit beside it."
+                        if head == "uid" or self.cfg.source.tag == "groups" else
+                        f". Both names are the manifest's own under every source tag, so a "
+                        f"'{head}' is refused here too, where no such column is written."))
         return (f"{self.root / str(provenance)}: {what} is named like "
                 f"{'a locator' if reserved is not None else 'a manifest column'}: {claim}"
                 f"\nFix: {fix}")
@@ -1052,16 +1062,33 @@ class _Walker:
         for column in [ids] if isinstance(ids, str) else ids:
             if column not in df.columns:
                 raise KeyError(f"{path}: id column {column!r} not among {list(df.columns)}")
-        # the two columns the manifest writes itself (#41); every other name is a parameter,
-        # and a table declares no artifacts, so no locator name is reserved for it either
-        taken = sorted(ENTITY_COLUMNS & set(df.columns))
+        # The two columns the manifest writes itself (#41); every other name is a parameter,
+        # and a table declares no artifacts, so no locator name is reserved for it either.
+        # A table's parameters are its columns and its locator keys, and a dotted name
+        # counts as its first part -- the part registration nests the value under, so
+        # 'uid.raw' claims 'uid' as much as 'uid' does. Both are caught here, where the
+        # table's own spelling and the file it is read from are known: reserved_error can
+        # name neither (a table's provenance is the row number, and it has no params block).
+        taken = [(c, f"column {c!r}", "rename the column in the table, or drop it")
+                 for c in df.columns if c.split(".", 1)[0] in ENTITY_COLUMNS]
+        taken += [(k, f"locator key {k!r}", "rename the key under 'locator'")
+                  for k in self.body.locator if k.split(".", 1)[0] in ENTITY_COLUMNS]
         if taken:
+            # a table writes a uid column but never a source_group one, so say which case
+            # this is rather than claim a column this tag does not write
+            takes = any(n.split(".", 1)[0] == "uid" for n, _, _ in taken)
             raise ValueError(
-                f"{path}: {' and '.join(repr(c) for c in taken)} "
-                f"{'is a reserved column name' if len(taken) == 1 else 'are reserved column names'}"
-                f": 'uid' is the identity computed for each row and 'source_group' the HDF5 "
-                f"group a 'groups' entity was read from, so a column of that name would take "
-                f"it. Fix: rename the column in the table, or drop it")
+                f"{path}: {' and '.join(w for _, w, _ in taken)} "
+                f"{'is' if len(taken) == 1 else 'are'} named like a manifest column: "
+                f"'uid' is the identity computed for each row and 'source_group' the HDF5 "
+                f"group a 'groups' entity was read from"
+                + (", so the value would take that column rather than sit beside it"
+                   if takes else
+                   ". Both names are the manifest's own under every source tag, so a "
+                   "'source_group' is refused here too, where no such column is written")
+                + ("; a dotted name counts as its first part, since registration nests the "
+                   "metadata under it" if any("." in n for n, _, _ in taken) else "")
+                + ".\nFix: " + "; ".join(dict.fromkeys(f for _, _, f in taken)) + ".")
         ent_rows = []
         for i, record in enumerate(df.to_dict(orient="records")):
             params = {k: _to_python(v) for k, v in record.items()}
