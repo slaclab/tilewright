@@ -2399,6 +2399,135 @@ class TestReservedNames:
         ent, _ = run(tmp_path, cfg)
         assert {"path_length", "path_energy", "index_spectrum_2"} <= set(ent.columns)
 
+    # -- the columns entities.parquet already has (#41) -----------------------
+
+    @pytest.mark.parametrize("name", ["uid", "source_group"])
+    def test_a_files_parameter_named_like_a_manifest_column_is_refused(self, tmp_path, name):
+        """#41: a scalar called 'uid' beside the parameters became the entity's identity,
+        and one called 'source_group' replaced the group each entity was read from, with
+        no message at all. Both are refused, naming the file, the parameter and the fix."""
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f[name] = 100.0 + i
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert msg.startswith(f"{tmp_path / 'runs' / 'run_0.h5'}: parameter '{name}' is "
+                              f"named like a manifest column")
+        assert f"'{name}' is a column entities.parquet already has" in msg
+        assert (f"Fix: add '/{name}' to params.exclude under the source, or rename it in "
+                f"the file. To keep the value, read its group under a name of your own "
+                f"with params.groups ({{meta: /}} nests it as 'meta.{name}')") in msg
+        cfg["source"]["files"]["params"] = {"exclude": [f"/{name}"]}
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert len(ent) == 3 and list(ent.columns) == ["uid", "run", "temperature",
+                                                       "temperature_units"]
+        assert all(re.fullmatch(r"[0-9a-f]{16}", u) for u in ent["uid"])
+
+    @pytest.mark.parametrize("name", ["uid", "source_group"])
+    def test_an_attribute_named_like_a_manifest_column_is_refused(self, tmp_path, name):
+        """The same guard under 'from: attrs', where the attribute names are the keys."""
+        cfg = files_dataset(tmp_path, attrs=True)
+        cfg["source"]["files"]["params"]["group"] = "/meta"
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                g = f.require_group("meta")
+                g.attrs["run"] = i
+                g.attrs[name] = "ZZZ"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert f"run_0.h5: parameter '{name}' is named like a manifest column" in msg
+        assert (f"Fix: add '/meta/{name}' to params.exclude under the source, or rename "
+                f"the attribute '{name}' in the file.") in msg
+        cfg["source"]["files"]["params"]["exclude"] = [f"/meta/{name}"]
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert list(ent.columns) == ["uid", "run"] and list(ent["run"]) == [0, 1, 2]
+        assert all(re.fullmatch(r"[0-9a-f]{16}", u) for u in ent["uid"])
+
+    def test_a_batch_parameter_named_like_a_manifest_column_is_refused(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
+            f["params/uid"] = np.arange(3, dtype=float)
+        with pytest.raises(ValueError, match=r"parameter 'uid' is named like a manifest "
+                                             r"column(.|\n)*"
+                                             r"add '/params/uid' to params.exclude"):
+            run(tmp_path, cfg)
+
+    def test_a_groups_parameter_named_source_group_is_refused(self, tmp_path):
+        """Left alone, every entity of the file claims the one value the file carries, so
+        the column no longer says which group each entity came from."""
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/source_group"] = "ZZZ"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert ("samples.h5:/samples/sample_0: parameter 'source_group' is named like a "
+                "manifest column") in msg
+        assert "add '/params/source_group' to params.exclude" in msg
+
+    @pytest.mark.parametrize("name", ["uid", "source_group"])
+    def test_a_params_groups_name_that_is_a_manifest_column_is_refused(self, tmp_path, name):
+        """A nested key counts as its first part: 'uid.tenDq' is written into the identity
+        column's own name, and registration nests the metadata the same way."""
+        cfg = groups_dataset(tmp_path)
+        cfg["source"]["groups"]["params"] = {"groups": {name: "params"}}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert (f"samples.h5:/samples/sample_0: parameter '{name}.tenDq' is named like a "
+                f"manifest column") in msg
+        assert msg.splitlines()[-1] == f"Fix: rename '{name}' under params.groups."
+
+    def test_a_params_groups_name_of_your_own_still_nests_such_a_field(self, tmp_path):
+        """The guard reaches the key's first part only, so the documented fix works: read
+        the group under a name of your own and the field keeps its value beside the
+        identity, which stays the manifest's own. (A guard: it passes without the fix.)"""
+        cfg = groups_dataset(tmp_path)
+        cfg["source"]["groups"]["params"] = {"groups": {"meta": "params"}}
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/uid"] = 100.0 + i
+        ent, _ = run(tmp_path, cfg)
+        assert sorted(ent["meta.uid"]) == [100.0, 101.0, 102.0]
+        assert all(re.fullmatch(r"[0-9a-f]{16}", u) for u in ent["uid"])
+        assert sorted(ent["source_group"]) == [f"samples/sample_{i}" for i in range(3)]
+
+    def test_a_label_that_spells_a_manifest_column_is_refused(self, tmp_path):
+        """A label is '<field>_<attr>', so a parameter 'source' carrying an attribute
+        'group' spells 'source_group' without either name being one."""
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.create_dataset("source", data=f"beam_{i}").attrs["group"] = "ZZZ"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert ("label 'source_group' (attribute 'group' of parameter 'source') is named "
+                "like a manifest column") in msg
+        assert ("add '/source' to params.exclude under the source (this also leaves out "
+                "the parameter 'source'), or rename the attribute 'group' in the file.") in msg
+
+    @pytest.mark.parametrize("name", ["uid", "source_group"])
+    def test_a_table_column_named_like_a_manifest_column_is_refused(self, tmp_path, name):
+        """A table's columns are its parameters, so the same two names are its own too;
+        no locator name is reserved for it, since it declares no artifacts."""
+        d = tmp_path / "specimens"
+        d.mkdir()
+        pd.DataFrame({"specimen": ["s1", "s2"], name: ["ZZZ", "ZZZ"]}).to_csv(
+            d / "meta.csv", index=False)
+        cfg = {"label": "Specimens", "metadata": dict(META),
+               "source": {"table": {"directory": str(d), "path": "meta.csv",
+                                    "id": "specimen"}}}
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        msg = str(exc.value)
+        assert msg.startswith(f"{d / 'meta.csv'}: '{name}' is a reserved column name")
+        assert "Fix: rename the column in the table, or drop it" in msg
+
     def test_a_table_declares_no_artifacts_so_its_columns_never_collide(self, tmp_path):
         d = tmp_path / "picks"
         d.mkdir()

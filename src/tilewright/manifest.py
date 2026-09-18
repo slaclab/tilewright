@@ -37,8 +37,9 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from .contract import (
-    TYPE_RULE, ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec,
-    SharedAxisSpec, climb, key_problem, load_dataset, slugify_key, source_fingerprint,
+    ENTITY_COLUMNS, TYPE_RULE, ArtifactSpec, ContractError, DatasetConfig, Identity,
+    ParamsSpec, SharedAxisSpec, climb, key_problem, load_dataset, slugify_key,
+    source_fingerprint,
 )
 from .utils import ARTIFACT_STANDARD_COLS
 
@@ -770,7 +771,17 @@ class _Walker:
 
     def entity(self, uid, params, labels, provenance, source_group=None, artifacts=()):
         """The entity's row. ``artifacts`` are its expanded ones (``expand``), whose types
-        reserve their locator names too."""
+        reserve their locator names too.
+
+        A parameter or label is refused when its name is one the manifest writes itself:
+        a locator of one of this entity's artifact types, or a column of
+        ``entities.parquet`` (``ENTITY_COLUMNS``, #41) -- a ``uid`` read out of a file
+        would otherwise become the entity's identity in place of the one computed here,
+        and a ``source_group`` would replace the group the entity was read from, both
+        without a word. A dotted name counts as its first part under either rule, since
+        that part is the column ``groups`` nests under and the key registration nests the
+        metadata under.
+        """
         row = OrderedDict(uid=uid)
         if source_group is not None:
             row["source_group"] = source_group
@@ -779,10 +790,12 @@ class _Walker:
         reserved = {**self.reserved, **{f"{kind}_{art_type}": art_type
                                         for art_type, _, _ in artifacts
                                         for kind in ("path", "dataset", "index")}}
-        if reserved:
-            for name in row:
-                if name.split(".", 1)[0] in reserved:  # a dotted name nests under it
-                    raise ValueError(self.reserved_error(name, params, provenance, reserved))
+        for name in (*params, *labels):  # never the two the walker itself wrote above
+            head = name.split(".", 1)[0]
+            if head in ENTITY_COLUMNS:
+                raise ValueError(self.reserved_error(name, params, provenance))
+            if head in reserved:
+                raise ValueError(self.reserved_error(name, params, provenance, reserved))
         row["_provenance"] = provenance  # dropped before writing; used by collision report
         return row
 
@@ -861,10 +874,13 @@ class _Walker:
                 out.append((art_type, path, ds))
         return out
 
-    def reserved_error(self, name, params, provenance, reserved):
-        """The message for a parameter or label named like a locator. The fix depends on
-        where the name came from: a params.location group, a params.groups name, an
-        attribute, a dataset, or a dataset's attribute label."""
+    def reserved_error(self, name, params, provenance, reserved=None):
+        """The message for a parameter or label named like something the manifest writes:
+        a locator, when ``reserved`` maps the reserved names to their artifact types, and
+        otherwise a column of ``entities.parquet`` (``ENTITY_COLUMNS``). Both are refused
+        the same way and told apart only in the sentence that says what the name claims;
+        the fix depends on where the name came from: a params.location group, a
+        params.groups name, an attribute, a dataset, or a dataset's attribute label."""
         head = name.split(".", 1)[0]
         what, field, rename = f"parameter '{name}'", name, "rename it in the file"
         if name not in params:  # a '<field>_<attr>' label
@@ -887,11 +903,24 @@ class _Walker:
             fix = (f"add '{path}' to params.exclude under the source"
                    + (f" (this also leaves out the parameter '{field}')"
                       if field != name else "")
-                   + f", or {rename}.")
-        return (f"{self.root / str(provenance)}: {what} is named like a locator: "
-                f"registration writes the locator of artifact '{reserved[head]}' under "
-                f"the name '{head}'. path_<type>, dataset_<type> and index_<type> are "
-                f"reserved for every artifact type.\nFix: {fix}")
+                   + f", or {rename}."
+                   + ("" if reserved is not None else
+                      f" To keep the value, read its group under a name of your own with "
+                      f"params.groups ({{meta: {spec.group or '/'}}} nests it as "
+                      f"'meta.{name}'); that renames the group's other parameters too, and "
+                      f"every name is part of the identity, so the uids change with it."))
+        if reserved is not None:
+            claim = (f"registration writes the locator of artifact '{reserved[head]}' under "
+                     f"the name '{head}'. path_<type>, dataset_<type> and index_<type> are "
+                     f"reserved for every artifact type.")
+        else:
+            claim = (f"'{head}' is a column entities.parquet already has: "
+                     f"'uid' is the identity computed for the entity and 'source_group' "
+                     f"the HDF5 group it was read from, so this value would take that "
+                     f"column rather than sit beside it.")
+        return (f"{self.root / str(provenance)}: {what} is named like "
+                f"{'a locator' if reserved is not None else 'a manifest column'}: {claim}"
+                f"\nFix: {fix}")
 
     # -- files ---------------------------------------------------------------
 
@@ -1023,8 +1052,16 @@ class _Walker:
         for column in [ids] if isinstance(ids, str) else ids:
             if column not in df.columns:
                 raise KeyError(f"{path}: id column {column!r} not among {list(df.columns)}")
-        if "uid" in df.columns:
-            raise ValueError(f"{path}: 'uid' is a reserved column name")
+        # the two columns the manifest writes itself (#41); every other name is a parameter,
+        # and a table declares no artifacts, so no locator name is reserved for it either
+        taken = sorted(ENTITY_COLUMNS & set(df.columns))
+        if taken:
+            raise ValueError(
+                f"{path}: {' and '.join(repr(c) for c in taken)} "
+                f"{'is a reserved column name' if len(taken) == 1 else 'are reserved column names'}"
+                f": 'uid' is the identity computed for each row and 'source_group' the HDF5 "
+                f"group a 'groups' entity was read from, so a column of that name would take "
+                f"it. Fix: rename the column in the table, or drop it")
         ent_rows = []
         for i, record in enumerate(df.to_dict(orient="records")):
             params = {k: _to_python(v) for k, v in record.items()}
