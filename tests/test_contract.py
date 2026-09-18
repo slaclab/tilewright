@@ -21,6 +21,7 @@ from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliase
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
 EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
+REFERENCE_PAGE = Path(__file__).parent.parent / "docs" / "reference" / "dataset-yaml.md"
 
 
 def files_cfg(**over):
@@ -152,16 +153,24 @@ class TestAccepted:
     def test_the_entity_group_default_names_the_group_and_not_the_entities(self):
         """`entity_group` names the group whose subgroups are the entities, so its stated
         default has to be a group. Read as naming the entities instead, "the file's
-        top-level groups" would make each entity a *subgroup* of a top-level group, which
-        for the ordinary file whose top-level groups are themselves the entities is no
-        entities at all -- exactly what '/*' does. The behaviour the real default produces
-        is pinned by
-        tests/test_manifest.py::TestGroups::test_top_level_groups_when_no_entity_group."""
+        top-level groups" would make each entity a *subgroup* of a top-level group -- what
+        '/*' does, and a different set of entities on the same file, which
+        tests/test_manifest.py::TestGroups::test_top_level_groups_when_no_entity_group
+        runs both ways to prove.
+
+        The default group is the file root, so the clause that states it names the root:
+        that word is the fact and not a turn of phrase, since the default is a path and
+        the root is the only path it can be. What the clause must not do is name the
+        alternative, so '/*' has to appear later in the description, as the contrast, and
+        never in the clause itself."""
         from tilewright.contract import GroupsSource
 
         field = GroupsSource.model_fields["entity_group"]
         assert field.default is None
-        assert field.description.split("Default:")[1].strip().startswith("the file root")
+        default_clause, rest = field.description.split("Default:")[1].split(".", 1)
+        assert "root" in default_clause, default_clause
+        assert "'/*'" not in default_clause, default_clause
+        assert "'/*'" in rest
 
     @pytest.mark.parametrize("path", ["..", "../..", "../calibration", "/../calibration",
                                       "../../run/beam/", "../../.."])
@@ -597,26 +606,35 @@ class TestVocabulary:
 
     def test_the_description_rule_says_which_keys_count(self):
         """"Every number must also exist as a metadata key" has to say *which* keys, or
-        an author with a number that only entities carry cannot apply it. The rule names
-        this block, rules an entity parameter out, and gives one test for what counts as
-        a number."""
-        from tilewright.contract import DatasetMetadata
+        an author with a number that only entities carry cannot apply it. The block it
+        means is the one this model is: the rule names it by the same name the YAML gives
+        it, so renaming the block renames it here too. It also rules an entity parameter
+        out, and gives one test for what counts as a number."""
+        from tilewright.contract import DatasetConfig, DatasetMetadata
 
+        block = next(name for name, f in DatasetConfig.model_fields.items()
+                     if f.annotation is DatasetMetadata)
         doc = DatasetMetadata.model_fields["description"].description
-        assert "key of this 'metadata' block" in doc
+        assert f"key of this '{block}' block" in doc
         assert "entity parameter is not a key of this block" in doc
         assert "Key('...') == query on that number" in doc
-        # the reference page is HTML: an angle-bracketed placeholder would be swallowed
-        assert "<" not in doc and ">" not in doc
+        # and the whole rule reaches the page a reader reads, verbatim
+        assert doc in REFERENCE_PAGE.read_text()
 
     def test_the_contact_description_covers_a_record_with_no_address(self):
         """`Name <email>` is the shape, not a requirement: plenty of records publish no
         address, and the field says what to write then rather than leaving the author to
-        guess one or drop the field."""
+        guess one or drop the field. Saying it means showing a contact with no address in
+        it -- and that one has to validate, unremarked, or the advice is wrong."""
         from tilewright.contract import DatasetMetadata
 
         doc = DatasetMetadata.model_fields["contact"].description
-        assert "no address" in doc
+        addressless = [ex for ex in re.findall(r"'([^']+)'", doc) if "@" not in ex]
+        assert addressless, doc
+        for example in addressless:
+            cfg, notes = load_dataset(files_cfg(metadata=dict(META, contact=example)))
+            assert cfg.metadata.contact == example
+            assert [n for n in notes if n.startswith("metadata.contact")] == []
 
     def test_alias_rewrites_spelling_only(self):
         raw = files_cfg(metadata={"method": ["EDRIXS"], "material": "NIPS", "data_type": "simulation"})

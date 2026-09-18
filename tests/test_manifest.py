@@ -344,6 +344,12 @@ class TestGroups:
         assert set(art["dataset"]) == {f"/samples/sample_{i}/spectrum" for i in range(3)}
 
     def test_top_level_groups_when_no_entity_group(self, tmp_path):
+        """The default entity_group is the file root, so the file's own top-level groups
+        are the entities. '/*' names those groups instead, so each of *their* subgroups
+        becomes one: on the same file the two give different entities, which is the
+        distinction the field description has to keep straight (tests/test_contract.py
+        ::TestAccepted::test_the_entity_group_default_names_the_group_and_not_the_entities
+        pins that it does)."""
         cfg = groups_dataset(tmp_path)
         del cfg["source"]["groups"]["entity_group"]
         cfg["source"]["groups"]["params"] = None
@@ -351,6 +357,11 @@ class TestGroups:
         cfg["artifacts"] = [{"type": "spectrum", "dataset": "sample_0/spectrum"}]
         ent, art = run(tmp_path, cfg)
         assert list(ent["source_group"]) == ["samples"]
+
+        cfg["source"]["groups"]["entity_group"] = "/*"
+        cfg["artifacts"] = [{"type": "spectrum", "dataset": "spectrum"}]
+        ent, art = run(tmp_path, cfg, name="star")
+        assert list(ent["source_group"]) == [f"samples/sample_{i}" for i in range(3)]
 
     def test_missing_artifact_names_the_group(self, tmp_path):
         cfg = groups_dataset(tmp_path)
