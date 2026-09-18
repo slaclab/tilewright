@@ -26,10 +26,10 @@ carry, and the facets a reader searches by. Nothing about your science is hardco
 **Documentation:** <https://slaclab.github.io/TileWright/>
 
 - [Install](docs/install.md) (Python ≥ 3.11, `uv run tilewright --help`)
-- [Publish a dataset](docs/ONBOARDING.md), with an agent or by hand
+- [Publish a dataset](skills/onboarding/reference/walkthrough.md), with the `/onboarding` skill (`tilewright skills install`) or by hand
 - [Read a registered catalog](docs/using-the-catalog.md), which needs only `tiled[client]`
 - [Host a server](docs/host-a-server.md)
-- [The YAML contract](docs/reference/dataset-yaml.md), generated from `src/tilewright/contract.py`
+- [The YAML contract](skills/onboarding/reference/dataset-yaml.md), generated from `src/tilewright/contract.py`
 
 **Automatic ingestion** for AmSC lives in
 [slaclab/amsc-catalog-publisher](https://github.com/slaclab/amsc-catalog-publisher).
@@ -38,11 +38,11 @@ carry, and the facets a reader searches by. Nothing about your science is hardco
 
 ```
 src/tilewright/      the package: contract, vocabulary, manifest, register, delete, client, adapter
-examples/datasets/   one annotated YAML per source tag, with expected counts
 examples/notebook.py marimo tour of the read path
 docs/                the site (mkdocs-material); docs/adr/ is internal
 scripts/             maintainer tools; see CONTRIBUTING.md
-skills/              Claude Code skills for producers: onboarding (install once, run from your data)
+skills/              Claude Code skills for producers, shipped in the wheel: onboarding, with
+                     its reference pages and one annotated example YAML per source tag
 .claude/skills/      Claude Code skills for maintainers: vocab-review
 config.yml           a local pointer-serving server; config.upload.yml hosts uploads
 ```

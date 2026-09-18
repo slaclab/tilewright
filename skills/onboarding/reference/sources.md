@@ -3,10 +3,7 @@
 Your data has to match one of four sources. What you call your parameters and your
 arrays, and how many entities you have, are up to you.
 
-<figure class="tw-diagram">
---8<-- "diagrams/layouts.svg"
-<figcaption>Where the entity boundary falls in each source, and where each one keeps its parameters.</figcaption>
-</figure>
+![Where the entity boundary falls in each source, and where each one keeps its parameters.](diagrams/layouts.svg)
 
 ## What each one looks like
 
@@ -93,11 +90,11 @@ quotes `"\d"` is a YAML error, and `"\b"` silently becomes a backspace.
   it is part of the identity ([identity and keys](identity.md#the-entity-key-comes-from-the-entitys-identity)).
   A batch file whose rows hold nothing else can use the row number, so that each row
   keeps a number to query and a key of its own. The row number starts again in every
-  file; [the `params` fields](../reference/dataset-yaml.md#params) say what to capture
+  file; [the `params` fields](dataset-yaml.md#params) say what to capture
   when the pattern matches several files.
 - **Every entity must match, and a name comes from one place.** `tilewright manifest`
   stops at an entity whose location does not match, and at a name that is also read
-  inside the file or group ([errors](../reference/errors.md#tilewright-manifest-the-data)).
+  inside the file or group ([errors](errors.md#tilewright-manifest-the-data)).
 
 Why a regular expression and not a `{bias_mV:d}` template: real names need wildcards for
 the parts that are not values, and Python already parses the expression. Why not a table
@@ -133,9 +130,9 @@ Two detectors of one site read the same calibration, so under `identity: params`
 would be the same entity; the `location` names keep them apart
 ([parameters from the location](#parameters-from-the-location)). Which arrays count as one
 value per entity, the sort order and what is skipped are in
-[the `groups` fields](../reference/dataset-yaml.md#sourcegroups); entities that read
+[the `groups` fields](dataset-yaml.md#sourcegroups); entities that read
 different parameters get null for the others
-([the data model](data-model.md#entities-with-different-parameters)).
+([the data model](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
 
 Why `..` and not a path from the file root: each site has its own `calibration`, and one
 fixed path can name only one of them. Why a glob and not a number of levels: a depth
@@ -179,7 +176,7 @@ author writes one, and it is an ordinary part of the dataset:
   changes — nothing checks that the table still matches the files.
 
 The rest of a table's rules — every column kept, an empty header cell, a null cell in a
-composite `id` — is in [the `table` fields](../reference/dataset-yaml.md#sourcetable).
+composite `id` — is in [the `table` fields](dataset-yaml.md#sourcetable).
 
 ## Why the tag owns the keys
 
@@ -222,12 +219,12 @@ if it had an entry of its own, so registration and both read paths see nothing n
 `{name}` in `type` is the member's name, so `trace_{name}` over `/channels/ch_a` gives
 `trace_ch_a`. A `batch` source does not take this form, because its first artifact sets
 the batch size, and neither does `shared`. What counts as a member, and what an absent or
-empty group does, is in [the `artifacts` fields](../reference/dataset-yaml.md#artifacts).
+empty group does, is in [the `artifacts` fields](dataset-yaml.md#artifacts).
 
 Each member is still an array of its own: one more node to register, and one read per
 step to get the series back. A few dozen channels are fine. Thousands of per-step
 datasets register slowly (that time is spent when you
-[register the dataset](../ONBOARDING.md#4-register-the-dataset)) and read slowly: stack
+[register the dataset](walkthrough.md#4-register-the-dataset)) and read slowly: stack
 them into one array, a
 `(steps, ny, nx)` dataset, or into a `batch` file, before onboarding, and the series
 becomes one artifact that slices like any other.
@@ -241,7 +238,7 @@ neither.
 
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
   and stores the row number in `index`. An entity is a slice, read by slicing in h5py
-  rather than pulling the whole stacked dataset ([sliced reads](data-model.md#an-entity-is-a-slice)).
+  rather than pulling the whole stacked dataset ([sliced reads](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#an-entity-is-a-slice)).
 - **`groups`**: an artifact's `dataset` path resolves relative to each entity group, and
   so does a params path, which can leave it with `..`.
 - **`files`**: the file is the entity boundary, so there is no index.
@@ -251,5 +248,5 @@ neither.
 You declare it once and it is never re-inferred: the manifest, the locator metadata, and
 the read path all rely on it matching the files.
 
-See also [the `source` section](../reference/dataset-yaml.md#source) for the fields, and
-[How to publish a dataset](../ONBOARDING.md) for the steps.
+See also [the `source` section](dataset-yaml.md#source) for the fields, and
+[How to publish a dataset](walkthrough.md) for the steps.

@@ -1,5 +1,5 @@
 This file is for working **on** TileWright. Onboarding a dataset is the producer skill's
-job (`skills/onboarding/`), run from the data root; see `skills/README.md`.
+job (`skills/onboarding/`, shipped in the wheel), run from the data root; see `skills/README.md`.
 
 ## Environment
 
@@ -33,8 +33,7 @@ generate), *identity* and *fingerprint* as defined there. "Mode A/B" is retired.
 ## Contract surface vs implementation
 
 The onboarding skill (`skills/onboarding/SKILL.md`) reads the **contract surface** only: `contract.py`,
-`vocabulary.yml`, `examples/datasets/*.yml`, `docs/ONBOARDING.md`,
-`docs/reference/errors.md`. Needing to read `manifest.py` or `register.py` to learn what
+`vocabulary.yml`, and its own `reference/` and `examples/`. Needing to read `manifest.py` or `register.py` to learn what
 a valid YAML is means the surface has a gap; fix the surface.
 
 ## Working rules
@@ -51,8 +50,8 @@ a valid YAML is means the surface has a gap; fix the surface.
 | | |
 |---|---|
 | `docs/` | the mkdocs site (diataxis: Guides / Understand / Reference); `docs/adr/` unpublished |
-| `docs/reference/dataset-yaml.md` | **generated**; edit `contract.py` |
+| `skills/onboarding/reference/dataset-yaml.md` | **generated**; edit `contract.py` |
 | `examples/notebook.py` | marimo tour of the read path |
 | `scripts/` | maintainer tools (see `CONTRIBUTING.md`) |
-| `skills/` | producer skills (`onboarding`); `.claude/skills/` holds maintainer skills and a symlink to it |
+| `skills/` | producer skills (`onboarding`), shipped in the wheel; `.claude/skills/` holds maintainer skills and a symlink to it |
 | `config.yml`, `config.upload.yml` | server configs: pointer-serving, upload-hosting |

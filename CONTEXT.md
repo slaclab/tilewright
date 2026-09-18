@@ -57,8 +57,9 @@ fingerprint under the same key.
 unknown values warn (ADR-0003). Grows by pull request. _Avoid_: schema, semantic model.
 
 **Contract surface**: the artifacts that define a valid dataset: `contract.py`, the
-generated YAML reference, `vocabulary.yml`, `examples/datasets/*.yml`,
-`docs/ONBOARDING.md`. Onboarding reads the surface, never the implementation.
+generated YAML reference, `vocabulary.yml`, and the onboarding skill (`skills/onboarding/`:
+its walkthrough, reference pages and example YAMLs). Onboarding reads the surface, never
+the implementation.
 
 ### Commands
 

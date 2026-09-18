@@ -732,7 +732,7 @@ class _Walker:
         self.existing = existing_uids
         self.root = Path(self.body.directory)
         # Registration writes each artifact's locators beside the parameters under these
-        # names (reference/manifest.md). A table declares no artifacts, so none for it;
+        # names (skills/onboarding/reference/manifest.md). A table declares no artifacts, so none for it;
         # the types of a 'group' entry are added per entity, once expanded (ADR-0012).
         self.reserved = {f"{kind}_{art.type}": art.type for art in cfg.artifacts
                          if art.dataset for kind in ("path", "dataset", "index")}

@@ -14,7 +14,7 @@ from ruamel.yaml import YAML
 from tilewright.contract import load_dataset
 from tilewright.manifest import generate_manifests
 
-EXAMPLES = sorted((Path(__file__).parent.parent / "examples" / "datasets").glob("*.yml"))
+EXAMPLES = sorted((Path(__file__).parent.parent / "skills" / "onboarding" / "examples").glob("*.yml"))
 
 
 def test_one_example_per_source_tag():

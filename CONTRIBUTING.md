@@ -9,11 +9,10 @@
 | `src/tilewright/manifest.py` | YAML → Parquet manifests; key stamping; identity and collisions |
 | `src/tilewright/register.py` | manifests → Tiled over HTTP; both transports; fingerprint cases; verify |
 | `src/tilewright/delete.py`, `client.py`, `adapter.py` | deletion; same-filesystem reads; the server-side array adapter |
-| `examples/datasets/` | one annotated YAML per source tag; tests assert they validate with zero warnings |
 | `tests/` | offline by default; `-m integration` needs `TILED_URL`/`TILED_API_KEY` and a server with data |
 | `docs/` | the site; `docs/adr/` is internal and unpublished |
 | `scripts/` | maintainer tools, not installed, not on the CLI |
-| `skills/` | Claude Code skills for producers (`onboarding`); installed into `~/.claude/skills/`, run from the data root. `.claude/skills/onboarding` is a symlink to it |
+| `skills/onboarding/` | the producer skill, shipped in the wheel: `SKILL.md`, `reference/` (everything onboarding needs to know) and `examples/` (one annotated YAML per source tag; tests assert they validate with zero warnings). `tilewright skills install` links it into `~/.claude/skills/`; `.claude/skills/onboarding` is a symlink to it |
 | `.claude/skills/` | Claude Code skills for maintainers (`vocab-review`); load only in a session opened here |
 
 ## Running things
@@ -30,7 +29,7 @@ uv run --with 'mkdocs-material>=9,<10' mkdocs serve
 
 1. Edit the models in `contract.py`. Every field carries a `description`; write it for
    the person authoring a YAML.
-2. `uv run scripts/build_yaml_reference.py` regenerates `docs/reference/dataset-yaml.md`.
+2. `uv run scripts/build_yaml_reference.py` regenerates `skills/onboarding/reference/dataset-yaml.md`.
    Commit both; the docs workflow fails if they disagree.
 3. `tests/test_contract.py::test_concept_budget` pins the top-level keys and the source
    tags. Adding a key or a tag means editing that test in the same PR, and writing an ADR
@@ -49,15 +48,18 @@ Every fact lives on exactly one page, and other pages link to it:
 
 | Fact | Home |
 |---|---|
-| what a field means | `reference/dataset-yaml.md` (generated) |
-| the count formulas | `reference/errors.md`, "Expected counts" |
-| the read-back snippet | `ONBOARDING.md` step 5 |
-| how local and server paths agree | `ONBOARDING.md` step 3 |
-| that nothing fills `metadata` in from the files, root attributes included | `ONBOARDING.md` step 1, the `metadata` bullet |
-| what a checkout gives that a plain install does not | `install.md`, "No checkout" |
-| the server config lines | `host-a-server.md` |
+| what a field means | `skills/onboarding/reference/dataset-yaml.md` (generated) |
+| the count formulas | `skills/onboarding/reference/errors.md`, "Expected counts" |
+| the read-back snippet | `skills/onboarding/reference/walkthrough.md` step 5 |
+| how local and server paths agree | `skills/onboarding/reference/walkthrough.md` step 3 |
+| that nothing fills `metadata` in from the files, root attributes included | `skills/onboarding/reference/walkthrough.md` step 1, the `metadata` bullet |
+| what a checkout gives that a plain install does not | `docs/install.md`, "No checkout" |
+| the server config lines | `docs/host-a-server.md` |
 | connecting (`TILED_URL`, the check) | `includes/connect.md`, transcluded with `--8<--` |
 | why a decision was made | `docs/adr/` (unpublished) or an explanation page |
+
+Onboarding facts live in `skills/onboarding/`, which ships in the wheel; `docs/` holds what
+operators and catalog readers need. Pages link across the two by GitHub URL.
 
 Guides say how, explanation pages say why, reference pages list. A how-to that needs a
 "why" links to the explanation rather than repeating it. Retired terms: "Mode A/B",

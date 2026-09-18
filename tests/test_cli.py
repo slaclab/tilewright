@@ -39,10 +39,11 @@ def test_find_manifests_uses_the_key_layout(tmp_path):
     assert _find_manifests(yaml_path, "K") == (m / "entities.parquet", m / "artifacts.parquet")
 
 
-def test_dispatcher_lists_three_commands():
+def test_dispatcher_lists_four_commands():
     out = subprocess.run([sys.executable, "-m", "tilewright.cli", "--help"],
                          capture_output=True, text=True).stdout
-    assert [c for c in ("manifest", "register", "delete") if c in out] == ["manifest", "register", "delete"]
+    names = ["manifest", "register", "delete", "skills"]
+    assert [c for c in names if c in out] == names
     assert "stamp-key" not in out and "generate" not in out
 
 

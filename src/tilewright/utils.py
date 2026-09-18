@@ -75,7 +75,7 @@ def to_json_safe(value, nonfinite=None, _key=""):
 
     ``inf`` and ``-inf`` are no more JSON numbers than NaN is, and the client's
     serializer writes any of them as null whatever is sent, so they become None here too
-    (reference/manifest.md). ``nonfinite``, when given, is called with the key and the
+    (skills/onboarding/reference/manifest.md). ``nonfinite``, when given, is called with the key and the
     value before an infinity is dropped — with the path inside a mapping, ``limits.upper``
     — so that a caller can say once per key that the value was not stored. NaN is left to
     it silently: it is also what a row holds where it has no value for a column.

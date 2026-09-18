@@ -15,7 +15,7 @@ One row per entity.
 
 | Column | Required | Description |
 |---|---|---|
-| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](../explanation/identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
+| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
 | `source_group` | `groups` only | The entity's HDF5 group |
 | *(any others)* | no | Become the entity container's queryable metadata. A dotted column (`instrument.Ei`) is nested on registration; a `<field>_<attr>` column is that field's attribute label, holding a string, a number, a boolean or a list of them (an array attribute as its list) |
 
@@ -77,7 +77,7 @@ Each column has one type across every row, so the widest value in it wins:
 - **Floats are `float64`.** A `float32` dataset is written as `float64`; the uid is
   computed from the value as read, before the table exists.
 - **A null widens a column of integers to floats**, the same rule as for an entity that
-  lacks a parameter ([the data model](../explanation/data-model.md#entities-with-different-parameters)).
+  lacks a parameter ([the data model](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
   Two cases are easy to miss. `index` is an integer row number, but a dataset that also
   declares a `shared` axis has rows with no `index`, so the column is `float` (`0.0`,
   `1.0`); registration writes `index_<type>` back as an `int`, and slices land on the row
@@ -96,7 +96,7 @@ compares it: it is a record of which text produced these rows. So editing a comm
 line outside `source`, does not oblige a new manifest — the fingerprint is unchanged and
 `register` proceeds. What does need one is a change to the data or to the `source` block
 (the three procedures are in
-[How to publish a dataset](../ONBOARDING.md#4-register-the-dataset)); a changed
+[How to publish a dataset](walkthrough.md#4-register-the-dataset)); a changed
 `description` or facet is picked up by `register --update` from the YAML, not from here.
 
 ## Snapshot semantics
@@ -112,7 +112,7 @@ The manifest is therefore a snapshot, and registration trusts it.
 - `file_size` and `file_mtime` describe the file in the `file` column — the one the source
   matched. An array that lives in another file, reached through an external link or as a
   virtual dataset, is not stamped, so the `changed on disk` check
-  ([`register`](cli.md#tilewright-register)) never notices a change to it. Where one entity
+  ([`register`](https://github.com/slaclab/TileWright/blob/main/docs/reference/cli.md#tilewright-register)) never notices a change to it. Where one entity
   spans several files, rebuild the dataset after the linked files change.
 
 ## Entity metadata written at registration
@@ -126,7 +126,7 @@ Registration stamps locator keys onto each entity's metadata, one set per artifa
 | `index_<type>` | the manifest's `index`; absent for non-batch sources |
 
 They make provenance searchable and are what `tilewright.client.locate` reads
-([How to read a registered catalog](../using-the-catalog.md#read-the-files-directly)).
+([How to read a registered catalog](https://github.com/slaclab/TileWright/blob/main/docs/using-the-catalog.md#read-the-files-directly)).
 A `type` with a dot gives locator keys with a dot, such as `path_stage.x`: each is one key
 and is never nested, unlike a dotted parameter column.
 A locator is the pair `path_<type>` and `dataset_<type>`; `index_<type>` is optional. A

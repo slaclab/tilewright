@@ -120,7 +120,7 @@ Attribute labels (`Ei_units`) are stored beside a parameter but never hashed, so
 units string does not create a new entity. Dataset-level metadata is not hashed either;
 that is what `--update` is for. What the catalog stores is not identity either: a
 parameter the transport cannot carry is stored as null and hashed from the manifest all
-the same ([values the transport cannot carry](../reference/manifest.md#values-the-transport-cannot-carry)).
+the same ([values the transport cannot carry](manifest.md#values-the-transport-cannot-carry)).
 
-See also [the manifest reference](../reference/manifest.md) for the exact columns, and
-[the `identity` field](../reference/dataset-yaml.md#identity).
+See also [the manifest reference](manifest.md) for the exact columns, and
+[the `identity` field](dataset-yaml.md#identity).
