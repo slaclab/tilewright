@@ -32,9 +32,10 @@ generate), *identity* and *fingerprint* as defined there. "Mode A/B" is retired.
 
 ## Contract surface vs implementation
 
-The onboarding skill (`skills/onboarding/SKILL.md`) reads the **contract surface** only: `contract.py`,
-`vocabulary.yml`, and its own `reference/` and `examples/`. Needing to read `manifest.py` or `register.py` to learn what
-a valid YAML is means the surface has a gap; fix the surface.
+The onboarding skill (`skills/onboarding/SKILL.md`) reads the **contract surface** only:
+`contract.py`, `vocabulary.yml`, and its own `reference/` (one page per decision) and
+`examples/`. Needing to read `manifest.py` or `register.py` to learn what a valid YAML is
+means the surface has a gap; fix the surface.
 
 ## Working rules
 

@@ -3,6 +3,8 @@
 *Generated from `src/tilewright/contract.py` by `scripts/build_yaml_reference.py`; edit
 the models, not this page.*
 
+**Read this when** you need one field's exact rules.
+
 One YAML describes one dataset. To author one, see [How to publish a dataset](walkthrough.md);
 to copy a working file, see `../examples/<source>.yml`, one per source tag with its
 expected counts in the header.
@@ -40,25 +42,25 @@ sentence each, as `contract error: <field> <what to do>`.
 
 Values of the facets marked *vocabulary facet* are soft-checked: a known alias is rewritten
 to its id, an unknown value warns and registers as written
-([the soft vocabulary](vocabulary.md)).
+([the soft vocabulary](metadata-and-vocabulary.md#spelling-a-value-the-soft-vocabulary)).
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `method` | list of str | **yes** |  | Scientific methods, e.g. ['RIXS']; at least one. A method is how the values were obtained, so a field of study ('geophysics'), a file format and the name of a code are not methods -- the code is 'producer'. Data produced by no method at all (a reference table compiled from the literature, a solver benchmark, model weights) takes ['not_applicable'], the escape hatch 'material' has, and there is no other way to say it: the field is required and may not be empty. The vocabulary lists no 'not_applicable' among the methods, so it registers as written with a note; that note is the record that this dataset had no method, not a mistake to correct. Vocabulary facet. |
+| `method` | list of str | **yes** |  | Scientific methods, e.g. ['RIXS']; at least one. A method is how the values were obtained, so a field of study ('geophysics'), a file format and the name of a code are not methods -- the code is 'producer'. A simulation has a method too: the numerical technique that computed it ('DFT', 'particle-in-cell', 'regional climate model'), in the vocabulary's spelling where it has one. Data produced by no method at all (a reference table compiled from the literature, a solver benchmark, model weights) takes ['not_applicable'], the escape hatch 'material' has, and there is no other way to say it: the field is required and may not be empty. The vocabulary lists no 'not_applicable' among the methods, so it registers as written with a note; that note is the record that this dataset had no method, not a mistake to correct. Vocabulary facet. |
 | `data_type` | str | **yes** |  | What kind of data, as one of the data_type ids in the vocabulary: 'simulation', 'experimental', 'benchmark' or 'optimization'. A measurement of the world is experimental wherever the instrument stood, a laboratory, a field site or an orbit; what a model or a code computed is simulation. A benchmark is a set whose purpose is to grade something else -- the accuracy of a solver, the score of a model, the throughput of a pipeline -- so its arrays are the yardstick and not the subject. An optimization is the record of a search for a best value (a fit, a sweep that an objective steered, a training run), and its entities are the attempts. Enumeration is neither: a space computed or measured case by case, with nothing scoring it and nothing steering it, is simulation when a code computed it and experimental when an instrument measured it, however exhaustive the enumeration and whoever later grades a model against it. Vocabulary facet. |
 | `material` | str | **yes** |  | Material or system studied, e.g. 'NiPS3'. A physical system that is not a substance is named as the system it is ('upper atmosphere', 'seafloor sediment'); 'not_applicable' is for data with no physical subject at all, such as a benchmark of a solver. Vocabulary facet. |
-| `producer` | str | no |  | Code that produced or reduced the data ('sunny_jl', 'mantid'). When a chain of codes made the files, it names the last one that shaped the arrays being registered; name the earlier steps in 'description'. Vocabulary facet. |
+| `producer` | str | no |  | Code that produced or reduced the data ('sunny_jl', 'mantid'). When a chain of codes made the files, it names the last one that shaped the arrays being registered; name the earlier steps in 'description'. When that last code only post-processed a model's output (a regridder or a format converter such as CDO), readers will search for the model: name it in 'description' and in a key of its own, 'model: COSMO-CLM2', beside 'producer'. Vocabulary facet. |
 | `project` | str | no |  | Project or collaboration ('MAIQMag'). Vocabulary facet. |
 | `proposal` | str | no |  | Beamtime proposal id ('IPTS-37598'). Vocabulary facet. |
 | `facility` | str | no |  | Where experimental data was collected ('SNS'). Vocabulary facet. |
 | `instrument` | str | no |  | Instrument or beamline ('SEQUOIA', 'JEOL NeoARM'). Free text. |
 | `contact` | str | no |  | Who to ask about this dataset, as `Name <email>`. Nothing parses it, so a record that publishes no address still fills it: write the name and where it can be reached from ('Lattice Dynamics Group, Vasari Institute (via doi:10.5555/000000)'), or the name alone. A name with no address beats a guessed address, and both beat leaving the field out while someone can be named. |
-| `description` | str | no |  | One paragraph a reader uses to decide whether to open the dataset. Repeat the defining numbers here freely, but every number in it must also exist as a key of this 'metadata' block: the key is authoritative, the prose is the summary. The test for both halves is one question -- would anyone write a Key('...') == query on that number to find datasets? A count, a size, a rate, a temperature: yes, so it needs a key. A year in a name, a version string, a DOI, a dtype ('uint8'), a formula ('NiPS3'), and a value quoted to explain what it means ('0 is a valid reading, not a gap'): no, they are prose and need none. An entity parameter is not a key of this block, so a number that describes the entities as a set ('tilt runs from 0 to 30 degrees') takes dataset keys of its own here, or it goes. Nothing checks any of this, so a prose number that no key carries, or a key whose value the prose contradicts, is found by a reader. |
+| `description` | str | no |  | One paragraph a reader uses to decide whether to open the dataset. Repeat the defining numbers here freely, but every number in it must also exist as a key of this 'metadata' block: the key is authoritative, the prose is the summary. The test for both halves is one question -- would anyone write a Key('...') == query on that number to find datasets? A count, a size, a rate, a temperature: yes, so it needs a key. A year in a name, a version string, a DOI, a dtype ('uint8'), a formula ('NiPS3'), a dimensionality ('2-D'), and a value quoted to explain what it means ('0 is a valid reading, not a gap'): no, they are prose and need none. An entity parameter is not a key of this block, so a number that describes the entities as a set ('tilt runs from 0 to 30 degrees') takes dataset keys of its own here, or it goes. Nothing checks any of this, so a prose number that no key carries, or a key whose value the prose contradicts, is found by a reader. |
 
 ## `source`
 
 Exactly one of the four tags. Each owns only the keys below, so an illegal combination
-cannot be written ([sources](sources.md)). `identity` and `pattern` belong
+cannot be written ([source and entity](source-and-entity.md)). `identity` and `pattern` belong
 to the three HDF5 tags; a `table` has neither.
 
 ### `source.files`
@@ -119,7 +121,7 @@ and `batch`, the entity group for `groups`, which a path can leave with `..`; se
 queryable metadata; each field's own HDF5 attributes ride along as `<field>_<attr>`
 labels, stored beside the value and never part of the identity. `location` adds the
 values that only the entity's path holds: a number in a file or directory name, a group
-name, a batch row number ([parameters from the location](sources.md#parameters-from-the-location)).
+name, a batch row number ([parameters from the location](params-and-identity.md#parameters-from-the-location)).
 Entities that read different parameters get null for the ones they lack
 ([the data model](https://github.com/slaclab/tilewright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
 

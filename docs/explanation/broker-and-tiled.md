@@ -48,17 +48,17 @@ data, and TileWright answers them for this kind of data.
   → Entity → Artifact, so a query written against one dataset means something against the
   next ([the data model](data-model.md)).
 - **Entity extraction.** Four sources say where the entity boundary falls
-  ([sources](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/sources.md)). Only one resembles the file-per-node default; the others turn
+  ([sources](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/source-and-entity.md)). Only one resembles the file-per-node default; the others turn
   *part* of a file into an independently queryable record.
 - **Parameter harvesting.** The manifest step lifts HDF5 scalars, attributes, and named
   groups into container metadata, where Tiled's SQL-backed search can reach them. This is
   what makes `Key("sigma") >= 0.04` work at all.
 - **Stable identity.** Entity keys derive from the physics (or the provenance), dataset
   keys from the label, and a fingerprint keeps two labels from silently merging
-  ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md)).
+  ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/params-and-identity.md#identity-and-keys)).
 - **A soft vocabulary.** Canonical ids for `material`, `method`, `producer` and the other
   facets, so cross-dataset queries stay honest when six groups onboard independently
-  ([the soft vocabulary](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/vocabulary.md)).
+  ([the soft vocabulary](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/metadata-and-vocabulary.md)).
 - **A scan/register split.** `tilewright manifest` records each artifact's shape and dtype
   into [a Parquet manifest](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/manifest.md); `tilewright register` opens no HDF5
   at all. That is what makes 10,000 entities cheap, and what lets a server that cannot

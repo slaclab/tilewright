@@ -3,7 +3,7 @@
 Every message from `tilewright register`, `tilewright delete` and reads through the
 server that has a specific cause, in the order of the pipeline that raises it. Messages from
 `tilewright manifest` are part of onboarding, in
-[the onboarding skill's errors page](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/errors.md).
+[the onboarding skill's errors page](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/troubleshooting.md).
 
 ---
 
@@ -16,7 +16,7 @@ server that has a specific cause, in the order of the pipeline that raises it. M
 | `the manifests in <dir> were generated from a different source block than <yaml> now has` | The source block changed after the manifests were built | Rerun `tilewright manifest` |
 | `declares shared axes but the manifests for '<KEY>' carry none` | Manifests predate the `shared` entries | Rerun `tilewright manifest` |
 | `ERROR: <yaml>: could not register '<KEY>': TypeError: ...` | The Tiled client cannot encode a value under `metadata`, such as an integer beyond 64 bits (`Integer exceeds 64-bit range`). A `TypeError` raised anywhere else is a bug and prints its traceback instead | Quote the value in the YAML so that it is a string. Report a traceback as a bug |
-| `'<KEY>' already holds different data` | Another dataset (or a copy of this one in another directory) is registered under this label; or this table's `id` changed to, from or between lists since it was registered ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md)). Both fingerprints are printed | Choose a different label. For your own table after an `id` change: `tilewright delete <KEY>`, then `register` |
+| `'<KEY>' already holds different data` | Another dataset (or a copy of this one in another directory) is registered under this label; or this table's `id` changed to, from or between lists since it was registered ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/params-and-identity.md#identity-and-keys)). Both fingerprints are printed | Choose a different label. For your own table after an `id` change: `tilewright delete <KEY>`, then `register` |
 | `'<KEY>' was registered before fingerprints existed` | The container predates the fingerprint convention | If it is this dataset, `--adopt`; otherwise choose a different label |
 | `dataset '<KEY>' exists with storage='external' but this run would register storage='uploaded'` (or the reverse) | The key was registered with the other transport, and a dataset is one or the other | `tilewright delete <KEY>` and re-register, or choose a new label |
 | `415 ... mimetype application/x-hdf5-broker is not one that the Tiled server knows how to read` | The server's config has no `adapters_by_mimetype` entry for the adapter, or `tilewright` is not importable in the server's environment | Server side: [How to host a server](../host-a-server.md). On a server you do not run, ask its operator |

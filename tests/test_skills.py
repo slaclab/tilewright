@@ -56,6 +56,16 @@ def test_install_never_replaces_a_real_directory(tmp_path):
     assert (mine / "SKILL.md").read_text() == "my own"
 
 
+def test_every_reference_page_says_when_to_read_it_and_skill_md_routes_to_it():
+    """Pages are read when their decision comes (ADR-0019), so each says when, and the
+    routing in SKILL.md names each one; a page it does not name is never read."""
+    skill = (SKILL / "SKILL.md").read_text()
+    for page in sorted((SKILL / "reference").glob("*.md")):
+        text = page.read_text()
+        assert "**Read this when**" in text.split("\n## ")[0], f"{page.name} opens without 'Read this when'"
+        assert f"reference/{page.name}" in skill, f"SKILL.md never routes to {page.name}"
+
+
 def _slug(heading):
     """GitHub's anchor for a heading: lowercase, punctuation dropped, spaces to hyphens."""
     text = re.sub(r"[^\w\- ]", "", heading.strip().lower())

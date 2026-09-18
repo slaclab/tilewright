@@ -1,11 +1,21 @@
-# Errors and warnings
+# Troubleshooting
 
-Every message `tilewright manifest` produces that has a specific cause, in the order it
-raises them. [How to publish a dataset](walkthrough.md) has a short table of the common
-ones; this page is the full set. Messages from `tilewright register`, `delete` and reads
-through the server are in [the operator docs](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md).
+**Read this when** a command fails or prints a note or warning. The common symptoms first;
+then every message `tilewright manifest` produces that has a specific cause, in the order
+it raises them. Messages from `tilewright register`, `delete` and reads through the server
+are in [the operator docs](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md).
 
----
+## Common symptoms
+
+| Symptom | Fix |
+|---|---|
+| `contract error: ...` | Each line names the field and the fix; the [YAML reference](dataset-yaml.md) has every field |
+| `has no 'key:' yet` | Run `tilewright manifest` first |
+| `N entities share K uids` | The report shows what differs and a fix for your source: a distinguishing parameter or `identity: provenance`; for a table, another column in `id` ([the fix for each source](#collisions-the-fix-for-each-source)) |
+| `already holds different data` | Another dataset owns that label; choose a different one. If it is your table and you changed its `id`, delete it and register again ([identity and keys](params-and-identity.md#identity-and-keys)) |
+| `no manifests for '<KEY>'` | Run `tilewright manifest` on this YAML |
+| Entity or artifact counts are wrong | Check `pattern`, the batch leading axis, or `entity_group` ([expected counts](counts-and-cost.md#expected-counts)) |
+| Registration succeeds but every read returns HTTP 500 | The server is missing the adapter, or `server_base_dir` / `readable_storage` / a symlinked path is wrong ([paths and the server](paths-and-server.md#when-the-server-reads-the-files)). Fix, then regenerate, delete, register again |
 
 ## `tilewright manifest`: the contract
 
@@ -25,9 +35,9 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `contract error: source.groups.exclude_groups: '<entry>': each entry is a pattern matched against the name of a subgroup` | An empty entry, or one with a `/` | Write the subgroup's name, or a glob of it: `calibration`, `cal*`. It is matched against names, never paths |
 | `contract error: key '<K>' does not match slug(label)` | `label` changed after the key was written | Restore the label, or delete the `key:` line and rerun. A drifted key is never silently rewritten, because the old key may already hold registered data |
 | `contract error: a 'table' source has no readable arrays: remove 'artifacts'` | `artifacts` on a table source | Remove it |
-| `contract error: source.table.identity is not a contract key` | `identity` under a table. A table's identity is its `id` column(s) ([identity and keys](identity.md)) | Remove it. To tell rows with a repeated id apart, list more columns in `id` |
+| `contract error: source.table.identity is not a contract key` | `identity` under a table. A table's identity is its `id` column(s) ([identity and keys](params-and-identity.md#identity-and-keys)) | Remove it. To tell rows with a repeated id apart, list more columns in `id` |
 | `contract error: source.table.id: must be a column name or a list of column names, none of them empty` (or `names a column more than once`) | `id` is empty, not a string, or a list with an empty, non-string or repeated entry | Write one column, `id: run`, or several, `id: [specimen, replicate]` |
-| `contract error: source.<tag>.params.location: is not a Python regular expression (...)` | `location` does not compile; the parentheses hold Python's own words, such as `missing ), unterminated subpattern` | Correct the expression. Write it in single quotes, where YAML keeps every backslash: in double quotes `"\d"` is a YAML error and `"\b"` becomes a backspace ([parameters from the location](sources.md#parameters-from-the-location)) |
+| `contract error: source.<tag>.params.location: is not a Python regular expression (...)` | `location` does not compile; the parentheses hold Python's own words, such as `missing ), unterminated subpattern` | Correct the expression. Write it in single quotes, where YAML keeps every backslash: in double quotes `"\d"` is a YAML error and `"\b"` becomes a backspace ([parameters from the location](params-and-identity.md#parameters-from-the-location)) |
 | `contract error: source.<tag>.params.location: has no named group, so it gives no parameter` | `location` has only unnamed groups, `(...)`, or none; unnamed groups are wildcards | Name each value you want: `(?P<year>\d{4})` |
 | `contract error: source.<tag>.params.location: may not name a group uid` (or `source_group`) | A named group is called like a column of `entities.parquet` that is not a parameter | Choose another name |
 | `contract error: source.<tag>.params.location: may not name a group _<name>: a name that starts with '_' is kept for the manifest's own use` | A named group starts with `_`. The manifest keeps its own bookkeeping under such names and leaves it out of `entities.parquet` | Choose a name that starts with a letter |
@@ -40,15 +50,15 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `contract error: artifacts[<i>]: a 'batch' source takes 'dataset' entries only` | A `group` entry under `batch`, whose first artifact sets the batch size | Name each array of the group in an entry of its own |
 | `contract error: shared[<i>].group is not a contract key` | A `group` under `shared` | A shared entry names one array, with `dataset` |
 | `contract error: artifacts[<i>]: type '<t>' contains '/', which separates the keys of a path; a type is a node key that travels in a URL, so the server would not serve that array back` (or `shared[<i>]`; or `'?'`, `'#'`, an ASCII control character, `'%20'` and the like, or `is a dot segment`) | A `type` the server would register but never serve back, or refuse | Replace the character, with `_` say. Spaces, dots, brackets, `-`, `\|`, a leading `_` or `.`, and non-ASCII letters are fine ([the `type` field](dataset-yaml.md#artifacts)) |
-| `note: metadata.<field> '<v>' is not in the vocabulary` | A facet value with no canonical id | Non-fatal by design ([the soft vocabulary](vocabulary.md)). Prefer an id so the dataset lands on the same facet as everyone else's |
+| `note: metadata.<field> '<v>' is not in the vocabulary` | A facet value with no canonical id | Non-fatal by design ([the soft vocabulary](metadata-and-vocabulary.md#spelling-a-value-the-soft-vocabulary)). Prefer an id so the dataset lands on the same facet as everyone else's |
 
 ## `tilewright manifest`: the data
 
 | Message | Cause | Fix |
 |---|---|---|
 | `no files match '<pattern>' under <directory>` | Wrong directory or pattern | `ls` the directory; the default pattern is `**/*.h5`, and the glob rules are in [the `pattern` field](dataset-yaml.md#sourcefiles) |
-| `OSError: Unable to open file ... file signature not found` | The pattern matched something that is not HDF5: a Parquet sidecar, a `.gz`, or a netCDF-3 classic file, which a `.nc`, `.cdf` or `.grd` name often is | Tighten `pattern`. Check a name before you trust it: `head -c 8 <file> \| od -c` prints `211 H D F` for HDF5 (netCDF-4 included) and `C D F 001` for netCDF-3. netCDF-3 has to be converted before it can be registered, or described with a `table` source ([sources](sources.md#what-each-one-looks-like)) |
-| `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems_links(print)`, see below) and correct `dataset`, or add `optional: true` |
+| `OSError: Unable to open file ... file signature not found` | The pattern matched something that is not HDF5: a Parquet sidecar, a `.gz`, or a netCDF-3 classic file, which a `.nc`, `.cdf` or `.grd` name often is | Tighten `pattern`, and [check the signature](netcdf-cf.md#check-the-file-signature-first) of a name before you trust it |
+| `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems_links(print)`, [how](source-and-entity.md#dumping-a-file-that-uses-hard-links)) and correct `dataset`, or add `optional: true` |
 | `<file>: artifact type='<t>' group '<g>' not found (mark it 'optional: true' if some entities lack it)` (the entity is named `<file>:/<group>` for `groups`) | The `group` of an entry names nothing in that file. Under `groups` it is relative to each entity group, and the message shows the full path | List the file's groups (`h5py.File(p).visititems_links(print)`) and correct `group`, or add `optional: true` |
 | `<file>: artifact type='<t>' group '<g>' is a dataset: name it with 'dataset'` | The `group` of an entry names a dataset | Write it as a `dataset` entry, with a `type` without `{name}` |
 | `<file>: artifact type='<t>' group '<g>' has no dataset whose name matches members '<m>'; it holds N datasets (...)` | No dataset directly in the group matches `members` (case matters), or the group holds only subgroups, which are never members | Compare `members` with the names the message lists and correct it or `group`, or add `optional: true` if only some entities have them |
@@ -64,7 +74,7 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `<file>:/<group>: params.group '<path>' climbs N levels from an entity group M levels below the file root, so above the root` (or `params.groups.<name>`) | The path has more `..` segments than the entity group is deep | Remove the extra `..`: M of them reach the file root. A path inside the file root is written after them: `../../calibration` |
 | `<file>:/<group>: params.group '<path>' names no group or dataset there, and under `from: attrs` a group that a container lacks is an error` (or `params.groups.<name>`) | Under `from: attrs` the group's own attributes are the parameters, so a file (or entity group) without that group has none of them; the message names the container that lacks it. Under `from: datasets` the same missing group leaves null columns instead | Follow the `Fix:` line: narrow `pattern` (and `entity_group`) to the containers that hold the group, name a group every one of them has, or read these parameters with `from: datasets` |
 | A parameter from a group beside the entity groups is missing, or belongs to another entity | A 1-D array there is one value per entity only when its length equals the number of sibling entity groups after `exclude_groups`; any other length is skipped without a message. The values pair with the siblings in text order, so `scan_10` comes before `scan_2` ([the `groups` fields](dataset-yaml.md#sourcegroups)) | Count the subgroups beside the entity group, add the ones that are not entities to `exclude_groups`, and check that the names are zero-padded. When they are not, text order does not follow the array: leave the array out with `exclude` and say so in the description. A group beside the entity groups is read through its own path: `../calibration` |
-| `<file>: no parameters found, so no identity` | `params` points at a group with no scalars, and identity is `params` | Point `params` at the right group, take the values from the path with `params.location` ([parameters from the location](sources.md#parameters-from-the-location)), declare `params: null` (valid for `files`, `batch` and `groups`), or set `identity: provenance` |
+| `<file>: no parameters found, so no identity` | `params` points at a group with no scalars, and identity is `params` | Point `params` at the right group, take the values from the path with `params.location` ([parameters from the location](params-and-identity.md#parameters-from-the-location)), declare `params: null` (valid for `files`, `batch` and `groups`), or set `identity: provenance` |
 | `<file>: its location '<location>' does not match params.location '<expression>'` (the entity is named `<file>:/<group>` for `groups`, `<file> row <i>` for `batch`) | One entity's location does not fit the expression: a file named unlike the rest, or an expression written for a file name when a `groups` location ends in `:/<group path>` and a `batch` location in `:<row number>` | Try it on the location the message quotes, `re.search(expression, location)`. Widen the expression, or narrow `pattern` so that the odd file is not matched |
 | `<file>: params.location names '<n>', and '<key>' is also read inside the file` (or `inside the entity group`) | A named group has the name of a parameter or a `<field>_<attr>` label read in the container, or of the parent of a dotted key (`instrument` for `instrument.Ei`), so one value would hide the other | Rename the group in `location`, or leave the inner value out with `exclude` |
 | `<KEY>: N entities share K uids; every entity must be distinct` | Repeated parameter sets under `identity: params`; a pattern or `entity_group` matching the same thing twice under `provenance`; table rows that repeat the `id` value(s) | For every shared uid the report says where each entity came from (for a table, the id values and the row numbers, counted from 0 after the header), then each column or parameter whose values differ, one value per entity, and under `params` the parameters they share. Its `Fix:` line depends on the source: [the fix for each source](#collisions-the-fix-for-each-source) |
@@ -77,43 +87,12 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `note: column '<c>' of entities.parquet holds values of more than one kind across rows; stored as JSON text` (or `artifacts.parquet`) | A parameter changes type across files (a number in one, a string or an array in another; a `params.location` group that captures only digits for some entities and other text for others), or one attribute name is a list for one artifact type and a scalar for another. Parquet has one type per column ([columns of more than one kind](manifest.md#columns-of-more-than-one-kind)) | The manifest is written, and that column holds each value's JSON text, so a query on the key compares text. For a parameter, dump two files and diff them, fix the inconsistent file and regenerate; for a location group, make it capture the same kind of text everywhere. For one attribute name shared by two artifact types, nothing to do |
 | `note: <path>@<attr> is not carried as array metadata: HDF5 object references cannot be stored` (or `as a label`, for a parameter field's attribute) | The attribute is an HDF5 object or region reference, or holds one. A reference points inside one file, so no catalog can follow it | Nothing to do: the array and the other attributes are carried. Write what a reader needs as a path or a name in another attribute |
 | `WARNING: /path@attr is not carried as array metadata` | A dataset attribute is named like a column of `artifacts.parquet`, which it would overwrite ([which names](manifest.md#reserved-names)) | Harmless; the attribute is dropped, not the array. Rename it in the file if you need it carried |
-| Entity or artifact counts differ from what you expected | The glob matched extra or fewer files; a batch leading axis is not what you assumed (it is read from `artifacts[0]`); `entity_group` or `exclude_groups` is wrong | Count the files, dump one file, fix, regenerate. Formulas below |
-
-### Dumping a file that uses hard links
-
-`visit` and `visititems` walk *objects*, and each object is visited once. A field that is
-hard-linked into two groups — the usual way a detector's arrays also appear under the
-group a reader is pointed at — is therefore listed under one of its paths only, and the
-other path looks missing although it resolves perfectly. `visititems_links(print)` walks
-*links*, so it prints every path, and so does walking `keys()` group by group:
-
-```python
-import h5py
-with h5py.File(p) as f:
-    f.visititems_links(print)                 # every path, hard links included
-    f["/entry/data"].keys()                   # or walk the groups yourself
-```
-
-A path this prints is a path the YAML can name, whichever link leads to it.
+| Entity or artifact counts differ from what you expected | The glob matched extra or fewer files; a batch leading axis is not what you assumed (it is read from `artifacts[0]`); `entity_group` or `exclude_groups` is wrong | Count the files, dump one file, fix, regenerate. [The formulas](counts-and-cost.md#expected-counts) |
 
 ### Collisions: the fix for each source
 
 | Source | The report's `Fix:` line | What to do |
 |---|---|---|
-| `table` | list one of the columns that differ, per uid, in `id`, with an example list | Make `id` a list, `id: [specimen, replicate]`, so that together the columns are unique. When the rows are equal in every column (`no column differs`), no set of columns is unique: de-duplicate the table. The contract does not number rows ([why](identity.md)) |
+| `table` | list one of the columns that differ, per uid, in `id`, with an example list | Make `id` a list, `id: [specimen, replicate]`, so that together the columns are unique. When the rows are equal in every column (`no column differs`), no set of columns is unique: de-duplicate the table. The contract does not number rows ([why](params-and-identity.md#identity-and-keys)) |
 | `files`, `batch`, `groups` under `identity: provenance` | the pattern or `entity_group` is matching the same thing twice | Tighten `pattern` or `entity_group` |
-| `files`, `batch`, `groups` under `identity: params` | add a distinguishing parameter, from inside the container or from its path with `params.location`, or set `identity: provenance` | Add a run number or seed to the parameters. When only the file, directory or group name or the batch row tells the entities apart, take it with `params.location` ([parameters from the location](sources.md#parameters-from-the-location)). Or write `identity: provenance` under the source |
-
-### Expected counts
-
-| Source | Entities | Artifacts |
-|---|---|---|
-| `files` | files matched by `pattern` (`ls <directory>/<pattern> \| wc -l`) | entities × non-optional `artifacts` entries, plus optional ones where present |
-| `batch` | sum over files of the leading axis of `artifacts[0]` | entities × `artifacts` entries |
-| `groups` | subgroups of every group `entity_group` matches (or of the root), less those `exclude_groups` names, summed over files | entities × `artifacts` entries |
-| `table` | rows of the table | 0 |
-
-Plus one artifact row per `shared` axis, reported separately as `shared=S`. A `group` entry
-counts, for each entity, the datasets directly in its group whose names match `members`
-(none where an optional group is absent). `tilewright manifest --check` prints the number
-of entries, not this count.
+| `files`, `batch`, `groups` under `identity: params` | add a distinguishing parameter, from inside the container or from its path with `params.location`, or set `identity: provenance` | Add a run number or seed to the parameters. When only the file, directory or group name or the batch row tells the entities apart, take it with `params.location` ([parameters from the location](params-and-identity.md#parameters-from-the-location)). Or write `identity: provenance` under the source |

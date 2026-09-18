@@ -54,6 +54,6 @@ have replaced one is not published.
   link, since `--8<--` snippets render only under mkdocs.
 - mkdocs no longer checks links inside the skill, so `tests/test_skills.py` does.
 - The move and the rewrite are separate pull requests, each followed by a blind onboarding
-  run, so a regression traces to one of them. The rewrite (#48) splits `reference/` by the
-  decision the agent faces and turns Step 2 into a routing checklist.
+  run, so a regression traces to one of them. The rewrite (#48, ADR-0019) splits
+  `reference/` by the decision the agent faces and turns Step 2 into a routing checklist.
 - A new producer skill goes in `skills/`; a new maintainer skill in `.claude/skills/`.

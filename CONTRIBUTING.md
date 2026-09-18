@@ -34,7 +34,9 @@ uv run --with 'mkdocs-material>=9,<10' mkdocs serve
 3. `tests/test_contract.py::test_concept_budget` pins the top-level keys and the source
    tags. Adding a key or a tag means editing that test in the same PR, and writing an ADR
    in `docs/adr/`: contract growth is deliberate.
-4. Update the example YAMLs and the onboarding skill's Step 2 if authors need to know.
+4. Update the example YAMLs, and the `skills/onboarding/reference/` page for the decision
+   the change touches, if authors need to know. Each page has one decision; `SKILL.md`
+   only routes to it.
 
 ## Adding a vocabulary term
 
@@ -49,10 +51,10 @@ Every fact lives on exactly one page, and other pages link to it:
 | Fact | Home |
 |---|---|
 | what a field means | `skills/onboarding/reference/dataset-yaml.md` (generated) |
-| the count formulas | `skills/onboarding/reference/errors.md`, "Expected counts" |
+| the count formulas, and when a source is too slow to register | `skills/onboarding/reference/counts-and-cost.md` |
 | the read-back snippet | `skills/onboarding/reference/walkthrough.md` step 5 |
-| how local and server paths agree | `skills/onboarding/reference/walkthrough.md` step 3 |
-| that nothing fills `metadata` in from the files, root attributes included | `skills/onboarding/reference/walkthrough.md` step 1, the `metadata` bullet |
+| how local and server paths agree | `skills/onboarding/reference/paths-and-server.md` |
+| that nothing fills `metadata` in from the files, root attributes included | `skills/onboarding/reference/metadata-and-vocabulary.md` |
 | what a checkout gives that a plain install does not | `docs/install.md`, "No checkout" |
 | the server config lines | `skills/onboarding/reference/config-pointer.yml`, embedded in `docs/host-a-server.md` |
 | connecting (`TILED_URL`, the check) | `includes/connect.md`, transcluded with `--8<--` |

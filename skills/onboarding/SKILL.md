@@ -1,55 +1,63 @@
 ---
 name: onboarding
 description: >-
-  Onboard a new HDF5 dataset into the Tiled catalog. Reads the contract surface
-  (its walkthrough, the pydantic contract, the vocabulary, the example YAMLs), then
-  explores the user's data + codebase to draft a first-pass dataset YAML with predicted
-  entity/artifact counts, pauses for the user's review, runs `tilewright manifest` and
-  compares the counts, pauses again for the go, then registers and proves the result by
-  reading it back through the server. Use when the user wants to onboard, register, or add
-  a new dataset, or asks to "get ready to onboard a dataset".
+  Onboard an HDF5 (or netCDF-4, NeXus) dataset into a Tiled catalog with tilewright:
+  explore the files, draft the dataset YAML with the user, predict and check the counts,
+  register, and read it back through the server. Use when the user wants to onboard,
+  register, publish or add a dataset to Tiled, write a tilewright dataset YAML, or asks
+  to "get ready to onboard a dataset".
 ---
 
 # Onboarding a dataset
 
 Goal: take a producer's HDF5 dataset and register it into the catalog by authoring **one
-dataset YAML** against the contract surface, then running `tilewright manifest` and
-`tilewright register`. You onboard by reading the *contract*, never broker *implementation*.
+dataset YAML** against the contract, then running `tilewright manifest` and
+`tilewright register`. You onboard by reading the *contract*, never the implementation.
 
 ## Where you are
 
-The session runs in the user's **data root**, where the YAML and its manifests go. Everything
-this skill reads ships with it, beside this file: `reference/` (the walkthrough, the source,
-identity, field and error references) and `examples/` (one YAML per source tag). Every
-`reference/…` and `examples/…` path below is relative to this skill's directory, not to
-the working directory. The contract models and the vocabulary ship in the package,
-`<pkg>`, which this skill sits inside once installed:
+The session runs in the user's **data root**, where the YAML and its manifests go. What
+this skill reads ships beside this file: `reference/` and `examples/`. Every `reference/…`
+and `examples/…` path below is relative to this skill's directory, `$SKILL`, not to the
+working directory. The contract models and the vocabulary ship in the package, `<pkg>`,
+which this skill sits inside once installed:
 
 ```bash
-d=$(readlink -f <this skill's base directory>/../..)   # the package, or a checkout's root
-[ -f "$d/contract.py" ] && echo "$d" || echo "$d/src/tilewright"
+SKILL=~/.claude/skills/onboarding        # replace with the base directory Claude Code printed
+                                         # when this skill loaded
+d=$(readlink -f "$SKILL/../..")          # the package, or a checkout's root
+PKG=$([ -f "$d/contract.py" ] && echo "$d" || echo "$d/src/tilewright")
+ls "$PKG/contract.py" "$PKG/vocabulary.yml"
 ```
 
 If `tilewright` is not on `PATH`, stop and ask the user to install it
 (`tilewright skills install` is how this skill got here).
 
-## Step 0 — Read the contract surface (do this first, do not skip)
+## Step 0 — Read the contract (do this first)
 
-Read these, in order. They define what a valid dataset is; do not reverse-engineer it from
+Read these now. They define what a valid dataset is; do not reverse-engineer it from
 `manifest.py` / `register.py`:
 
-1. `reference/walkthrough.md` — the walkthrough: pick a transport, author, manifest, make paths
-   agree, register, read back. It links the source, field, and error references.
-2. `<pkg>/contract.py` — the authoritative field contract (every YAML field, its
-   type, whether it is required, what it means).
-3. `<pkg>/vocabulary.yml` — canonical ids + aliases for `method`, `material`,
-   `producer`, `project`, `proposal`, `facility`, `data_type`.
-4. `examples/{files,batch,groups,table}.yml` — one worked example per source tag,
-   each with its expected counts in the header; `files_nexus.yml` shows a NeXus tree mapped
-   onto the contract (several parameter groups → nested metadata).
-5. `reference/walkthrough.md` step 4, the upload tab — **only if** the server cannot see the
-   user's files (they will say so, or you learn it in Step 1). Same contract, different
-   transport.
+1. `<pkg>/contract.py` — the authoritative field contract: every YAML field, its type,
+   whether it is required, and what it means. Its descriptions settle the hard cases.
+2. `reference/walkthrough.md`, the section headings and steps 1–2 — the path from YAML to
+   read-back that the steps below follow.
+
+Everything else is read when its moment comes, one page per decision:
+
+| Read | When |
+|---|---|
+| `reference/paths-and-server.md` | Step 1, once the user says where the server runs; again in Step 5 |
+| `reference/source-and-entity.md` | Step 2, before anything else |
+| `examples/<source>.yml` | Step 2, once you know the source (`files_nexus.yml` for NeXus) |
+| `reference/params-and-identity.md` | Step 2, parameters and identity |
+| `reference/artifacts-and-shared.md` | Step 2, artifacts and shared axes |
+| `reference/nexus.md` | Step 2, if any group has an `NX_class` attribute |
+| `reference/netcdf-cf.md` | Step 2, for a `.nc`/`.cdf`/`.grd` name or `NAME`/`scale_factor` attributes |
+| `reference/metadata-and-vocabulary.md` and `<pkg>/vocabulary.yml` | Step 2, drafting `metadata` |
+| `reference/counts-and-cost.md` | Step 3, predicting the counts |
+| `reference/troubleshooting.md` | whenever a command fails |
+| `reference/dataset-yaml.md`, `reference/manifest.md` | to look up one field or one manifest column |
 
 ## Step 1 — Report ready, ask for the starting context (and wait)
 
@@ -64,7 +72,8 @@ values warn, they don't block). Then ask for the starting context you need to ex
 - **who to name as `contact`** for the dataset (`Name <email>`), and whether the
   registrant is that person;
 - **where the server runs** relative to the data (same filesystem → pointer registration;
-  server can't see the files → `tilewright register --upload`); and
+  server can't see the files → `tilewright register --upload`;
+  `reference/paths-and-server.md`); and
 - any other context they want to give (paper, README, prior YAML, etc.).
 
 **This is a conversation — stop and wait for the answer**, even if the data path was
@@ -75,11 +84,12 @@ metadata besides the data itself (see Step 2). Don't go looking for more on your
 
 Explore **only two things**: (a) the data path, and (b) the codebase/context the user
 named in Step 1. Do **not** hunt for context elsewhere in the repo or its history — not the
-`examples/`, not deleted files showing in `git status`, not `git show`/`git log`, not
-`config.yml`'s storage roots, not example keys in `README.md`/`CLAUDE.md`, not old
-manifests. Those describe *other* datasets and deployments; copying values from them
-fabricates provenance for this one. If you notice such a file, ignore it and — if it seems
-relevant — *mention* it to the user and let them decide whether to hand it to you.
+`examples/` beyond using them as templates, not deleted files showing in `git status`, not
+`git show`/`git log`, not `config.yml`'s storage roots, not example keys in
+`README.md`/`CLAUDE.md`, not old manifests. Those describe *other* datasets and
+deployments; copying values from them fabricates provenance for this one. If you notice
+such a file, ignore it and — if it seems relevant — *mention* it to the user and let them
+decide whether to hand it to you.
 
 The same goes for a YAML that already describes **this very dataset** (a prior
 `.tilewright/datasets/<KEY>.yml` in the data root, or manifests for it): don't silently
@@ -87,170 +97,39 @@ adopt, overwrite, or delete it. Tell the user it exists and ask whether to start
 from scratch.
 
 Explore first so your questions are informed; then ask the user for what the data can't
-say — in **one batched round**, not field-by-field across many turns. Build the YAML
-**dynamically** from what you discover:
+say — in **one batched round**, not field-by-field across many turns. Work through these in
+order, reading each page when you reach it:
 
-- **Inspect the HDF5** with `h5py`: open representative files; list groups/datasets,
-  shapes, dtypes, and attributes (`visititems` walks objects, so a hard-linked field
-  appears under one path only — use `visititems_links(print)` to see every path). Decide
-  the **source** from how entities are packed (one
-  file each → `files`; stacked on axis 0 → `batch`; one group each → `groups`; not HDF5 at
-  all, with a sidecar table → `table`). When two of those fit at once — one entry per file
-  whose signal also has a short frame axis, or a stack on axis 0 inside each of several
-  groups — break the tie on **what a reader queries**: the unit they would search for is
-  the entity, and an axis they would always want whole stays inside the artifact. Then the
-  **artifacts** (the array datasets and good
-  `type` names: spaces, dots, brackets and non-ASCII letters are fine, but not `/`, `?`,
-  `#`, an ASCII control character or `%` with two hex digits, nor `.` or `..` alone, so
-  keep a dataset's name where you can and replace only those; `optional: true` for one
-  that some entities lack), the **parameters**
-  (`params.group`, or `params.groups` when the scalars are spread over several groups —
-  each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
-  `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/operator_note` —
-  and `recursive` for subgroups; a field named `uid` or `source_group`, a `params.groups`
-  name that is one of those, and under a `table` a column or `locator` key that is one —
-  or that nests under one, `uid.raw` — are refused: they are the two columns the manifest
-  writes itself, so `exclude` the field or rename the column, or nest the field's group
-  under a name of your own to keep the value), and any **shared axes** (arrays
-  *identical for every entity* → `shared:`, if you serve them at all — the YAML lists what
-  the dataset serves, not what the file holds, so a constant placeholder nobody would read
-  is simply left out; an axis that varies per entity is an artifact, and an array that is
-  not an axis at all, a lookup or normalization table the whole dataset shares, belongs in
-  `shared:` too). The entry names one copy by its absolute path, and `manifest` checks
-  every copy the source holds against it: under `files`/`batch` that path in each file,
-  under `groups` the same path inside **each entity group of each file**, so one file with
-  four entity groups is checked four times. A differing copy is refused, naming both — you
-  do not have to digest those arrays by hand first. The check is deliberately off in two
-  shapes, and there you do: a path **beside** the entity groups (a calibration group above
-  them, say), and one inside a group `exclude_groups` leaves out, are each one copy per
-  file, so copies that differ from entity group to entity group under such a path pass.
-  A group that simply lacks the array is passed over, and its entity is served the copy
-  the entry names.
-  Field attributes (`units`, ...) are captured automatically — nothing to declare; an
-  array attribute comes through as a list, and `reference/manifest.md` says which
-  values are left out and what a `batch` row's copy of them describes. A
-  size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
-  So does a netCDF-4 dimension placeholder that has no coordinate variable (a dataset
-  whose `NAME` attribute begins `This is a netCDF dimension`, value `0.0`): `exclude` it —
-  and leave it out of `shared:` too, at any length, since a placeholder of 8 or 2 is
-  identical in every file and would otherwise pass for an axis. A *real* coordinate
-  variable of length 1 (its own `units`, a `NAME` that is just its name) is the opposite
-  case: a genuine scalar parameter, and if it is identical in every file it hands every
-  entity the same identity — take what varies from the name with `params.location`.
-  Any bigger dataset in a params group, a `(7,)` array say, is skipped without a message
-  under `files` and `groups` (in `batch`, a 1-D one of length N is one value per row); a
-  per-entity log of that shape can still be an **artifact**, but it is then read and not
-  queried, so ask the producer for a scalar summary (a mean, a range) if it must be
-  searchable.
-  Every container is judged on its own — each file, and under `groups` each entity group —
-  again without a message: a field of size 1 in some of them and a bigger one in others is
-  a parameter only where one of the rules above makes it one, and a `params.groups` group
-  that some files or entity groups lack leaves those entities without its columns (with
-  `from: attrs`, a missing group is an error naming the container). So check a field's
-  shape, and a group's presence, across the containers, not in one.
-  `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
-  `type`, and `uid` and `source_group` always (`reference/manifest.md`, Reserved
-  names): a parameter with such a name goes
-  in `exclude`, a `params.location` group gets another name, or pick artifact type names
-  that do not clash. Every other name is free — `index`, `size` and `type` are ordinary
-  parameters — so do not rename a producer's field out of caution.
-- **netCDF-4 and CF files.** A packed variable (`scale_factor` / `add_offset` on an int
-  array) registers as the **stored integers**: nothing unpacks, both factors ride along as
-  artifact metadata, and a reader who does not apply them sees counts — say so in the
-  `description`. A grid-mapping variable (a 0-dim value such as `crs = 0` whose
-  meaning is entirely in its attributes) is broadcast to every entity as a meaningless
-  parameter under `batch`: `exclude` it and put the projection in the dataset `metadata`.
-  Its root attributes (`@title`, `@source`) need copying into the YAML by hand like any
-  other file's — see the `metadata` bullet below. And a `.nc`, `.cdf` or `.grd`
-  name is often netCDF-3 classic, which no HDF5 source can read: check the file
-  signature before you plan anything (`reference/errors.md`, the `file signature not
-  found` row).
-- **Many arrays side by side in one group (one dataset per channel or per step) → one
-  `group` entry.** `{type: "trace_{name}", group: /channels}` gives one artifact per
-  dataset directly in the group (subgroups are not members), typed with `{name}` filled
-  in; quote the template. `members: "ch_*"` picks some, `optional: true` skips an entity
-  without the group. Not under `batch` or `shared`. The types must stay unique after
-  expansion. Count = matching members per entity. Thousands of per-step datasets
-  register slowly: tell the user, and suggest stacking them into one array (or a `batch`
-  file) before onboarding.
-- **Decide identity.** The default hashes parameter values, so two entities with identical
-  parameters would collide — `tilewright manifest` refuses that and names them. Repeated
-  measurements (same settings, different runs) are the usual case: put a run number in the
-  params, or write `identity: provenance` under the source. Say which and why in a comment.
-  A `batch` file with no per-entity values at all takes `params: null` (identity becomes
-  provenance), as `files` and `groups` do.
-- **Values only in the file, directory or group name, or a batch row number →
-  `params.location`.** A regex, in single quotes, searched in the path relative to
-  `directory` (`groups`: `<file>:/<group>`; `batch`: `<file>:<row>`); each named group is
-  a parameter and part of the identity:
-  `params: {location: 'cell(?P<cell>\d+)/sweep_(?P<bias_mV>[+-]?\d+)mV\.h5$'}`. Digits
-  become ints (leading zeros are lost), unnamed groups are wildcards. Try it with
-  `re.search` on every name you listed: one that does not match stops the manifest. A
-  `batch` file with nothing else per row can keep a queryable row number,
-  `':(?P<shot>\d+)$'`, instead of `params: null`; with several files, capture part of the
-  file name too, since every file's rows start again at 0.
-- **Entities deeper than one group level, or values stored beside the entity groups →
-  `groups` with a glob `entity_group`, `exclude_groups` and a params path that starts
-  with `..`.** `entity_group: "/*"` makes every `/<site>/<detector>` an entity;
-  `exclude_groups: [calibration]` leaves out a sibling group that is not one;
-  `params: {groups: {calibration: ../calibration}}` reads it for each detector. Name
-  each such group in its own path: `recursive: true` and a path that starts with `..`
-  are a contract error in one params block. `params: {group: ..}` gives each entity its
-  element of a 1-D array beside the groups whose length is the number of sibling groups,
-  in sorted name order: check that the names are zero-padded (`scan_10` sorts before
-  `scan_2`) and that the length matches after `exclude_groups`, or the array is skipped.
-  When siblings read the same values, capture the group names with `params.location`.
-  Entities that lack a parameter get null for it. Count = the subgroups of every
-  matching group, less the excluded ones.
-- **A `table` has no `identity` key: its `id` is the identity.** Check that the `id`
-  column is unique (`df[col].is_unique`). If no single column is, list several,
-  `id: [specimen, replicate]`, and say in a comment which rows needed the extra column. If no
-  set of columns is unique (rows equal in every column), the table needs de-duplicating:
-  that is the user's decision, so ask. Where two columns are both unique, prefer the one
-  that **names the measurement** over one that encodes how the bytes are packed: the key a
-  reader pastes should mean something, and a repacking must not re-key the dataset. A
-  table serves no arrays at all, so arrays stacked beside it (a CSV whose column points
-  into a pack) stay unserved — the choices are in `reference/sources.md`, "What a
-  `table` can and cannot express", and they are the user's, so put them to them.
-- **If groups carry an `NX_class` attribute, the file is NeXus — map it, don't guess:**
-  one `NXentry` per file → `files` (several per file → `groups`); follow `@default` to the
-  `NXdata` group — its `@signal` field, the `@axes` fields and any `FIELDNAME_errors` are
-  the artifacts (axes go to `shared:` only if identical across the files you sampled; say
-  which in a comment); `NXsample` / `NXinstrument` / `NXparameters` / `NXcollection` → one
-  `params.groups` entry each, named after the group, with large string fields (JSON blobs)
-  listed in `exclude`; root-level `definition` / `title` / `start_time` → a group entry
-  pointing at the entry itself; `NXprocess` (`program`, `version`) → `producer` and a
-  `code_version` key in `metadata`. Fields constant across every sampled file
-  (`sample/chemical_formula`, `instrument/name`, `definition`) are candidates for dataset
-  `metadata` — propose them as `# TODO confirm — "NiPS3" in all 12 files`, mapped onto
-  `vocabulary.yml` ids. See `examples/files_nexus.yml` and
-  `reference/nexus.md`. Two shapes that guide does not cover — a file with no
-  `@default` anywhere, whose signal is marked on the field, and one entity spread over a
-  header, a master and an image file — are in that page under "Files that do not follow
-  the modern conventions".
-- **Read the codebase / context** to infer the dataset `metadata` (`method`, `data_type`,
-  `material`, `producer`, `project`, `facility`, `instrument`, `proposal`). **Nothing
-  fills `metadata` in from the files** — `reference/walkthrough.md`, step 1, the `metadata`
-  bullet, is where that rule and its reason live. Your part of it: read the files' root
-  attributes (`@title`, `@source`, `@institution`) alongside the codebase, propose the
-  ones worth keeping, and mark them as read from the files rather than confirmed
-  (Step 3). Map each value onto
-  a canonical id in `vocabulary.yml` where one fits, and where none does write the
-  producer's own term: that is not inventing vocabulary, it registers as written with a
-  warning, and the curator sees it later. What you must not do is coin an official-looking
-  id, stretch an unrelated one, or edit `vocabulary.yml`. The facets the data rarely
-  settles — `material` for something that is not a substance, `method` for data no method
-  produced, `data_type` between `simulation`, `benchmark` and `optimization` for an
-  enumerated set, `producer` when a chain of codes made the files — are decided in the
-  field descriptions in `contract.py`; read the field before you guess.
+1. **Inspect across the containers, not one file.** Dump representative files with
+   `visititems_links`, then compare paths, shapes, dtypes and attributes across every file
+   (and every entity group). Differences are silent later.
+   → `reference/source-and-entity.md`, "Inspect across the containers"
+2. **Choose the source and the entity.** How the entities are packed decides `files`,
+   `batch`, `groups` or `table`; a path that varies per file means `groups`; a tie is
+   broken by what a reader queries and what their usual read costs.
+   → `reference/source-and-entity.md`
+3. **Artifacts and shared axes.** Which arrays each entity serves, their `type` names,
+   which are `optional`, which are identical for every entity, and what does not travel
+   with them (a parent group's attributes, attribute-only records).
+   → `reference/artifacts-and-shared.md`
+4. **Parameters and identity.** Which scalars become queryable parameters, the names the
+   manifest keeps for itself, values only in a name (`params.location`), and how each
+   entity stays distinct. Decide identity now, and say why in a comment.
+   → `reference/params-and-identity.md`
+5. **Formats.** NeXus → `reference/nexus.md`; netCDF or CF → `reference/netcdf-cf.md`
+   (check the file signature first).
+6. **Metadata, from the user and the codebase only.** Nothing fills `metadata` in from the
+   files; map values onto vocabulary ids, and read the field in `contract.py` for the hard
+   cases. → `reference/metadata-and-vocabulary.md`
 
 ## Step 3 — Draft a first-pass YAML (don't blind-guess)
 
 Write it as `<data root>/.tilewright/datasets/<KEY>.yml`, where `<KEY>` is `slug(label)`
 (the YAML and its manifests travel with the data). Copy the `examples/<source>.yml`
-that matches and fill it from what you found. Set `label`; leave `key` for
-`tilewright manifest` to write. Keep the closed sections free of unknown keys — a typo
-there is a hard error, reported in one sentence naming the field.
+that matches, **delete its `key:` line** (it is the example's key, and `tilewright
+manifest` writes yours from the label), and fill it from what you found. Set `label`.
+Keep the closed sections free of unknown keys — a typo there is a hard error, reported in
+one sentence naming the field.
 
 **Mark uncertainty as comments — do not silently guess.** If you can infer a value but it
 was never stated explicitly, put your best guess in and flag it inline:
@@ -280,10 +159,14 @@ anything a reader should know before trusting this data?* — a trust ceiling, a
 region, a known artefact. That goes into the description, and any number in it becomes a
 key the author names.
 
-**Predict the counts now, from what you inspected**, and keep them. The formulas per
-source are in `reference/errors.md` under "Expected counts"; say how you got each
-number ("5 files × `/spectra` leading axis 2000 = 10,000 entities; 1 artifact each + 2
-shared axes"). These are what `tilewright manifest` will be checked against in Step 5.
+**Predict the counts now, from what you inspected**, and keep them: entities, artifacts
+per entity, shared axes, with how you got each (`reference/counts-and-cost.md`). These are
+what `tilewright manifest` will be checked against in Step 5.
+
+**Check the cost.** When the nodes you predict pass the threshold in
+`reference/counts-and-cost.md`, "When the source's shape makes registration slow",
+registration takes hours: raise it with the user in Step 4, with the node count, a rough
+time and the choices on that page. The choice is theirs, before sign-off.
 
 ## Step 4 — Hand it to the user for review (a dialogue, not a hand-off)
 
@@ -315,7 +198,7 @@ tilewright manifest .tilewright/datasets/<KEY>.yml
 ```
 
 It validates the contract, writes `key:` into the YAML, walks the files, and prints
-`dataset=<KEY> entities=N artifacts=M shared=S`. Compare with your prediction from Step 4,
+`dataset=<KEY> entities=N artifacts=M shared=S`. Compare with your prediction from Step 3,
 and **tell the user the result — then stop and wait for their go before registering.**
 
 - **Match:** say so, with both numbers side by side, and that you are good to register
@@ -334,8 +217,8 @@ Before reporting "good to register", two checks:
 - **Where does the server run relative to the data?** Same filesystem → omit
   `server_base_dir`; mounts it elsewhere → set it; cannot see it at all →
   `tilewright register --upload` (trial with `-n 5`, verify, re-run). The rules —
-  `readable_storage`, the physical-path caveat, what "the server's view" means — are
-  **`reference/walkthrough.md` step 3**; follow that section rather than reasoning it out here,
+  `readable_storage`, the physical-path caveat, the server's config — are
+  **`reference/paths-and-server.md`**; follow that page rather than reasoning it out here,
   and **do not assume a host or facility**: the path the user gave you is where the data is.
 - **Is the key already on the target server?** `list(from_uri(URL, api_key=KEY))`. If so,
   tell the user. `tilewright register` will compare fingerprints: the same data proceeds
@@ -349,9 +232,9 @@ tilewright register .tilewright/datasets/<KEY>.yml --url <URL> --api-key <KEY>
 ```
 
 (or `tilewright register --upload ...` — trial with `-n 5` first, verify, re-run without
-`-n`; `TILED_URL` / `TILED_API_KEY` in the environment replace the flags). Above a few
-thousand entities, tell the user how long the run will take *before* starting it: time
-`-n 100` and multiply out (`reference/walkthrough.md` step 4, "How long a pointer run takes").
+`-n`; `TILED_URL` / `TILED_API_KEY` in the environment replace the flags). For any run
+longer than a few minutes, tell the user how long it will take *before* starting it: time
+`-n 100` and multiply out (`reference/counts-and-cost.md`).
 Read the summary
 block, not the exit code: `Artifact errors` must be 0, `Broken nodes` must be absent, and
 `Entities` + `Skipped` should equal the entity count from Step 5. Any
@@ -368,11 +251,12 @@ the server**, not the register summary. Run the read-back snippet in
 **`reference/walkthrough.md` step 5** with the same URL and key you registered with.
 
 Pass = the entity count matches, and one artifact array **and each shared axis** come back
-with the shapes the manifest recorded, with a small slice read from one of them. Ask the
+with the shapes the manifest recorded, with a small slice read from one of them; step 5
+also says how to check the values against the file. Ask the
 array client for `.shape`; never read `[:]` of a multi-gigabyte artifact to prove a
 pointer works. A `table` has no array, so its pass is the entity count, one row's
 metadata, and a `Key` search. Report those numbers. A bare `500` on the read is
-the path/adapter/allowlist problem — the Troubleshooting table in `reference/walkthrough.md` decodes it, and
+the path/adapter/allowlist problem — `reference/troubleshooting.md` decodes it, and
 [the operator errors page](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md) every other failure after
 `manifest`, by symptom; fix the YAML, regenerate,
 **delete the dataset** (`reference/walkthrough.md` step 6), re-register — an existing artifact
