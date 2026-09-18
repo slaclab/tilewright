@@ -121,7 +121,7 @@ labels, stored beside the value and never part of the identity. `location` adds 
 values that only the entity's path holds: a number in a file or directory name, a group
 name, a batch row number ([parameters from the location](sources.md#parameters-from-the-location)).
 Entities that read different parameters get null for the ones they lack
-([the data model](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
+([the data model](https://github.com/slaclab/tilewright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|

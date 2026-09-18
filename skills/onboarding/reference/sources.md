@@ -132,7 +132,7 @@ would be the same entity; the `location` names keep them apart
 value per entity, the sort order and what is skipped are in
 [the `groups` fields](dataset-yaml.md#sourcegroups); entities that read
 different parameters get null for the others
-([the data model](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
+([the data model](https://github.com/slaclab/tilewright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
 
 Why `..` and not a path from the file root: each site has its own `calibration`, and one
 fixed path can name only one of them. Why a glob and not a number of levels: a depth
@@ -238,7 +238,7 @@ neither.
 
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
   and stores the row number in `index`. An entity is a slice, read by slicing in h5py
-  rather than pulling the whole stacked dataset ([sliced reads](https://github.com/slaclab/TileWright/blob/main/docs/explanation/data-model.md#an-entity-is-a-slice)).
+  rather than pulling the whole stacked dataset ([sliced reads](https://github.com/slaclab/tilewright/blob/main/docs/explanation/data-model.md#an-entity-is-a-slice)).
 - **`groups`**: an artifact's `dataset` path resolves relative to each entity group, and
   so does a params path, which can leave it with `..`.
 - **`files`**: the file is the entity boundary, so there is no index.

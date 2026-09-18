@@ -3,7 +3,7 @@
 Turn a directory of HDF5 files into a dataset in a Tiled catalog: searchable by its
 physics, readable from anywhere.
 
-**Before you start:** [install `tilewright`](https://github.com/slaclab/TileWright/blob/main/docs/install.md), check the files match one of the
+**Before you start:** [install `tilewright`](https://github.com/slaclab/tilewright/blob/main/docs/install.md), check the files match one of the
 [four sources](sources.md), and export `TILED_URL` and `TILED_API_KEY`.
 
 ## Pick a transport first
@@ -153,7 +153,7 @@ entity group. The formulas are in [errors and warnings](errors.md#expected-count
 
     Nothing to do: no path has to agree with anything, `server_base_dir` is ignored, and
     the stock Tiled adapter serves the uploaded arrays. The receiving server needs
-    `writable_storage`; see [How to host a server](https://github.com/slaclab/TileWright/blob/main/docs/host-a-server.md).
+    `writable_storage`; see [How to host a server](https://github.com/slaclab/tilewright/blob/main/docs/host-a-server.md).
 
 === "Server reads the files"
 
@@ -181,8 +181,11 @@ entity group. The formulas are in [errors and warnings](errors.md#expected-count
     - Sharing a filesystem? Omit `server_base_dir`; it defaults to `directory`.
 
     The server also needs TileWright's array adapter, or every read returns HTTP 500
-    after a registration that looked fine; [How to host a server](https://github.com/slaclab/TileWright/blob/main/docs/host-a-server.md) has
-    the config line.
+    after a registration that looked fine. [`config-pointer.yml`](config-pointer.yml),
+    beside this page, is a complete config for a server that serves pointer registrations,
+    with the adapter line: set `readable_storage` to your server-side root and start it with
+    `tiled serve config config-pointer.yml --api-key <KEY>`. Running a shared server is in
+    [How to host a server](https://github.com/slaclab/tilewright/blob/main/docs/host-a-server.md).
 
 ## 4. Register the dataset
 
@@ -219,7 +222,7 @@ nodes a second is the order of magnitude for a server on a SQLite catalog, which
 thousand entities minutes and a hundred thousand hours. Measure your own rate rather than
 trusting that: time `tilewright register -n 100`, divide, and multiply out. Two levers if
 it matters: `--max-workers N`, which helps a dataset of many entities and hardly one of
-few entities and very many arrays ([the flags](https://github.com/slaclab/TileWright/blob/main/docs/reference/cli.md#tilewright-register) say
+few entities and very many arrays ([the flags](https://github.com/slaclab/tilewright/blob/main/docs/reference/cli.md#tilewright-register) say
 why), and the run's own resumability — a long one can simply be started again. Reading
 back is not affected: a query answers from the catalog database, at any size.
 
@@ -278,9 +281,9 @@ the whole contract, proven. Collaborators need nothing beyond the Tiled client.
 
 A `table` dataset has no artifact to read, so its proof is the other three: the entity
 count, one row's metadata, and a `Key` search that returns the rows you expect
-([search](https://github.com/slaclab/TileWright/blob/main/docs/using-the-catalog.md#search)).
+([search](https://github.com/slaclab/tilewright/blob/main/docs/using-the-catalog.md#search)).
 
-Next: [read a registered catalog](https://github.com/slaclab/TileWright/blob/main/docs/using-the-catalog.md).
+Next: [read a registered catalog](https://github.com/slaclab/tilewright/blob/main/docs/using-the-catalog.md).
 
 ## 6. Start over
 
@@ -304,4 +307,4 @@ stored, since the catalog is their only home. Your HDF5 files are never touched.
 | Registration succeeds but every read returns HTTP 500 | The server is missing the adapter, or `server_base_dir` / `readable_storage` / a symlinked path is wrong (step 3). Fix, then regenerate, delete, register again |
 
 Every other message with a specific cause is in [errors and warnings](errors.md);
-flags and exit codes are in [the `tilewright` reference](https://github.com/slaclab/TileWright/blob/main/docs/reference/cli.md).
+flags and exit codes are in [the `tilewright` reference](https://github.com/slaclab/tilewright/blob/main/docs/reference/cli.md).

@@ -3,7 +3,7 @@
 Every message `tilewright manifest` produces that has a specific cause, in the order it
 raises them. [How to publish a dataset](walkthrough.md) has a short table of the common
 ones; this page is the full set. Messages from `tilewright register`, `delete` and reads
-through the server are in [the operator docs](https://github.com/slaclab/TileWright/blob/main/docs/reference/errors.md).
+through the server are in [the operator docs](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md).
 
 ---
 

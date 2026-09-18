@@ -43,8 +43,8 @@ written, so they are not new rules, but the first one changes what is hashed:
   dataset with a null dataspace.
 
 Where each rule is stated for authors: the float rule is in
-[identity and keys](https://github.com/slaclab/TileWright/blob/main/skills/onboarding/reference/identity.md). The size-1 rule is in
-[the NeXus page](https://github.com/slaclab/TileWright/blob/main/skills/onboarding/reference/nexus.md) and the onboarding skill.
+[identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md). The size-1 rule is in
+[the NeXus page](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/nexus.md) and the onboarding skill.
 
 ## Why
 

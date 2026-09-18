@@ -82,7 +82,7 @@ markdown_extensions:
   # than one page (the .env setup + connection check), kept outside docs_dir so mkdocs
   # does not also build them as pages of their own.
   - pymdownx.snippets:
-      base_path: [docs, includes]
+      base_path: [docs, includes, skills/onboarding/reference]
       check_paths: true
   - pymdownx.superfences:
       custom_fences:

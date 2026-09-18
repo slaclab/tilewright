@@ -16,7 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skills" / "onboarding"
-GH = "https://github.com/slaclab/TileWright/blob/main/"
+GH = "https://github.com/slaclab/tilewright/blob/main/"
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 
 

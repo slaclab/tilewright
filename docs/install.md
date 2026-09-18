@@ -77,7 +77,7 @@ repository rather than in the package, so an install without one does without th
 
 | Only in a checkout | What to do instead |
 |---|---|
-| `examples/notebook.py`, the marimo tour of the read path | Read the catalog with the snippets in [How to read a registered catalog](using-the-catalog.md); the notebook is one self-contained file, so saving it [from the repository](https://github.com/slaclab/TileWright/blob/main/examples/notebook.py) and running it as that page describes also works |
+| `examples/notebook.py`, the marimo tour of the read path | Read the catalog with the snippets in [How to read a registered catalog](using-the-catalog.md); the notebook is one self-contained file, so saving it [from the repository](https://github.com/slaclab/tilewright/blob/main/examples/notebook.py) and running it as that page describes also works |
 | the test suite | `tilewright --help`, then `tilewright manifest --check MY_DATASET.yml`, which validates and prints the key without touching the network |
 
 The vocabulary ships inside the package too, so its canonical ids are readable wherever

@@ -373,7 +373,7 @@ array client for `.shape`; never read `[:]` of a multi-gigabyte artifact to prov
 pointer works. A `table` has no array, so its pass is the entity count, one row's
 metadata, and a `Key` search. Report those numbers. A bare `500` on the read is
 the path/adapter/allowlist problem — the Troubleshooting table in `reference/walkthrough.md` decodes it, and
-[the operator errors page](https://github.com/slaclab/TileWright/blob/main/docs/reference/errors.md) every other failure after
+[the operator errors page](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md) every other failure after
 `manifest`, by symptom; fix the YAML, regenerate,
 **delete the dataset** (`reference/walkthrough.md` step 6), re-register — an existing artifact
 is never rewritten. A metadata-only correction needs no delete: edit the YAML and run

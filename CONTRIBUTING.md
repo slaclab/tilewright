@@ -54,7 +54,7 @@ Every fact lives on exactly one page, and other pages link to it:
 | how local and server paths agree | `skills/onboarding/reference/walkthrough.md` step 3 |
 | that nothing fills `metadata` in from the files, root attributes included | `skills/onboarding/reference/walkthrough.md` step 1, the `metadata` bullet |
 | what a checkout gives that a plain install does not | `docs/install.md`, "No checkout" |
-| the server config lines | `docs/host-a-server.md` |
+| the server config lines | `skills/onboarding/reference/config-pointer.yml`, embedded in `docs/host-a-server.md` |
 | connecting (`TILED_URL`, the check) | `includes/connect.md`, transcluded with `--8<--` |
 | why a decision was made | `docs/adr/` (unpublished) or an explanation page |
 
