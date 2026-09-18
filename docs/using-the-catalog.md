@@ -116,7 +116,9 @@ uv run --with marimo --with matplotlib marimo run examples/notebook.py    # read
 uv run --with marimo --with matplotlib marimo edit examples/notebook.py   # change it
 ```
 
-Over SSH, add `--headless` and forward the port it prints.
+Over SSH, add `--headless` and forward the port it prints. The notebook lives in the
+repository and not in the package, so an install with no clone has to fetch the file
+first ([No checkout](install.md#no-checkout)).
 
 ---
 
