@@ -68,6 +68,10 @@ source:
 - Add the **server-side** root to `readable_storage`.
 - Use physical paths (`pwd -P`, `readlink -f`), not symlinks.
 - Sharing a filesystem? Omit `server_base_dir`; it defaults to `directory`.
+- A file that is itself a virtual dataset (detector master files often are) is read through
+  its source files every time. They must be readable where the server looks too, or the
+  array reads as its fill value with no error; the read-back compares a member with the
+  original ([when the source's shape is the problem](counts-and-cost.md#when-the-sources-shape-is-the-problem)).
 
 ### The server's config
 

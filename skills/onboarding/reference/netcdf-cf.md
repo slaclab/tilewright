@@ -1,8 +1,8 @@
 # netCDF and CF
 
-**Read this when** a file name ends in `.nc`, `.cdf` or `.grd`, or a dataset carries a
-`NAME`, `scale_factor` or `grid_mapping` attribute (Step 2). netCDF-4 is HDF5 underneath and
-registers like any HDF5 file; these are the places it differs.
+**Read this when** a file name ends in `.nc`, `.cdf` or `.grd`, or any HDF5 file carries
+CF attributes — `NAME`, `scale_factor`, `_FillValue`, `grid_mapping` (Step 2). netCDF-4 is
+HDF5 underneath and registers like any HDF5 file; these are the places it differs.
 
 ## Check the file signature first
 

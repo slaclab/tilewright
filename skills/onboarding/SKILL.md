@@ -23,8 +23,9 @@ working directory. The contract models and the vocabulary ship in the package, `
 which this skill sits inside once installed:
 
 ```bash
-SKILL=~/.claude/skills/onboarding        # replace with the base directory Claude Code printed
-                                         # when this skill loaded
+SKILL=~/.claude/skills/onboarding        # the base directory Claude Code printed when this
+                                         # skill loaded; if it printed none (you opened the
+                                         # file by path), the directory of that SKILL.md
 d=$(readlink -f "$SKILL/../..")          # the package, or a checkout's root
 PKG=$([ -f "$d/contract.py" ] && echo "$d" || echo "$d/src/tilewright")
 ls "$PKG/contract.py" "$PKG/vocabulary.yml"
@@ -40,7 +41,7 @@ Read these now. They define what a valid dataset is; do not reverse-engineer it 
 
 1. `<pkg>/contract.py` — the authoritative field contract: every YAML field, its type,
    whether it is required, and what it means. Its descriptions settle the hard cases.
-2. `reference/walkthrough.md`, the section headings and steps 1–2 — the path from YAML to
+2. `reference/walkthrough.md`, the whole page (it is short) — the path from YAML to
    read-back that the steps below follow.
 
 Everything else is read when its moment comes, one page per decision:
@@ -53,7 +54,7 @@ Everything else is read when its moment comes, one page per decision:
 | `reference/params-and-identity.md` | Step 2, parameters and identity |
 | `reference/artifacts-and-shared.md` | Step 2, artifacts and shared axes |
 | `reference/nexus.md` | Step 2, if any group has an `NX_class` attribute |
-| `reference/netcdf-cf.md` | Step 2, for a `.nc`/`.cdf`/`.grd` name or `NAME`/`scale_factor` attributes |
+| `reference/netcdf-cf.md` | Step 2, for a `.nc`/`.cdf`/`.grd` name, or CF attributes (`NAME`, `scale_factor`, `_FillValue`) in any HDF5 file |
 | `reference/metadata-and-vocabulary.md` and `<pkg>/vocabulary.yml` | Step 2, drafting `metadata` |
 | `reference/counts-and-cost.md` | Step 3, predicting the counts |
 | `reference/troubleshooting.md` | whenever a command fails |
@@ -105,12 +106,16 @@ order, reading each page when you reach it:
    (and every entity group). Differences are silent later.
    → `reference/source-and-entity.md`, "Inspect across the containers"
 2. **Choose the source and the entity.** How the entities are packed decides `files`,
-   `batch`, `groups` or `table`; a path that varies per file means `groups`; a tie is
-   broken by what a reader queries and what their usual read costs.
+   `batch`, `groups` or `table`; a path that varies per file means `groups`; files that
+   split one acquisition are pieces of one array, not entities; state what a reader's usual
+   read costs, and let it break a tie.
+   Archives (zip, tar) and formats other than HDF5 are extracted or converted first.
    → `reference/source-and-entity.md`
 3. **Artifacts and shared axes.** Which arrays each entity serves, their `type` names,
    which are `optional`, which are identical for every entity, and what does not travel
-   with them (a parent group's attributes, attribute-only records).
+   with them (a parent group's attributes, attribute-only records). Siblings with one shape
+   and ordered names are a series stored as pieces: tell the owner what reading it costs,
+   whatever the count.
    → `reference/artifacts-and-shared.md`
 4. **Parameters and identity.** Which scalars become queryable parameters, the names the
    manifest keeps for itself, values only in a name (`params.location`), and how each
@@ -164,8 +169,8 @@ per entity, shared axes, with how you got each (`reference/counts-and-cost.md`).
 what `tilewright manifest` will be checked against in Step 5.
 
 **Check the cost.** When the nodes you predict pass the threshold in
-`reference/counts-and-cost.md`, "When the source's shape makes registration slow",
-registration takes hours: raise it with the user in Step 4, with the node count, a rough
+`reference/counts-and-cost.md`, "When the source's shape is the problem", or you found a
+series stored as pieces or an acquisition split across files, raise it with the user in Step 4, with the node count, a rough
 time and the choices on that page. The choice is theirs, before sign-off.
 
 ## Step 4 — Hand it to the user for review (a dialogue, not a hand-off)

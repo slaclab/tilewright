@@ -91,7 +91,9 @@ cncs/
 
 A file that is not HDF5 at all (netCDF-3 classic, a `.gz`, a Parquet sidecar) cannot be
 read by the first three; [netCDF and CF](netcdf-cf.md#check-the-file-signature-first)
-says how to tell.
+says how to tell. TileWright reads HDF5 files only, where they lie: a zip or tar archive
+is extracted first, and another format is converted, by the owner, before a `files`,
+`batch` or `groups` source can name it; or its rows are described with a `table`.
 
 ## Choosing between them
 
@@ -105,6 +107,18 @@ every path — make that varying level the entity group: `groups` with
 `entity_group: /data` takes each file's iteration group as its entity, and every artifact
 and params path is written relative to it (`fields/rho`). Capture the varying name with
 `params.location` if it is a value: `':/data/(?P<iteration>\d+)$'`.
+
+**Files that split one acquisition are pieces of one array, not entities.** A writer that
+rolls over by size or by process (`scan_000.h5`, `scan_001.h5`, … with identical shapes,
+holding consecutive frames of one measurement) makes each file look like an entity, and
+`files` registers it that way with every count matching. Nothing in the structure tells
+them apart from real entities: look at what the names and the values say (consecutive
+frame numbers, one start time), and ask the owner before making each chunk an entity. The
+alternatives are the ones for any source whose shape is the problem
+([counts and cost](counts-and-cost.md#when-the-sources-shape-is-the-problem)).
+
+**Say what the usual read costs**, in the comment above `source:`, whichever source you
+choose: one read, or one per entity, per member, per file.
 
 **When two sources fit at once**, as with one entry per file whose signal also has a short
 frame axis, or a stack on axis 0 inside each of several groups, decide on two things:

@@ -26,9 +26,9 @@ Two things do **not** travel, and nothing warns about either:
   group that holds its components as datasets — openPMD's `fields/E` with `@gridSpacing`,
   `@gridGlobalOffset` and `@unitDimension` on the group, and `x`, `y`, `z` inside — gives
   its attributes to none of the component artifacts. When a reader needs them, read the
-  group's attributes as entity parameters with `params.groups` and `from: attrs`
-  (`{E: /data/255/fields/E}` under `files`, or a group-relative path under `groups`), or
-  state them in `description` if they are the same everywhere.
+  group's attributes as entity parameters with `params.groups` and `from: attrs` (under
+  openPMD's `groups` source, `{E: fields/E}`, relative to the entity group), or state them
+  in `description` if they are the same everywhere.
 - **Records that hold no array.** A group that stores a constant as attributes only
   (openPMD writes a species' `charge` and `mass` as a group with `@value` and `@shape`) has
   no dataset to serve, so it is simply absent. Read it as parameters the same way, or say
@@ -55,10 +55,18 @@ does not take this form, because its first artifact sets the batch size, and nei
 [the `artifacts` fields](dataset-yaml.md#artifacts).
 
 Each member is still an array of its own: one more node to register, and one read per
-step to get the series back. A few dozen channels are fine. Thousands of per-step
-datasets register slowly and read slowly: that is the
-[slow-source gate](counts-and-cost.md#when-the-sources-shape-makes-registration-slow),
-and the owner decides before sign-off.
+member to get a series back. A few dozen channels read side by side are fine.
+
+### A series stored as pieces
+
+Siblings with the same shape and dtype whose names are ordered (`day_001` … `day_365`,
+`frame_0000` … `frame_0599`) are one array split up, whatever their number. A reader who
+wants the series — one pixel over every day — makes one read per member: 600 members is
+600 reads, even though 600 nodes register in seconds. Tell the owner what the usual read
+costs at Step 4, below the registration thresholds too, and offer the choices in
+[when the source's shape is the problem](counts-and-cost.md#when-the-sources-shape-is-the-problem).
+Pieces of different shapes (ragged) cannot be stacked into one array: one artifact per
+member is the right answer for them.
 
 ## Shared axes
 

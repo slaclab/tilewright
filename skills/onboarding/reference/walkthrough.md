@@ -7,7 +7,8 @@ Turn a directory of HDF5 files into a dataset in a Tiled catalog: searchable by 
 physics, readable from anywhere.
 
 **Before you start:** [install `tilewright`](https://github.com/slaclab/tilewright/blob/main/docs/install.md),
-check the files match one of the [four sources](source-and-entity.md), export `TILED_URL`
+check the files match one of the [four sources](source-and-entity.md) (TileWright reads
+HDF5 only: extract archives and convert other formats first), export `TILED_URL`
 and `TILED_API_KEY`, and [pick a transport](paths-and-server.md#pick-a-transport): the
 server reads your files, or you upload the arrays.
 

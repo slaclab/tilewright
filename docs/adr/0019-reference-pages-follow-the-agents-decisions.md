@@ -21,12 +21,19 @@ six-item checklist in the order the decisions are made, each item linking its pa
 ~170 lines of cases it used to carry live in the pages. Field facts stay in `contract.py`
 and the page generated from it.
 
-**A slow-source gate before sign-off.** Step 3 predicts nodes (entities × artifacts per
-entity). Above about 10,000 nodes, or 1,000 artifacts in one entity, the agent puts the
-node count, a rough time and three choices to the owner in Step 4: register everything,
-register a subset, or ask the producer to convert. TileWright builds no derived files; the
-page gives the method for timing a run, not a rate, because the rate depends on the server
-and is expected to change.
+**A gate before sign-off when the source's shape is the problem.** Step 3 predicts nodes
+(entities × artifacts per entity). Above about 10,000 nodes, or 1,000 artifacts in one
+entity, registering takes hours. Below that, a series stored as pieces (siblings of one
+shape with ordered names) or one acquisition split across files registers quickly and
+makes every reader's series one request per piece; the skill detects those by their
+pattern, not their count. Either way the agent puts the costs and three choices to the
+owner in Step 4: register as it is, register a subset, or register a converted copy made
+by the producer, or by the owner when a published record has no producer to ask. The
+page gives two recipes for that copy (stack the pieces, or map them with an HDF5 virtual
+dataset, whose missing sources read as fill values with no error, so the read-back
+compares members). TileWright builds no converted copies itself. The page gives the
+method for timing a run, not a rate, because the rate depends on the server and is
+expected to change.
 
 ## Why
 
@@ -38,7 +45,11 @@ runs stumbled: across sources (parameters, server paths, keys), not per source.
 
 The gate comes from one dataset that kept each day as its own array: 74,827 artifacts per
 entity, about 21 hours to register, discovered only at `register`. The decision belongs to
-the owner and before sign-off, so the skill raises it where the counts are predicted.
+the owner and before sign-off, so the skill raises it where the counts are predicted. The
+read-cost half, and the converted-copy recipes, come from the sidecar's review of PR #49:
+a count alone misses a 600-piece series, and "ask the producer" is a dead end for a
+published record. The same work measured a five-piece VDS of that dataset registering in
+five requests and reading a year-long pixel series in one slice, byte-equal.
 
 The blind runs on PR #47 also found gaps that no page covered, now filled: an array path
 that changes from file to file (openPMD's `/data/<iteration>/`) means a `groups` source; a

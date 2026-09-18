@@ -27,6 +27,12 @@ entity's queryable parameters, and how every entity keeps a key of its own.
   `groups`) makes identity provenance.
 - netCDF-4 dimension placeholders and length-1 coordinate variables look like scalars and
   are not always parameters: [netCDF and CF](netcdf-cf.md#placeholders-and-length-1-coordinates).
+- **A name that starts with `_` is not special** in a file. CF's `_FillValue` on a scalar
+  field is a label (`x__FillValue`), on an array it is artifact metadata, and under
+  `from: attrs` it is a parameter like any other. Only a `params.location` group may not
+  start with `_`. Nothing applies a CF attribute
+  ([netCDF and CF](netcdf-cf.md#packed-variables)); `exclude` one that only describes the
+  encoding, and say in `description` what it means if a reader needs it.
 
 ### Names the manifest keeps for itself
 

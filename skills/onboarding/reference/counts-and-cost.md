@@ -1,8 +1,9 @@
 # Counts and cost
 
-**Read this when** you predict the counts (Step 3), and before registering a large
-dataset: how many entities and artifacts the manifest will report, and how long
-registering them takes.
+**Read this when** you predict the counts (Step 3), when the data is a series stored as
+pieces or an acquisition split across files, and before registering a large dataset: how
+many entities and artifacts the manifest will report, how long registering them takes, and
+what to offer when the source's shape is the problem.
 
 ## Expected counts
 
@@ -38,24 +39,42 @@ back is not affected: a query answers from the catalog database, at any size.
 An upload moves the real data, so its wall-clock scales with size and uplink, not node
 count.
 
-## When the source's shape makes registration slow
+## When the source's shape is the problem
 
-Some sources are cheap to describe and expensive to register: a file that keeps each day,
-step or channel as a dataset of its own, so that one entity carries thousands of
-artifacts. One such dataset held 74,827 artifacts per entity and took about 21 hours to
-register. That is a decision for the owner, and it has to be made **before sign-off**, not
-discovered at `register`.
+Some sources are cheap to describe and expensive to use. Two costs, either one enough:
 
-Raise it when the nodes you predict (entities × artifacts per entity) pass about 10,000, or
-one entity carries more than about 1,000 artifacts. Give the owner the node count, a rough
-time at a few tens of nodes a second, and the choices:
+- **Registering.** A file that keeps each day, step or channel as a dataset of its own
+  gives one entity thousands of artifacts. One such dataset held 74,827 artifacts per
+  entity and took about 21 hours to register. Raise it when the nodes you predict
+  (entities × artifacts per entity) pass about 10,000, or one entity carries more than
+  about 1,000 artifacts.
+- **Reading.** A series stored as pieces
+  ([artifacts and shared axes](artifacts-and-shared.md#a-series-stored-as-pieces)), or an
+  acquisition split across files
+  ([source and entity](source-and-entity.md#choosing-between-them)), registers quickly and
+  makes the usual read one request per piece. Raise it whatever the count.
 
-- **Register everything**, stating the time. The run resumes if it is interrupted.
+This is the owner's decision, made **before sign-off**, not discovered at `register` or by
+the first reader. Give them the node count and a rough time at a few tens of nodes a
+second, what the usual read costs, and the choices:
+
+- **Register as it is**, stating both costs. The run resumes if it is interrupted.
 - **Register a subset**: fewer members with `members`, fewer files with `pattern`, or a
   trial with `register -n`. Say in `description` what was left out.
-- **Ask the producer to convert**: stack the per-step datasets into one array, a
-  `(steps, ny, nx)` dataset, or into a `batch` file, so the series becomes one artifact
-  that slices like any other.
+- **Register a converted copy**, made by the producer, or by the owner when there is no
+  producer to ask (a published record) and they can keep the copy beside the data. Two
+  recipes, each a short h5py script the owner runs and keeps with the copy:
+  - **Stack** the pieces into one chunked array, `(steps, ny, nx)`, or into a `batch`
+    file. A real copy: it costs disk, and it stays correct if the originals move.
+  - **A virtual dataset (VDS)**, which maps the pieces into one array without copying.
+    Every read resolves the source files at read time, and a source that is missing or
+    unreachable from the server's view reads as the fill value, **with no error**. Set the
+    fill value to NaN for floats, keep the source paths valid as the server sees them, and
+    make the read-back compare the first, the last and a few other members with the
+    originals.
 
-TileWright builds no derived files for you. Whichever the owner picks, record it in a
+  Either way the copy registers as ordinary data; say in `description` what it was made
+  from.
+
+TileWright builds no converted copies for you. Whichever the owner picks, record it in a
 comment above `artifacts:`.
