@@ -59,15 +59,33 @@ mkdir -p .tilewright/datasets
 cp <TileWright>/examples/datasets/files.yml .tilewright/datasets/MY_DATASET.yml
 ```
 
+`<TileWright>` is a checkout. Installed [without one](install.md#no-checkout) there is
+nothing to copy, so write the file from the skeleton and the field tables in
+[the dataset YAML reference](reference/dataset-yaml.md) instead; the rest of this guide is
+the same.
+
 Then edit:
 
 - **`label`**: distinctive. On a shared server, include your surname or group:
   `Okafor NiPS3 Powder`, not `My Dataset`. Two people picking the same name land on the
-  same key, and the second registration is refused.
+  same key, and the second registration is refused. See the key the label slugs to before
+  you commit to it: `tilewright manifest --check` prints it, and an accent, a hyphen or an
+  apostrophe in a name comes out as `_`
+  ([the rule](reference/dataset-yaml.md#top-level)). If that spelling is not one you want
+  pasted around a shared server, write the name plainly in the label and keep it as it is
+  really spelled in `contact`, or distinguish the dataset with a group, instrument or
+  project token instead of a surname.
 - **`metadata`**: `method`, `data_type`, `material` required; `contact` and
-  `description` expected. Prefer ids from `src/tilewright/vocabulary.yml`; unknown ones
-  warn, not fail. Write the description for a person deciding whether to open the
-  dataset, and say what a reader should know before trusting the data.
+  `description` expected. **Nothing fills these in from your files.** Dataset-level facts
+  the producer left as HDF5 root attributes (`@title`, `@source`, `@institution`) never
+  reach `metadata` by themselves — a `params` block reads per-entity values, not
+  dataset-level ones — so copy the ones worth keeping into the YAML by hand, and say in
+  the `description` that they came from the files rather than from a person. Prefer ids
+  from the vocabulary (`vocabulary.yml`: under `src/tilewright/` in a checkout, and beside
+  the installed package otherwise); unknown ones warn, not fail. Write the description for
+  a person deciding whether to open the dataset, say what a reader should know before
+  trusting the data, and give every number in it a key
+  ([what each field means, and what counts as a number](reference/dataset-yaml.md#metadata)).
 - **`source`**: one tag, `files`, `batch`, `groups`, or `table`, with its `directory`
   and where the parameters are: inside the files, or only in their names, which
   `params.location` reads
