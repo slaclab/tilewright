@@ -113,13 +113,35 @@ anyone on the same filesystem reads with h5py at full speed. Neither path needs 
 both come out of the same registration, and an uploaded dataset has only the first.
 Both are shown in [How to read a registered catalog](../using-the-catalog.md).
 
-## Readable keys
+## Readable keys, and the one that is not
 
-No level of `client[DATASET][ENTITY][ARTIFACT]` uses an opaque UUID. A key like
-`EDRIXS_636ce3e41ea05` can be pasted into a message and still resolve tomorrow, because
-each level derives from something the producer declared: the dataset key from the
-label, the entity key from its identity, the artifact key from its `type`
-([identity and keys](identity.md)).
+No level of `client[DATASET][ENTITY][ARTIFACT]` uses a random UUID: each derives from
+something the producer declared, so `EDRIXS_636ce3e41ea05` can be pasted into a message
+and still resolve tomorrow ([identity and keys](identity.md)). Only two of the three are
+*readable*, though. The dataset key is `slug(label)` and the artifact key is its `type`,
+both of them words the author chose; the entity key is `<DATASET_KEY>_<uid[:13]>`, and
+that uid is a hash — stable, and saying nothing about the entity.
+
+It shows most under a `groups` source, where the entity already has a name (the HDF5 group
+it was read from) that no identity mode puts in the key: `identity: params` hashes the
+parameter values and `identity: provenance` hashes the file-and-group path, so
+`/panels/panel_north` and `/panels/panel_south` come out as two hashes either way. The name
+is not lost. `tilewright manifest` records it in the `source_group` column, and
+registration turns that column into queryable metadata like any other, so the group is one
+search away:
+
+```python
+ent = ds.search(Key("source_group") == "panels/panel_north").values().first()
+ent.key                                   # 'TILT_ATLAS_636ce3e41ea05'
+dict(ent.metadata)["source_group"]        # 'panels/panel_north', the path inside the file
+```
+
+Going the other way, key to name, is a lookup of that entity's metadata. The key stays a
+hash on purpose: an entity's identity is what it *is*, so a producer who renamed the groups
+without changing a value would otherwise re-key every entity. Under `files` and `batch`
+the question does not arise the same way, because the file and the row are in metadata
+too, as `path_<type>` and `index_<type>`
+([search](../using-the-catalog.md#search)).
 
 ## What TileWright does
 
