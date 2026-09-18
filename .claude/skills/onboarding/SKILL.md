@@ -143,9 +143,9 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `description`. A grid-mapping variable (a 0-dim value such as `crs = 0` whose
   meaning is entirely in its attributes) is broadcast to every entity as a meaningless
   parameter under `batch`: `exclude` it and put the projection in the dataset `metadata`.
-  Dataset-level facts kept as root attributes (`@title`, `@source`) never reach `metadata`
-  by themselves; copy the ones worth having into the YAML by hand. And a `.nc`, `.cdf` or
-  `.grd` name is often netCDF-3 classic, which no HDF5 source can read: check the file
+  Its root attributes (`@title`, `@source`) need copying into the YAML by hand like any
+  other file's — see the `metadata` bullet below. And a `.nc`, `.cdf` or `.grd`
+  name is often netCDF-3 classic, which no HDF5 source can read: check the file
   signature before you plan anything (`docs/reference/errors.md`, the `file signature not
   found` row).
 - **Many arrays side by side in one group (one dataset per channel or per step) → one
@@ -211,15 +211,21 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `@default` anywhere, whose signal is marked on the field, and one entity spread over a
   header, a master and an image file — are in that page under "Files that do not follow
   the modern conventions".
-- **Read the codebase / context** to infer metadata (`method`, `data_type`, `material`,
-  `producer`, `project`, `facility`, `instrument`, `proposal`). Map each value onto a
-  canonical id in `vocabulary.yml` where one fits, and where none does write the
+- **Read the codebase / context** to infer the dataset `metadata` (`method`, `data_type`,
+  `material`, `producer`, `project`, `facility`, `instrument`, `proposal`). **Nothing
+  fills `metadata` in from the files** (`docs/ONBOARDING.md`, step 1, the `metadata`
+  bullet): a `params` block reads per-entity values, so dataset-level facts the producer
+  left as HDF5 root attributes (`@title`, `@source`, `@institution`) reach the catalog
+  only if you copy them into the YAML by hand — read them, propose the ones worth keeping,
+  and mark them as read from the files rather than confirmed (Step 3). Map each value onto
+  a canonical id in `vocabulary.yml` where one fits, and where none does write the
   producer's own term: that is not inventing vocabulary, it registers as written with a
   warning, and the curator sees it later. What you must not do is coin an official-looking
   id, stretch an unrelated one, or edit `vocabulary.yml`. The facets the data rarely
-  settles — `material` for something that is not a substance, `data_type` for observations,
-  `producer` when a chain of codes made the files — are decided in the field descriptions
-  in `contract.py`.
+  settles — `material` for something that is not a substance, `method` for data no method
+  produced, `data_type` between `simulation`, `benchmark` and `optimization` for an
+  enumerated set, `producer` when a chain of codes made the files — are decided in the
+  field descriptions in `contract.py`; read the field before you guess.
 
 ## Step 3 — Draft a first-pass YAML (don't blind-guess)
 
@@ -268,7 +274,8 @@ Show the drafted YAML **and your predicted counts**, and ask the user, in one me
 concrete questions it leaves open: each `# TODO fill in`, each `# TODO confirm` (here's my
 inference and why — right?), the `label` (it becomes the key, and on a shared server it
 should carry the surname or group; show them the key it slugs to, since `slug()` keeps
-A-Z and 0-9 only and an accented name comes out spelled with `_`), the `contact`, the
+A-Z and 0-9 only and an accented name comes out spelled with `_` — the choices when that
+spelling will not do are in `docs/ONBOARDING.md`, step 1), the `contact`, the
 identity choice, and the
 artifact/shared `type` names you chose. **Wait for their answers**, apply them, show the
 result, and iterate until they say it's right. Only then move on. Never fill a blank from
