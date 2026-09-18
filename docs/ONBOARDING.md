@@ -267,15 +267,19 @@ print(dict(entity.metadata))           # this entity's physics parameters
 
 spectrum = entity["spectrum"]          # the array client: no bytes have moved yet
 print(spectrum.shape, spectrum.dtype)  # the shape and dtype the manifest recorded
-print(spectrum[0:2, 0:2])              # a corner: the server slices, these bytes cross
+corner = (slice(0, 2),) * spectrum.ndim   # at most 2 along *every* axis, at any rank
+print(spectrum[corner])                # a corner: the server slices, these bytes cross
 [ds[k].shape for k in shared]          # every shared axis
 ```
 
-Ask the array client for `.shape` and read a **small slice**. `spectrum[:]` would pull the
-whole array over HTTP, which for a multi-gigabyte artifact is a long wait and proves
-nothing the slice does not: both go through the same adapter, the same file and the same
-pointer. Compare the slice with the same corner read from the HDF5 by hand if you want the
-values checked too.
+Ask the array client for `.shape` and read a **small slice** — built from `.ndim`, so the
+corner means the same thing at every rank: 2×2 of a rank-2 artifact, and of a rank-3 one
+the 2×2×2 block at the origin, rather than the two rows out of two different planes that a
+literal `[0:2, 0:2]` returns without complaining. `spectrum[:]` would pull the whole array
+over HTTP, which for a multi-gigabyte artifact is a long wait and proves nothing the slice
+does not: both go through the same adapter, the same file and the same pointer. Compare
+the slice with the same corner read from the HDF5 by hand if you want the values checked
+too.
 
 Metadata on the dataset, parameters on the entity, an array at the shape you registered:
 the whole contract, proven. Collaborators need nothing beyond the Tiled client.
