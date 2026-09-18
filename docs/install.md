@@ -70,13 +70,14 @@ tilewright --help
 ```
 
 Nothing downstream needs a checkout: `manifest`, `register` (both transports) and `delete`
-all run, and so does reading the catalog back. Three things live in the repository rather
+all run, and so does reading the catalog back. Four things live in the repository rather
 than in the package, so an install without one does without them:
 
 | Only in a checkout | What to do instead |
 |---|---|
 | `examples/datasets/*.yml`, one annotated starting YAML per source tag | Write the YAML from the skeleton and the field tables in [the dataset YAML reference](reference/dataset-yaml.md), or read the examples [in the repository](https://github.com/slaclab/TileWright/tree/main/examples/datasets) |
 | the `/onboarding` skill for Claude Code | Author by hand: [step 1 of the publishing guide](ONBOARDING.md#by-hand) |
+| `examples/notebook.py`, the marimo tour of the read path | Read the catalog with the snippets in [How to read a registered catalog](using-the-catalog.md); the notebook is one self-contained file, so saving it [from the repository](https://github.com/slaclab/TileWright/blob/main/examples/notebook.py) and running it as that page describes also works |
 | the test suite | `tilewright --help`, then `tilewright manifest --check MY_DATASET.yml`, which validates and prints the key without touching the network |
 
 The vocabulary is **not** one of them: `vocabulary.yml` ships inside the package, so its
