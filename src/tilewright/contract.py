@@ -31,8 +31,13 @@ from pydantic import (
 
 TOP_LEVEL_KEYS = frozenset({"label", "key", "metadata", "source", "artifacts", "shared"})
 SOURCE_TAGS = ("files", "batch", "groups", "table")
-# Columns of entities.parquet that are not parameters; params.location may not name them.
-_ENTITY_COLUMNS = frozenset({"uid", "source_group"})
+# The columns of entities.parquet the manifest writes itself: the identity it computed for
+# the entity, and the HDF5 group a 'groups' entity was read from. Every other column is a
+# parameter. This is the whole list, and the one place it lives: nothing a dataset carries
+# may be named like one of them, whether it arrives as a named group of params.location
+# (refused below), as a parameter or label read out of a file, as a params.groups name, or
+# as a table column (all refused in manifest.py, which reads this set).
+ENTITY_COLUMNS = frozenset({"uid", "source_group"})
 
 
 class StrEnum(str, Enum):
@@ -178,14 +183,24 @@ class ParamsSpec(BaseModel):
         "'source.groups'. Default '/' when neither 'group' nor 'groups' is given. With "
         "'from: attrs' it may also name a dataset: that dataset's attributes are then the "
         "parameters. An attribute name with a dot in it ('run.number') is a dotted key, "
-        "nested on registration like the keys 'groups' makes (metadata.run.number).",
+        "nested on registration like the keys 'groups' makes (metadata.run.number). "
+        "A field of this group named 'uid' or 'source_group' is refused, naming the file "
+        "and the field: those two are the columns 'tilewright manifest' writes itself -- "
+        "the identity it computed, and the HDF5 group a 'groups' entity was read from -- "
+        "so a parameter of that name would take the column instead of sitting beside it. "
+        "Leave it out with 'exclude', or read its group under a name of your own with "
+        "'groups', which nests it ('meta.uid'); nesting renames that group's other "
+        "parameters too, and every parameter name is part of the identity, so the uids "
+        "change with it.",
     )
     groups: dict[str, str] | None = Field(
         default=None,
         description="Several groups, keyed by the name each nests under: "
         "{instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, "
         "metadata.sample.mass; queryable as Key('instrument.Ei'). Each path is read as "
-        "in 'group', '..' included.",
+        "in 'group', '..' included. A name here may not be 'uid' or 'source_group': every "
+        "key of that group nests under it, and registration nests the metadata the same "
+        "way, so those keys would land inside a column the manifest writes itself.",
     )
     from_: Literal["datasets", "attrs"] = Field(
         default="datasets",
@@ -303,7 +318,7 @@ class ParamsSpec(BaseModel):
         if not names:
             raise ValueError("has no named group, so it gives no parameter: write "
                              "(?P<name>...) around each value")
-        reserved = sorted(set(names) & _ENTITY_COLUMNS)
+        reserved = sorted(set(names) & ENTITY_COLUMNS)
         if reserved:
             raise ValueError(f"may not name a group {' or '.join(reserved)}: 'uid' and "
                              f"'source_group' are manifest columns; choose another name")

@@ -169,19 +169,35 @@ its first part, so that part counts), and the message names it
 - Other names with these prefixes, such as `path_length`, are ordinary parameters.
 
 Two more names belong to the manifest itself, in every dataset: **`uid` and
-`source_group`**, the columns of `entities.parquet` that are not parameters. The contract
-refuses each as a named group of `params.location`, and refuses a `location` group whose
-name starts with `_`, which the manifest keeps for its own bookkeeping. That second rule
-is about `location` group names only: a field read out of a file under a name that starts
-with `_` is an ordinary column, warned about by nothing.
+`source_group`**, the columns of `entities.parquet` that are not parameters. That is the
+whole list, and it lives in one place, `ENTITY_COLUMNS` in `contract.py`.
 
-A field named `uid` or `source_group` read out of a file is the case to watch, because it
-takes that column rather than sitting beside it and the run says nothing. A scalar `uid`
-under the params group becomes the entity's uid, in place of the identifier the manifest
-computed from the parameters; a scalar `source_group` replaces the group each entity was
-read from with its own value, so two entities can end up claiming the same one. Rename the
-field in the file, or leave it out with `params.exclude`. Whether either should instead be
-refused is [issue #41](https://github.com/slaclab/TileWright/issues/41).
+Nothing a dataset carries may be named like one of them, however it arrives:
+
+| Where the name comes from | What happens |
+|---|---|
+| a scalar dataset or an attribute read as a parameter (`from: datasets` or `from: attrs`, any source tag) | refused, naming the file, the parameter and the fix |
+| a `params.groups` name (the key nests under it, `uid.tenDq`) | refused; rename it under `params.groups` |
+| a named group of `params.location` | refused by the contract, before any file is opened |
+| a column of a `table` source | refused, naming the table file |
+| a `<field>_<attr>` label: a parameter `source` carrying an attribute `group` spells `source_group` | refused, naming the label, the attribute and the parameter it belongs to |
+
+The fix a message offers depends on where the name came from: leave the field out with
+`params.exclude`, rename it in the file, rename the `params.groups` name or the
+`params.location` group, or rename the table's column. To **keep** the value from a file,
+read its group under a name of your own with `params.groups`, which nests the key
+(`meta.uid`); that renames the group's other parameters too, and every parameter name is
+part of the identity, so the uids change with it.
+
+The rule is a refusal rather than a rename because the entity's identity must stay the one
+TileWright computed: a parameter carried under a name TileWright invented would be a key no
+file and no YAML spells, hashed into the uid all the same
+([the `params` fields](dataset-yaml.md#params)).
+
+A separate rule covers names that start with `_`: the contract refuses a `params.location`
+group whose name starts with one, which the manifest keeps for its own bookkeeping. That
+rule is about `location` group names only: a field read out of a file under a name that
+starts with `_` is an ordinary column, warned about by nothing.
 
 Nothing else is reserved for an entity parameter. A parameter called `index`, `size`,
 `type`, `shape`, `dtype`, `file`, `dataset` or `event` is an ordinary column of
