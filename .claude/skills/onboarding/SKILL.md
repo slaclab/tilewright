@@ -213,11 +213,11 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   the modern conventions".
 - **Read the codebase / context** to infer the dataset `metadata` (`method`, `data_type`,
   `material`, `producer`, `project`, `facility`, `instrument`, `proposal`). **Nothing
-  fills `metadata` in from the files** (`docs/ONBOARDING.md`, step 1, the `metadata`
-  bullet): a `params` block reads per-entity values, so dataset-level facts the producer
-  left as HDF5 root attributes (`@title`, `@source`, `@institution`) reach the catalog
-  only if you copy them into the YAML by hand — read them, propose the ones worth keeping,
-  and mark them as read from the files rather than confirmed (Step 3). Map each value onto
+  fills `metadata` in from the files** — `docs/ONBOARDING.md`, step 1, the `metadata`
+  bullet, is where that rule and its reason live. Your part of it: read the files' root
+  attributes (`@title`, `@source`, `@institution`) alongside the codebase, propose the
+  ones worth keeping, and mark them as read from the files rather than confirmed
+  (Step 3). Map each value onto
   a canonical id in `vocabulary.yml` where one fits, and where none does write the
   producer's own term: that is not inventing vocabulary, it registers as written with a
   warning, and the curator sees it later. What you must not do is coin an official-looking
