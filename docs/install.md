@@ -7,8 +7,10 @@
     [How to read a registered catalog](using-the-catalog.md).
 
 Everything below is for **publishing** data. It runs the `tilewright` command line, so it
-wants a clone of the repository and **Python 3.11 or newer**. The same install serves both
-transports, pointer registration and `--upload`; which one you use is chosen at
+wants the package installed and **Python 3.11 or newer**. A clone is the fullest way and
+the one the three tabs below take; the whole pipeline also runs from an install with no
+checkout at all ([No checkout](#no-checkout)). The same install serves both transports,
+pointer registration and `--upload`; which one you use is chosen at
 [step 4 of the publishing guide](ONBOARDING.md#4-register-the-dataset).
 
 ## 1. Install
@@ -55,6 +57,34 @@ transports, pointer registration and `--upload`; which one you use is chosen at
 `tilewright --help` printing its three commands is the check. For a fuller one,
 `uv run --extra test pytest` (plain `pytest` in an activated environment) needs no server
 and no credentials.
+
+### No checkout
+
+The package installs straight from the repository URL, into a tool environment of its own
+or into an environment you already have:
+
+```bash
+uv tool install git+https://github.com/slaclab/TileWright   # its own environment, on PATH
+pip install git+https://github.com/slaclab/TileWright       # or into the active one
+tilewright --help
+```
+
+Nothing downstream needs a checkout: `manifest`, `register` (both transports) and `delete`
+all run, and so does reading the catalog back. Three things live in the repository rather
+than in the package, so an install without one does without them:
+
+| Only in a checkout | What to do instead |
+|---|---|
+| `examples/datasets/*.yml`, one annotated starting YAML per source tag | Write the YAML from the skeleton and the field tables in [the dataset YAML reference](reference/dataset-yaml.md), or read the examples [in the repository](https://github.com/slaclab/TileWright/tree/main/examples/datasets) |
+| the `/onboarding` skill for Claude Code | Author by hand: [step 1 of the publishing guide](ONBOARDING.md#by-hand) |
+| the test suite | `tilewright --help`, then `tilewright manifest --check MY_DATASET.yml`, which validates and prints the key without touching the network |
+
+The vocabulary is **not** one of them: `vocabulary.yml` ships inside the package, so its
+canonical ids are readable wherever `tilewright` is installed.
+
+```bash
+python -c "import tilewright, pathlib; print(pathlib.Path(tilewright.__file__).parent / 'vocabulary.yml')"
+```
 
 ## 2. Point at a server
 
