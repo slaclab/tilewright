@@ -149,6 +149,20 @@ class TestAccepted:
         assert body.exclude_groups == ["calibration", "_*"]
         assert body.params.paths == {"calibration": "../calibration", "own": "/"}
 
+    def test_the_entity_group_default_names_the_group_and_not_the_entities(self):
+        """`entity_group` names the group whose subgroups are the entities, so its stated
+        default has to be a group. Read as naming the entities instead, "the file's
+        top-level groups" would make each entity a *subgroup* of a top-level group, which
+        for the ordinary file whose top-level groups are themselves the entities is no
+        entities at all -- exactly what '/*' does. The behaviour the real default produces
+        is pinned by
+        tests/test_manifest.py::TestGroups::test_top_level_groups_when_no_entity_group."""
+        from tilewright.contract import GroupsSource
+
+        field = GroupsSource.model_fields["entity_group"]
+        assert field.default is None
+        assert field.description.split("Default:")[1].strip().startswith("the file root")
+
     @pytest.mark.parametrize("path", ["..", "../..", "../calibration", "/../calibration",
                                       "../../run/beam/", "../../.."])
     def test_a_groups_params_path_may_start_with_dotdot(self, path):
@@ -548,6 +562,61 @@ class TestVocabulary:
         doc = DatasetMetadata.model_fields["data_type"].description
         ids = [entry["id"] for entry in load_vocabulary()["data_types"]]
         assert re.findall(r"'([^']+)'", doc) == ids
+
+    def test_the_data_type_description_explains_every_id_it_lists(self):
+        """Listing an id is not defining it. `vocabulary.yml` gives 'benchmark' and
+        'optimization' no label, and no page mentions them, so the field description is
+        the only place an author can learn when to pick one: each id is named again
+        outside the list that introduces it."""
+        from tilewright.contract import DatasetMetadata
+
+        doc = DatasetMetadata.model_fields["data_type"].description.lower()
+        for entry in load_vocabulary()["data_types"]:
+            assert doc.count(entry["id"]) >= 2, entry["id"]
+
+    def test_the_method_description_says_what_to_write_when_no_method_applies(self):
+        """'method' is required and the vocabulary has no id for "none", so an author
+        whose data was produced by no method writes something that is not a method unless
+        the field says what to do. It points at the same escape hatch 'material'
+        documents, and that value really does validate, with a note and nothing else."""
+        from tilewright.contract import DatasetMetadata
+
+        doc = DatasetMetadata.model_fields["method"].description
+        assert "not_applicable" in doc
+        assert "not_applicable" in DatasetMetadata.model_fields["material"].description
+
+        cfg, notes = load_dataset(files_cfg(metadata={
+            "method": ["not_applicable"], "data_type": "benchmark",
+            "material": "not_applicable"}))
+        assert cfg.metadata.method == ["not_applicable"]
+        assert [n for n in notes if n.startswith("metadata.method")] == [
+            "metadata.method 'not_applicable' is not in the vocabulary; it is registered "
+            "as written (known: " + ", ".join(
+                sorted(e["id"] for e in load_vocabulary()["methods"])) + ")"]
+        assert [n for n in notes if n.startswith("metadata.material")] == []
+
+    def test_the_description_rule_says_which_keys_count(self):
+        """"Every number must also exist as a metadata key" has to say *which* keys, or
+        an author with a number that only entities carry cannot apply it. The rule names
+        this block, rules an entity parameter out, and gives one test for what counts as
+        a number."""
+        from tilewright.contract import DatasetMetadata
+
+        doc = DatasetMetadata.model_fields["description"].description
+        assert "key of this 'metadata' block" in doc
+        assert "entity parameter is not a key of this block" in doc
+        assert "Key('...') == query on that number" in doc
+        # the reference page is HTML: an angle-bracketed placeholder would be swallowed
+        assert "<" not in doc and ">" not in doc
+
+    def test_the_contact_description_covers_a_record_with_no_address(self):
+        """`Name <email>` is the shape, not a requirement: plenty of records publish no
+        address, and the field says what to write then rather than leaving the author to
+        guess one or drop the field."""
+        from tilewright.contract import DatasetMetadata
+
+        doc = DatasetMetadata.model_fields["contact"].description
+        assert "no address" in doc
 
     def test_alias_rewrites_spelling_only(self):
         raw = files_cfg(metadata={"method": ["EDRIXS"], "material": "NIPS", "data_type": "simulation"})
