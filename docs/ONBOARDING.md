@@ -34,8 +34,9 @@ anything about your science. It lives **with the data**, at
 
 ### With an agent (recommended)
 
-A clone ships an `/onboarding` skill at `.claude/skills/onboarding/`. From the repository
-root in Claude Code:
+A clone ships an `/onboarding` skill for Claude Code in `skills/onboarding/`. Install it
+once ([the command](https://github.com/slaclab/TileWright/tree/main/skills#install-once)),
+then open Claude Code in your data root and type:
 
 ```
 /onboarding

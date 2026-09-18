@@ -16,6 +16,20 @@ Goal: take a producer's HDF5 dataset and register it into the catalog by authori
 dataset YAML** against the contract surface, then running `tilewright manifest` and
 `tilewright register`. You onboard by reading the *contract*, never broker *implementation*.
 
+## Where you are
+
+The session runs in the user's **data root**, where the YAML and its manifests go. It may
+also run in a TileWright checkout. The contract surface is in the checkout this skill
+lives in: `<checkout>` is two directories above this skill's real path, found with
+`readlink -f <this skill's base directory>/../..`. That works whether the skill is
+symlinked into `~/.claude/skills/` or opened in a clone. If `<checkout>/src/tilewright/contract.py`
+is not there, stop and ask the user where their TileWright checkout is. Every `docs/…`,
+`src/…` and `examples/…` path in this skill is under `<checkout>`, not the working
+directory.
+
+Run `tilewright` if it is on `PATH`; otherwise run `uv run --project <checkout> tilewright`
+wherever this skill says `tilewright`.
+
 ## Step 0 — Read the contract surface (do this first, do not skip)
 
 Read these, in order. They define what a valid dataset is; do not reverse-engineer it from

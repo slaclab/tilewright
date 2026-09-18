@@ -42,7 +42,8 @@ examples/datasets/   one annotated YAML per source tag, with expected counts
 examples/notebook.py marimo tour of the read path
 docs/                the site (mkdocs-material); docs/adr/ is internal
 scripts/             maintainer tools; see CONTRIBUTING.md
-.claude/skills/      onboarding (for producers) and vocab-review (for maintainers)
+skills/              Claude Code skills for producers: onboarding (install once, run from your data)
+.claude/skills/      Claude Code skills for maintainers: vocab-review
 config.yml           a local pointer-serving server; config.upload.yml hosts uploads
 ```
 

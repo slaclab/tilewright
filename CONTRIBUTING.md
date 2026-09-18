@@ -13,7 +13,8 @@
 | `tests/` | offline by default; `-m integration` needs `TILED_URL`/`TILED_API_KEY` and a server with data |
 | `docs/` | the site; `docs/adr/` is internal and unpublished |
 | `scripts/` | maintainer tools, not installed, not on the CLI |
-| `.claude/skills/` | `onboarding` for producers, `vocab-review` for maintainers |
+| `skills/` | Claude Code skills for producers (`onboarding`); installed into `~/.claude/skills/`, run from the data root. `.claude/skills/onboarding` is a symlink to it |
+| `.claude/skills/` | Claude Code skills for maintainers (`vocab-review`); load only in a session opened here |
 
 ## Running things
 
