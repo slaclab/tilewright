@@ -281,9 +281,13 @@ artifact/shared `type` names you chose. **Wait for their answers**, apply them, 
 result, and iterate until they say it's right. Only then move on. Never fill a blank from
 anything other than the data or what the user told you.
 
-**Run no `tilewright` command before this sign-off — `manifest` included.** It is local and
-re-runnable, but it bakes the label into a key and snapshots the YAML into manifests, which
-presents decisions the user hasn't made yet as settled.
+**Write nothing before this sign-off: no `tilewright manifest`, no `register`.** `manifest`
+is local and re-runnable, but it bakes the label into a key and snapshots the YAML into
+manifests, which presents decisions the user hasn't made yet as settled.
+`tilewright manifest --check` is the exception, and the tool for this step: it validates
+the contract and prints the key the label slugs to, and writes nothing — neither the `key:`
+line nor a manifest (`docs/reference/cli.md`, `tilewright manifest`). Run it to show the
+user the key, as `docs/ONBOARDING.md` step 1 says.
 
 ## Step 5 — Manifest, compare — then stop
 
@@ -362,10 +366,11 @@ is never rewritten. A metadata-only correction needs no delete: edit the YAML an
 - **Two sources only: the data, and what the user tells you.** Never mine the repo or git
   history for a dataset's metadata. If in doubt, ask the user.
 - **It's a conversation, with two stops.** Ask for starting context and wait (Step 1);
-  explore; ask the open questions in one batched round and wait (Step 4) — run **no
-  `tilewright` command** until the user has signed off on the YAML. After `manifest`,
-  report the count comparison and wait again (Step 5) — run **no `tilewright register`**
-  until they say go.
+  explore; ask the open questions in one batched round and wait (Step 4) — **write
+  nothing** until the user has signed off on the YAML; `tilewright manifest --check`, which
+  writes nothing, is the one command that belongs before the sign-off (Step 4). After
+  `manifest`, report the count comparison and wait again (Step 5) — run **no
+  `tilewright register`** until they say go.
 - **Predict, then compare.** A mismatch means you misread the data — don't register, find
   out why.
 - **The read-back is the proof.** `register` reporting zero errors proves nothing about
