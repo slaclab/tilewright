@@ -90,10 +90,11 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   (`params.group`, or `params.groups` when the scalars are spread over several groups —
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/operator_note` —
-  and `recursive` for subgroups; a field named `uid` or `source_group`, and a
-  `params.groups` name that is one of those, are refused — they are the two columns the
-  manifest writes itself, so `exclude` the field, or nest its group under a name of your
-  own to keep the value), and any **shared axes** (arrays
+  and `recursive` for subgroups; a field named `uid` or `source_group`, a `params.groups`
+  name that is one of those, and under a `table` a column or `locator` key that is one —
+  or that nests under one, `uid.raw` — are refused: they are the two columns the manifest
+  writes itself, so `exclude` the field or rename the column, or nest the field's group
+  under a name of your own to keep the value), and any **shared axes** (arrays
   *identical for every entity* → `shared:`, if you serve them at all — the YAML lists what
   the dataset serves, not what the file holds, so a constant placeholder nobody would read
   is simply left out; an axis that varies per entity is an artifact, and an array that is

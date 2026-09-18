@@ -18,7 +18,8 @@ parameter and what to do, wherever such a name arrives:
 - a `<field>_<attr>` label — a parameter `source` carrying an attribute `group` spells
   `source_group` without either name being one;
 - a column of a `table` source, which already refused `uid` and now refuses
-  `source_group` with it;
+  `source_group` with it, and a key of its `locator`, which is a parameter the YAML spells
+  rather than one the table file carries;
 - a named group of `params.location`, which the contract refused before this ADR and
   refuses unchanged.
 
@@ -26,6 +27,18 @@ A dotted name counts as its first part, so a *nested* key is refused only when t
 nests under is one of the two: `meta.uid` from `params.groups: {meta: /meta}` is an
 ordinary column and stays one. That is also the fix that keeps the value; the others are
 `params.exclude` and renaming the field in the file.
+
+The `table` check is the table's own, not the walker's, because only it knows the file the
+columns came from: a table row's provenance is its row number, and a `table` source has no
+`params` block for the shared message-builder to derive a `Fix:` from. It therefore applies
+the dotted-head rule itself and quotes the column as the table spells it (`uid.raw`, not
+`uid`), so the author can find the header.
+
+Both names are refused under every source tag although only a `groups` source writes a
+`source_group` column. One list and one rule are worth more than a per-tag list: the same
+name means the same thing in every dataset, and a source retagged to `groups` later does
+not start losing a value it used to keep. The message says which of the two cases it is,
+so it never claims a column that tag does not write.
 
 The list lives in one place, `ENTITY_COLUMNS` in `contract.py`, which both the contract's
 `params.location` validator and the walker read. Artifact-table column names (`type`,
@@ -90,6 +103,13 @@ silently.
   `test_a_groups_parameter_named_source_group_is_refused`,
   `test_a_params_groups_name_that_is_a_manifest_column_is_refused`,
   `test_a_label_that_spells_a_manifest_column_is_refused`,
-  `test_a_table_column_named_like_a_manifest_column_is_refused`, and
+  `test_a_table_column_named_like_a_manifest_column_is_refused` (parametrised over
+  `uid.raw` and `source_group.x` as well as the bare names),
+  `test_a_table_locator_key_named_like_a_manifest_column_is_refused`, and
   `test_a_params_groups_name_of_your_own_still_nests_such_a_field`, which holds the guard
   open: the rule reaches a key's first part only.
+- `_provenance` stays outside this rule. It is the manifest's own bookkeeping key, written
+  into the row it builds and dropped again before `entities.parquet`, so a field of that
+  name is hashed into the uid and then not written — pre-existing, unchanged here, and now
+  stated in `docs/reference/manifest.md` instead of contradicted by it. Closing it means
+  either refusing a third name or newly writing a column, and either is its own decision.

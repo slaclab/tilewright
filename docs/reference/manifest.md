@@ -179,8 +179,13 @@ Nothing a dataset carries may be named like one of them, however it arrives:
 | a scalar dataset or an attribute read as a parameter (`from: datasets` or `from: attrs`, any source tag) | refused, naming the file, the parameter and the fix |
 | a `params.groups` name (the key nests under it, `uid.tenDq`) | refused; rename it under `params.groups` |
 | a named group of `params.location` | refused by the contract, before any file is opened |
-| a column of a `table` source | refused, naming the table file |
+| a column of a `table` source, or a key of its `locator` | refused, naming the table file and the column or key as the table spells it |
 | a `<field>_<attr>` label: a parameter `source` carrying an attribute `group` spells `source_group` | refused, naming the label, the attribute and the parameter it belongs to |
+
+A dotted name counts as its first part everywhere in that table — `uid.raw`, whether it is
+a table column, an attribute or a `params.groups` key, claims `uid` as much as `uid` does,
+because that is the part `entities.parquet` gives a column and registration nests the
+value under.
 
 The fix a message offers depends on where the name came from: leave the field out with
 `params.exclude`, rename it in the file, rename the `params.groups` name or the
@@ -194,10 +199,21 @@ TileWright computed: a parameter carried under a name TileWright invented would 
 file and no YAML spells, hashed into the uid all the same
 ([the `params` fields](dataset-yaml.md#params)).
 
+Both names are refused under every source tag, although only a `groups` source writes a
+`source_group` column: one list, one rule, one place. Under the other three tags a
+`source_group` takes no column — it is refused so that the same name means the same thing
+in every dataset, and so that a source retagged later does not start losing a value it
+used to keep. The refusal says which of the two it is.
+
 A separate rule covers names that start with `_`: the contract refuses a `params.location`
 group whose name starts with one, which the manifest keeps for its own bookkeeping. That
 rule is about `location` group names only: a field read out of a file under a name that
-starts with `_` is an ordinary column, warned about by nothing.
+starts with `_` is an ordinary column, warned about by nothing — with one exception,
+`_provenance`. That is the one bookkeeping name the manifest writes into the row it builds
+and drops again before `entities.parquet` (it records where each entity was read from, for
+the collision report), so a field of that name is hashed into the uid like any other and
+then not written. Rename it in the file, or leave it out with `params.exclude`, if you
+need the value in the catalog.
 
 Nothing else is reserved for an entity parameter. A parameter called `index`, `size`,
 `type`, `shape`, `dtype`, `file`, `dataset` or `event` is an ordinary column of
