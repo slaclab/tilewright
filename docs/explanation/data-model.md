@@ -119,8 +119,9 @@ No level of `client[DATASET][ENTITY][ARTIFACT]` uses a random UUID: each derives
 something the producer declared, so `EDRIXS_636ce3e41ea05` can be pasted into a message
 and still resolve tomorrow ([identity and keys](identity.md)). Only two of the three are
 *readable*, though. The dataset key is `slug(label)` and the artifact key is its `type`,
-both of them words the author chose; the entity key is `<DATASET_KEY>_<uid[:13]>`, and
-that uid is a hash — stable, and saying nothing about the entity.
+both of them words the author chose; the entity key ends in a hash of the entity's
+identity ([the shape, and what is hashed](identity.md#the-entity-key-comes-from-the-entitys-identity))
+— stable, and saying nothing about the entity.
 
 It shows most under a `groups` source, where the entity already has a name (the HDF5 group
 it was read from) that no identity mode puts in the key: `identity: params` hashes the
@@ -132,7 +133,7 @@ search away:
 
 ```python
 ent = ds.search(Key("source_group") == "panels/panel_north").values().first()
-ent.key                                   # 'TILT_ATLAS_636ce3e41ea05'
+ent.item["id"]                            # 'TILT_ATLAS_636ce3e41ea05', the entity's key
 dict(ent.metadata)["source_group"]        # 'panels/panel_north', the path inside the file
 ```
 
