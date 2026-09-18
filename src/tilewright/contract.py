@@ -88,15 +88,30 @@ class DatasetMetadata(BaseModel):
 
     method: list[str] = Field(
         min_length=1,
-        description="Scientific methods, e.g. ['RIXS']; at least one. Vocabulary facet.",
+        description="Scientific methods, e.g. ['RIXS']; at least one. A method is how the "
+        "values were obtained, so a field of study ('geophysics'), a file format and the "
+        "name of a code are not methods -- the code is 'producer'. Data produced by no "
+        "method at all (a reference table compiled from the literature, a solver "
+        "benchmark, model weights) takes ['not_applicable'], the escape hatch 'material' "
+        "has, and there is no other way to say it: the field is required and may not be "
+        "empty. The vocabulary lists no 'not_applicable' among the methods, so it "
+        "registers as written with a note; that note is the record that this dataset had "
+        "no method, not a mistake to correct. Vocabulary facet.",
     )
     data_type: str = Field(
         min_length=1,
         description="What kind of data, as one of the data_type ids in the vocabulary: "
         "'simulation', 'experimental', 'benchmark' or 'optimization'. A measurement of "
         "the world is experimental wherever the instrument stood, a laboratory, a field "
-        "site or an orbit; what a model or a code computed is simulation. Vocabulary "
-        "facet.",
+        "site or an orbit; what a model or a code computed is simulation. A benchmark is a "
+        "set whose purpose is to grade something else -- the accuracy of a solver, the "
+        "score of a model, the throughput of a pipeline -- so its arrays are the yardstick "
+        "and not the subject. An optimization is the record of a search for a best value "
+        "(a fit, a sweep that an objective steered, a training run), and its entities are "
+        "the attempts. Enumeration is neither: a space computed or measured case by case, "
+        "with nothing scoring it and nothing steering it, is simulation when a code "
+        "computed it and experimental when an instrument measured it, however exhaustive "
+        "the enumeration and whoever later grades a model against it. Vocabulary facet.",
     )
     material: str = Field(
         min_length=1,
@@ -129,16 +144,25 @@ class DatasetMetadata(BaseModel):
     )
     contact: str | None = Field(
         default=None,
-        description="Who to ask about this dataset, as `Name <email>`.",
+        description="Who to ask about this dataset, as `Name <email>`. Nothing parses it, "
+        "so a record that publishes no address still fills it: write the name and where "
+        "it can be reached from ('Lattice Dynamics Group, Vasari Institute (via "
+        "doi:10.5555/000000)'), or the name alone. A name with no address beats a guessed "
+        "address, and both beat leaving the field out while someone can be named.",
     )
     description: str | None = Field(
         default=None,
         description="One paragraph a reader uses to decide whether to open the dataset. "
         "Repeat the defining numbers here freely, but every number in it must also "
-        "exist as a metadata key: the key is authoritative, the prose is the summary. A "
-        "number is a quantity someone could query on (a count, a size, a rate, a "
-        "temperature); a year in a name, a version string, a DOI and a field name are "
-        "prose, and need no key. Nothing checks the rule, so a prose number that no key "
+        "exist as a key of this 'metadata' block: the key is authoritative, the prose is "
+        "the summary. The test for both halves is one question -- would anyone write a "
+        "Key('...') == query on that number to find datasets? A count, a size, a rate, a "
+        "temperature: yes, so it needs a key. A year in a name, a version string, a DOI, "
+        "a dtype ('uint8'), a formula ('NiPS3'), and a value quoted to explain what it "
+        "means ('0 is a valid reading, not a gap'): no, they are prose and need none. An "
+        "entity parameter is not a key of this block, so a number that describes the "
+        "entities as a set ('tilt runs from 0 to 30 degrees') takes dataset keys of its "
+        "own here, or it goes. Nothing checks any of this, so a prose number that no key "
         "carries, or a key whose value the prose contradicts, is found by a reader.",
     )
 
@@ -432,7 +456,10 @@ class GroupsSource(_HDF5SourceBase):
     entity_group: str | None = Field(
         default=None,
         description="Group whose subgroups are the entities ('/samples'). Default: the "
-        "file's top-level groups. Any segment may be a glob, matched with fnmatch against "
+        "file root, so that each of the file's own top-level groups is an entity. (The "
+        "default is the group named here, not the entities: writing '/*', which names "
+        "every top-level group, would instead make an entity of every subgroup of one.) "
+        "Any segment may be a glob, matched with fnmatch against "
         "the names of the groups at that level: '*' and '?' match within the name, '[...]' "
         "one character of a set, and case matters. '/*' takes every top-level group, so "
         "that each subgroup of each of them is an entity (`/<site>/<detector>`); "
