@@ -2,7 +2,7 @@ name: Docs
 
 on:
   push:
-    branches: [main]
+    branches: [main, tilewright-bench]
     paths:
       - "docs/**"
       - "includes/**"
@@ -11,7 +11,7 @@ on:
       - "scripts/build_yaml_reference.py"
       - ".github/workflows/docs.yml"
   pull_request:
-    branches: [main]
+    branches: [main, tilewright-bench]
     paths:
       - "docs/**"
       - "includes/**"
