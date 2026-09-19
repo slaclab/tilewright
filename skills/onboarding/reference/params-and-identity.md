@@ -8,9 +8,12 @@ entity's queryable parameters, and how every entity keeps a key of its own.
 - **Inside the container.** `params.group` names one group whose scalars become flat keys;
   `params.groups` names several, and each nests under the name you give it
   (`{instrument: /entry/instrument}` gives `instrument.Ei`). `from: attrs` reads a group's
-  HDF5 attributes instead of its datasets. `exclude` leaves out blobs — an attribute's
-  path is `<group path>/<name>`, e.g. `/operator_note` — and `recursive: true` descends
-  into subgroups. Field attributes (`units`, ...) are captured automatically as labels
+  HDF5 attributes instead of its datasets; one `params` block reads one way, for every
+  group in it, so a container that keeps some values in datasets and others in
+  attributes gives up one of the two (copy the rest into `metadata` by hand). `exclude`
+  leaves out blobs — an attribute's path is `<group path>/<name>`, e.g.
+  `/operator_note` — in the same frame as the group paths, so under `groups` it is
+  relative to the entity group. `recursive: true` descends into subgroups. Field attributes (`units`, ...) are captured automatically as labels
   (`Ei_units`); nothing to declare.
 - **What counts as a scalar.** A 0-dim dataset, and a size-1 one (shape `(1,)`, as NeXus
   writes scalars). Any bigger dataset in a params group, a `(7,)` array say, is skipped
@@ -19,6 +22,9 @@ entity's queryable parameters, and how every entity keeps a key of its own.
   [artifact](artifacts-and-shared.md), but it is then read and not queried: ask the
   producer for a scalar summary (a mean, a range) if it must be searchable, and when there
   is no producer to ask, say in `description` that it is not searchable.
+- **A count is not a value in the file.** The length of an array (particles in a species,
+  frames in a run) is no scalar, so it is no parameter; if readers must query it, ask the
+  producer to store it as one, or state it in `description`.
 - **Every container is judged on its own**, without a message: see
   [inspect across the containers](source-and-entity.md#inspect-across-the-containers-not-one-file).
 - **In the name only** (a file, directory or group name, or a batch row number):
@@ -41,7 +47,10 @@ A few names belong to the manifest: the locator columns of each artifact `type`,
 nesting a group under a name of your own), are in
 [reserved names](manifest.md#reserved-names); `manifest` refuses a clash and prints the
 fix. Every other name is free — `index`, `size` and `type` are ordinary parameters — so do not
-rename a producer's field out of caution.
+rename a producer's field out of caution. One name may come from one place only: a
+`params.location` group may not share its name with a parameter read in the container,
+or with a `params.groups` name that keys nest under (`instrument` for `instrument.Ei`);
+`manifest` refuses the pair and names both.
 
 ## Parameters from the location
 

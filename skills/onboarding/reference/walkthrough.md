@@ -100,7 +100,8 @@ with a complete [server config](config-pointer.yml).
 
 ## 4. Register the dataset
 
-Register a small sample first, then the rest. When the server reads your files:
+Register a sample smaller than the dataset first (`-n 5`, or `-n 1` for a dataset of a
+few entities), then the rest. When the server reads your files:
 
 ```bash
 tilewright register -n 5 .tilewright/datasets/MY_DATASET.yml
@@ -119,7 +120,8 @@ This moves the real data. Parameters become queryable metadata, arrays stream to
 server, shared axes stream once each, and the container is stamped `storage: uploaded`.
 
 Either way registration is incremental: an existing entity is skipped, so the second
-command continues from the first and an interrupted run resumes.
+command continues from the first and an interrupted run resumes. Its summary counts that
+run only, so the sample's entities appear under `Skipped` the second time.
 
 How long a run takes, and what to do when the source's shape makes it slow, is in
 [counts and cost](counts-and-cost.md#how-long-registering-takes).

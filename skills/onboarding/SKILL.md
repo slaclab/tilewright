@@ -16,7 +16,9 @@ dataset YAML** against the contract, then running `tilewright manifest` and
 
 ## Where you are
 
-The session runs in the user's **data root**, where the YAML and its manifests go. What
+The session runs in the user's **data root**, where the YAML and its manifests go. If
+your shell is not on the host that holds the data (a login node, a laptop over a bridge),
+run every command — `h5py`, `tilewright` — on that host, not beside you. What
 this skill reads ships beside this file: `reference/` and `examples/`. Every `reference/…`
 and `examples/…` path below is relative to this skill's directory, `$SKILL`, not to the
 working directory. The contract models and the vocabulary ship in the package, `<pkg>`,
@@ -242,7 +244,8 @@ longer than a few minutes, tell the user how long it will take *before* starting
 `-n 100` and multiply out (`reference/counts-and-cost.md`).
 Read the summary
 block, not the exit code: `Artifact errors` must be 0, `Broken nodes` must be absent, and
-`Entities` + `Skipped` should equal the entity count from Step 5. Any
+`Entities` + `Skipped` should equal the entity count from Step 5. The summary counts this
+run only: after a `-n` sample, the full run reports the sample's entities as `Skipped`. Any
 `WARNING ... half-registered` lines mean a previous run died mid-entity and this run
 attached the rest — fine. A `Broken nodes` count means artifacts that are on the server
 but serve nothing: each is named with its key, and the fix is `tilewright delete <KEY>

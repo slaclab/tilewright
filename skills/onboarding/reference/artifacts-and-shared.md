@@ -48,7 +48,9 @@ artifacts:
 name matches `members`, `frame_0000` to `frame_0099`, and writes each to the manifest as
 if it had an entry of its own, so registration and both read paths see nothing new.
 `{name}` in `type` is the member's name, so `trace_{name}` over `/channels/ch_a` gives
-`trace_ch_a`; quote the template. Subgroups are not members, `optional: true` skips an
+`trace_ch_a`; quote the template. When several groups hold members with the same bare
+names (`/T2M/0`, `/PRECIP/0`), give each entry a prefix, `"T2M_{name}"`, or the types
+collide and `manifest` refuses them. Subgroups are not members, `optional: true` skips an
 entity without the group, and the types must stay unique after expansion. A `batch` source
 does not take this form, because its first artifact sets the batch size, and neither does
 `shared`. What counts as a member, and what an absent or empty group does, is in
@@ -85,6 +87,11 @@ a path **beside** the entity groups (a calibration group above them, say), and o
 a group `exclude_groups` leaves out, are each one copy per file, so copies that differ
 from entity group to entity group under such a path pass. A group that simply lacks the
 array is passed over, and its entity is served the copy the entry names.
+
+With a single entity every array is trivially "identical for every entity". Put the
+coordinates a reader slices by (time, latitude, energy) under `shared:` and the measured
+or computed values under `artifacts`, so the dataset reads like any other and stays right
+when entities are added.
 
 NeXus axes go to `shared:` only if identical across the files you sampled
 ([NeXus](nexus.md)); a netCDF dimension placeholder never does

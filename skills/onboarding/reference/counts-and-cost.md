@@ -60,7 +60,10 @@ second, what the usual read costs, and the choices:
 
 - **Register as it is**, stating both costs. The run resumes if it is interrupted.
 - **Register a subset**: fewer members with `members`, fewer files with `pattern`, or a
-  trial with `register -n`. Say in `description` what was left out.
+  trial with `register -n`. `members` is one fnmatch pattern, not a numeric range: over unpadded names
+  `[0-9]` picks 0–9 and `1[0-9]` picks 10–19, and no single pattern picks exactly 0–19.
+  Choose a range one pattern can express (the first ten, the tens), or write one entry
+  per pattern. Say in `description` what was left out.
 - **Register a converted copy**, made by the producer, or by the owner when there is no
   producer to ask (a published record) and they can keep the copy beside the data. Two
   recipes, each a short h5py script the owner runs and keeps with the copy:
