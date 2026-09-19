@@ -36,6 +36,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tilewright"]
 
+# The onboarding skill ships with the CLI it describes (ADR-0018).
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "tilewright/skills"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Server-dependent tests are opt-in: `pytest -m integration` with TILED_URL and

@@ -15,7 +15,7 @@ An unknown value warns and validates. Your dataset onboards either way.
   `NiPS3`, `HRSTEM` becomes `STEM`. An alias changes spelling and nothing else. The
   rewrite happens each time the YAML is read, and the file keeps what you wrote. The
   exception is a YAML that `tilewright manifest` must write out whole to add its `key:`
-  ([when](../reference/cli.md#tilewright-manifest)): that file then holds the canonical ids.
+  ([when](https://github.com/slaclab/tilewright/blob/main/docs/reference/cli.md#tilewright-manifest)): that file then holds the canonical ids.
 - An unknown value is left as you wrote it, and `tilewright manifest` prints a note.
 
 The stricter option would be to reject unknown values. That fails badly for the first
@@ -50,5 +50,5 @@ have not read the vocabulary invent reasonable synonyms: `PowderDiffraction` for
 English, and all are invisible to a query written against the canonical id, without
 anything failing or anyone being told. The report exists to make that drift visible.
 
-See also [the `metadata` section](../reference/dataset-yaml.md#metadata) for the fields
+See also [the `metadata` section](dataset-yaml.md#metadata) for the fields
 themselves.

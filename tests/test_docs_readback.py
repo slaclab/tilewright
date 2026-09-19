@@ -1,7 +1,7 @@
 """The read-back snippet on the onboarding page runs, at any rank.
 
-`docs/ONBOARDING.md` step 5 is the home of the read-back snippet (CONTRIBUTING.md, "one
-fact, one home"), and the onboarding skill sends *every* dataset to it. A corner written
+`skills/onboarding/reference/walkthrough.md` step 5 is the home of the read-back snippet
+(CONTRIBUTING.md, "one fact, one home"), and the onboarding skill sends *every* dataset to it. A corner written
 for one shape — `[0:2, 0:2]` — silently returns something else on an artifact of higher
 rank: rows out of two different planes, not a corner, and no error to say so. So the
 snippet is executed here, as the page ships it, against artifacts of rank 1, 2 and 3.
@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-PAGE = Path(__file__).resolve().parent.parent / "docs" / "ONBOARDING.md"
+PAGE = Path(__file__).resolve().parent.parent / "skills" / "onboarding" / "reference" / "walkthrough.md"
 
 
 def read_back_snippet():

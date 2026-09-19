@@ -11,7 +11,7 @@ from tilewright.contract import load_dataset, source_fingerprint
 from tilewright.register import dataset_container
 from tilewright.utils import FINGERPRINT_KEY, STORAGE_EXTERNAL, STORAGE_KEY, STORAGE_UPLOADED
 
-EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
+EXAMPLES = Path(__file__).parent.parent / "skills" / "onboarding" / "examples"
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3", "label": "X",
         "description": "the original"}

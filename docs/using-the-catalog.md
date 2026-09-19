@@ -70,7 +70,7 @@ list(ent)                                 # artifact keys under this entity
 > is not SQL-backed and silently degrades to filtering every entity client-side.
 
 Nested parameters, the ones a dataset declared with
-[`params.groups`](reference/dataset-yaml.md#params), are queried with a dotted key:
+[`params.groups`](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/dataset-yaml.md#params), are queried with a dotted key:
 
 ```python
 hot = ds.search(Key("instrument.Ei") > 50)

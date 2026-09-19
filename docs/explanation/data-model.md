@@ -16,7 +16,7 @@ An entity is one simulation run, one sample, or one measurement: the parameters 
 on, plus one or more arrays. Two things look like they could do that job instead:
 
 - **A file.** In one dataset a file is a run; in the next, a file holds ten thousand runs.
-  See [sources](sources.md).
+  See [sources](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/sources.md).
 - **An array.** An entity often has several. A spectrum and a magnetization curve share one
   set of parameters, and you want them back together.
 
@@ -46,7 +46,7 @@ across producers. A free-form dict holds `{Ja_meV, spin_s}` beside
 `{Udd, Delta, crystal_10Dq}` with no shared schema and no nulls.
 
 What you give up: nothing checks that two datasets using `sigma` mean the same quantity,
-or stops a third from calling it `sig`. The [soft vocabulary](vocabulary.md) covers only
+or stops a third from calling it `sig`. The [soft vocabulary](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/vocabulary.md) covers only
 the few facets used for cross-dataset discovery, such as `material` and `method`, not the
 physics parameters.
 
@@ -117,10 +117,10 @@ Both are shown in [How to read a registered catalog](../using-the-catalog.md).
 
 No level of `client[DATASET][ENTITY][ARTIFACT]` uses a random UUID: each derives from
 something the producer declared, so `EDRIXS_636ce3e41ea05` can be pasted into a message
-and still resolve tomorrow ([identity and keys](identity.md)). Only two of the three are
+and still resolve tomorrow ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md)). Only two of the three are
 *readable*, though. The dataset key is `slug(label)` and the artifact key is its `type`,
 both of them words the author chose; the entity key ends in a hash of the entity's
-identity ([the shape, and what is hashed](identity.md#the-entity-key-comes-from-the-entitys-identity))
+identity ([the shape, and what is hashed](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md#the-entity-key-comes-from-the-entitys-identity))
 — stable, and saying nothing about the entity.
 
 It shows most under a `groups` source, where the entity already has a name (the HDF5 group
@@ -151,5 +151,5 @@ TileWright decides what shape to register, and writes it the same way every time
 `register.py` builds each entity's metadata from all the manifest's columns, so no
 parameter name appears anywhere in its code. That is what makes it dataset-agnostic.
 
-See also [the Parquet manifest](../reference/manifest.md), where those columns come from,
-and [sources](sources.md) for where the entity boundary falls in each kind of data.
+See also [the Parquet manifest](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/manifest.md), where those columns come from,
+and [sources](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/sources.md) for where the entity boundary falls in each kind of data.

@@ -1,7 +1,8 @@
 """The config on the hosting page stays in step with the one the repository ships.
 
-`docs/host-a-server.md` embeds `includes/config-pointer.yml` as a complete pointer-serving
-config. It is written out rather than copied from `config.yml` (which carries a
+`docs/host-a-server.md` embeds `skills/onboarding/reference/config-pointer.yml` as a complete
+pointer-serving config; the skill ships it, so an agent onboarding from the installed skill
+has it too. It is written out rather than copied from `config.yml` (which carries a
 deployment's own storage roots), so these tests pin the parts that must agree: the shape
 Tiled expects, and the adapter line a reader will paste.
 """
@@ -11,7 +12,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-SNIPPET = ROOT / "includes" / "config-pointer.yml"
+SNIPPET = ROOT / "skills" / "onboarding" / "reference" / "config-pointer.yml"
 SHIPPED = ROOT / "config.yml"
 PAGE = ROOT / "docs" / "host-a-server.md"
 

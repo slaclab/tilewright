@@ -4,6 +4,7 @@ CLI entry points for TileWright.
     tilewright manifest   validate a dataset YAML, derive its key, write its Parquet manifests
     tilewright register   register manifests into a running Tiled server over HTTP
     tilewright delete     delete registered data from a running Tiled server
+    tilewright skills     install the Claude Code skills that ship with the package
 """
 
 import os
@@ -457,6 +458,54 @@ def delete_main():
         print("\nDone.")
 
 
+# ── tilewright skills ───────────────────────────────────────────────
+
+def _skills_dir():
+    """The skills shipped with this install: inside the package in a wheel, or the
+    checkout's top-level skills/ in an editable install."""
+    packaged = Path(__file__).resolve().parent / "skills"
+    return packaged if packaged.is_dir() else Path(__file__).resolve().parents[2] / "skills"
+
+
+def skills_main():
+    """CLI: symlink each shipped skill into ~/.claude/skills/, so its text always
+    matches the installed tilewright."""
+    parser = argparse.ArgumentParser(
+        prog="tilewright skills",
+        description="Install the Claude Code skills that ship with tilewright.",
+    )
+    actions = parser.add_subparsers(dest="action", required=True)
+    install = actions.add_parser(
+        "install", help="Symlink each skill into ~/.claude/skills/<name>")
+    install.add_argument(
+        "--force", action="store_true",
+        help="Replace an existing symlink that points elsewhere (never a real directory)")
+    args = parser.parse_args()
+
+    source = _skills_dir()
+    target = Path.home() / ".claude" / "skills"
+    skills = sorted(p for p in source.iterdir() if (p / "SKILL.md").is_file())
+    if not skills:
+        print(f"\nERROR: no skills found under {source}", file=sys.stderr)
+        sys.exit(1)
+    target.mkdir(parents=True, exist_ok=True)
+    for skill in skills:
+        link = target / skill.name
+        if link.is_symlink() and link.resolve() == skill.resolve():
+            print(f"  up to date: {link}")
+            continue
+        if link.is_symlink() and args.force:
+            link.unlink()
+        elif link.exists() or link.is_symlink():
+            what = "a symlink to " + os.readlink(link) if link.is_symlink() else "not a symlink"
+            hint = " (rerun with --force to replace it)" if link.is_symlink() else ", move it away first"
+            print(f"\nERROR: {link} exists and is {what}{hint}", file=sys.stderr)
+            sys.exit(1)
+        link.symlink_to(skill.resolve(), target_is_directory=True)
+        print(f"  linked: {link} -> {skill.resolve()}")
+    print("\nDone.")
+
+
 # ── tilewright (main dispatcher) ────────────────────────────────────
 
 def _manifest_main():
@@ -470,6 +519,7 @@ def main():
         "manifest": _manifest_main,
         "register": register_main,
         "delete": delete_main,
+        "skills": skills_main,
     }
 
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
@@ -478,6 +528,7 @@ def main():
         print("  manifest    Validate a dataset YAML, derive its key, write its Parquet manifests")
         print("  register    Register manifests into a running Tiled server over HTTP")
         print("  delete      Delete registered data from a running Tiled server")
+        print("  skills      Install the Claude Code skills that ship with the package")
         sys.exit(0)
 
     cmd = sys.argv[1]

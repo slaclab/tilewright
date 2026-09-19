@@ -20,8 +20,8 @@ from tilewright.manifest import _from_text
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
-EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
-REFERENCE_PAGE = Path(__file__).parent.parent / "docs" / "reference" / "dataset-yaml.md"
+EXAMPLES = Path(__file__).parent.parent / "skills" / "onboarding" / "examples"
+REFERENCE_PAGE = Path(__file__).parent.parent / "skills" / "onboarding" / "reference" / "dataset-yaml.md"
 
 
 def files_cfg(**over):

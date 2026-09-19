@@ -2,7 +2,7 @@
 
 TileWright does not implement NeXus classes. Its generic contract can describe
 NeXus-structured HDF5, and the onboarding skill knows how to map between them. See
-`examples/datasets/files_nexus.yml` for a complete example.
+`../examples/files_nexus.yml` for a complete example.
 
 ## Why the contract grew
 
@@ -27,7 +27,7 @@ generic ways to preserve the useful structure.
 | Attributes on arrays | Automatic capture | Metadata on the artifact node |
 | Several `NXentry` groups per file | `groups` source | One entity per entry |
 | Repeated runs with identical settings | `identity: provenance` | One entity per file, never a collision |
-| HDF5 soft or external links | h5py resolves the link; *below* the params group, `recursive: true` follows only what stays inside it ([`recursive`](../reference/dataset-yaml.md#params)) | The configured path is recorded |
+| HDF5 soft or external links | h5py resolves the link; *below* the params group, `recursive: true` follows only what stays inside it ([`recursive`](dataset-yaml.md#params)) | The configured path is recorded |
 
 The onboarding skill maps a tree using these conventions:
 
@@ -73,7 +73,7 @@ like any other. Two things to check:
 
 - **Only the matched file is stamped.** `file_size` and `file_mtime` describe it alone, so
   a regenerated image file is not reported as
-  [changed on disk](../reference/manifest.md#snapshot-semantics).
+  [changed on disk](manifest.md#snapshot-semantics).
 - **A virtual dataset has its own dtype.** It can be narrower than the sources it maps
   (a `uint16` layout over `uint32` images clips every value above 65535), and that dtype is
   what the manifest records and every read returns. `dset.is_virtual` and
@@ -88,6 +88,6 @@ like any other. Two things to check:
   but nothing checks the file against `NXsqom` or any other definition.
 - **Units remain labels.** `Ei_units` is stored; nothing converts or validates units.
 
-For exact field behavior, see [the dataset YAML reference](../reference/dataset-yaml.md)
-and [the manifest reference](../reference/manifest.md). To register a real dataset, follow
-[How to publish a dataset](../ONBOARDING.md).
+For exact field behavior, see [the dataset YAML reference](dataset-yaml.md)
+and [the manifest reference](manifest.md). To register a real dataset, follow
+[How to publish a dataset](walkthrough.md).

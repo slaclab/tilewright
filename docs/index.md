@@ -41,7 +41,8 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    Author the YAML (an agent can draft it), build the manifests, register, read it back.
+    Install the onboarding skill, and it drafts the YAML with you, builds the manifests,
+    registers and reads it back.
 
     [:octicons-arrow-right-24: Publish](ONBOARDING.md)
 
@@ -58,8 +59,8 @@ hits.values().first()["rixs_spectrum"][:]     # (151, 40)
 
     ---
 
-    The three commands, every dataset YAML field, the Parquet manifest columns, and every
-    error by symptom.
+    The four commands, and every error from registering, deleting and reading back. The
+    dataset YAML fields and the manifest columns ship with the onboarding skill.
 
     [:octicons-arrow-right-24: Reference](reference/cli.md)
 

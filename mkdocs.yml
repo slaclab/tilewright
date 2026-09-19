@@ -82,7 +82,7 @@ markdown_extensions:
   # than one page (the .env setup + connection check), kept outside docs_dir so mkdocs
   # does not also build them as pages of their own.
   - pymdownx.snippets:
-      base_path: [docs, includes]
+      base_path: [docs, includes, skills/onboarding/reference]
       check_paths: true
   - pymdownx.superfences:
       custom_fences:
@@ -134,12 +134,6 @@ nav:
   - Understand:
       - TileWright and Tiled: explanation/broker-and-tiled.md
       - Data model: explanation/data-model.md
-      - Sources: explanation/sources.md
-      - Identity and keys: explanation/identity.md
-      - Soft vocabulary: explanation/vocabulary.md
-      - NeXus support: explanation/nexus.md
   - Reference:
       - tilewright command line: reference/cli.md
-      - YAML contract: reference/dataset-yaml.md
-      - Parquet manifest: reference/manifest.md
       - Errors and warnings: reference/errors.md

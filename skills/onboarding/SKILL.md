@@ -2,7 +2,7 @@
 name: onboarding
 description: >-
   Onboard a new HDF5 dataset into the Tiled catalog. Reads the contract surface
-  (docs/ONBOARDING.md, the pydantic contract, the vocabulary, the example YAMLs), then
+  (its walkthrough, the pydantic contract, the vocabulary, the example YAMLs), then
   explores the user's data + codebase to draft a first-pass dataset YAML with predicted
   entity/artifact counts, pauses for the user's review, runs `tilewright manifest` and
   compares the counts, pauses again for the go, then registers and proves the result by
@@ -16,21 +16,38 @@ Goal: take a producer's HDF5 dataset and register it into the catalog by authori
 dataset YAML** against the contract surface, then running `tilewright manifest` and
 `tilewright register`. You onboard by reading the *contract*, never broker *implementation*.
 
+## Where you are
+
+The session runs in the user's **data root**, where the YAML and its manifests go. Everything
+this skill reads ships with it, beside this file: `reference/` (the walkthrough, the source,
+identity, field and error references) and `examples/` (one YAML per source tag). Every
+`reference/…` and `examples/…` path below is relative to this skill's directory, not to
+the working directory. The contract models and the vocabulary ship in the package,
+`<pkg>`, which this skill sits inside once installed:
+
+```bash
+d=$(readlink -f <this skill's base directory>/../..)   # the package, or a checkout's root
+[ -f "$d/contract.py" ] && echo "$d" || echo "$d/src/tilewright"
+```
+
+If `tilewright` is not on `PATH`, stop and ask the user to install it
+(`tilewright skills install` is how this skill got here).
+
 ## Step 0 — Read the contract surface (do this first, do not skip)
 
 Read these, in order. They define what a valid dataset is; do not reverse-engineer it from
 `manifest.py` / `register.py`:
 
-1. `docs/ONBOARDING.md` — the walkthrough: pick a transport, author, manifest, make paths
+1. `reference/walkthrough.md` — the walkthrough: pick a transport, author, manifest, make paths
    agree, register, read back. It links the source, field, and error references.
-2. `src/tilewright/contract.py` — the authoritative field contract (every YAML field, its
+2. `<pkg>/contract.py` — the authoritative field contract (every YAML field, its
    type, whether it is required, what it means).
-3. `src/tilewright/vocabulary.yml` — canonical ids + aliases for `method`, `material`,
+3. `<pkg>/vocabulary.yml` — canonical ids + aliases for `method`, `material`,
    `producer`, `project`, `proposal`, `facility`, `data_type`.
-4. `examples/datasets/{files,batch,groups,table}.yml` — one worked example per source tag,
+4. `examples/{files,batch,groups,table}.yml` — one worked example per source tag,
    each with its expected counts in the header; `files_nexus.yml` shows a NeXus tree mapped
    onto the contract (several parameter groups → nested metadata).
-5. `docs/ONBOARDING.md` step 4, the upload tab — **only if** the server cannot see the
+5. `reference/walkthrough.md` step 4, the upload tab — **only if** the server cannot see the
    user's files (they will say so, or you learn it in Step 1). Same contract, different
    transport.
 
@@ -110,7 +127,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   A group that simply lacks the array is passed over, and its entity is served the copy
   the entry names.
   Field attributes (`units`, ...) are captured automatically — nothing to declare; an
-  array attribute comes through as a list, and `docs/reference/manifest.md` says which
+  array attribute comes through as a list, and `reference/manifest.md` says which
   values are left out and what a `batch` row's copy of them describes. A
   size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
   So does a netCDF-4 dimension placeholder that has no coordinate variable (a dataset
@@ -132,7 +149,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `from: attrs`, a missing group is an error naming the container). So check a field's
   shape, and a group's presence, across the containers, not in one.
   `path_<type>`, `dataset_<type>` and `index_<type>` are reserved for each artifact
-  `type`, and `uid` and `source_group` always (`docs/reference/manifest.md`, Reserved
+  `type`, and `uid` and `source_group` always (`reference/manifest.md`, Reserved
   names): a parameter with such a name goes
   in `exclude`, a `params.location` group gets another name, or pick artifact type names
   that do not clash. Every other name is free — `index`, `size` and `type` are ordinary
@@ -146,7 +163,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   Its root attributes (`@title`, `@source`) need copying into the YAML by hand like any
   other file's — see the `metadata` bullet below. And a `.nc`, `.cdf` or `.grd`
   name is often netCDF-3 classic, which no HDF5 source can read: check the file
-  signature before you plan anything (`docs/reference/errors.md`, the `file signature not
+  signature before you plan anything (`reference/errors.md`, the `file signature not
   found` row).
 - **Many arrays side by side in one group (one dataset per channel or per step) → one
   `group` entry.** `{type: "trace_{name}", group: /channels}` gives one artifact per
@@ -193,7 +210,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   that **names the measurement** over one that encodes how the bytes are packed: the key a
   reader pastes should mean something, and a repacking must not re-key the dataset. A
   table serves no arrays at all, so arrays stacked beside it (a CSV whose column points
-  into a pack) stay unserved — the choices are in `docs/explanation/sources.md`, "What a
+  into a pack) stay unserved — the choices are in `reference/sources.md`, "What a
   `table` can and cannot express", and they are the user's, so put them to them.
 - **If groups carry an `NX_class` attribute, the file is NeXus — map it, don't guess:**
   one `NXentry` per file → `files` (several per file → `groups`); follow `@default` to the
@@ -206,14 +223,14 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `code_version` key in `metadata`. Fields constant across every sampled file
   (`sample/chemical_formula`, `instrument/name`, `definition`) are candidates for dataset
   `metadata` — propose them as `# TODO confirm — "NiPS3" in all 12 files`, mapped onto
-  `vocabulary.yml` ids. See `examples/datasets/files_nexus.yml` and
-  `docs/explanation/nexus.md`. Two shapes that guide does not cover — a file with no
+  `vocabulary.yml` ids. See `examples/files_nexus.yml` and
+  `reference/nexus.md`. Two shapes that guide does not cover — a file with no
   `@default` anywhere, whose signal is marked on the field, and one entity spread over a
   header, a master and an image file — are in that page under "Files that do not follow
   the modern conventions".
 - **Read the codebase / context** to infer the dataset `metadata` (`method`, `data_type`,
   `material`, `producer`, `project`, `facility`, `instrument`, `proposal`). **Nothing
-  fills `metadata` in from the files** — `docs/ONBOARDING.md`, step 1, the `metadata`
+  fills `metadata` in from the files** — `reference/walkthrough.md`, step 1, the `metadata`
   bullet, is where that rule and its reason live. Your part of it: read the files' root
   attributes (`@title`, `@source`, `@institution`) alongside the codebase, propose the
   ones worth keeping, and mark them as read from the files rather than confirmed
@@ -230,7 +247,7 @@ say — in **one batched round**, not field-by-field across many turns. Build th
 ## Step 3 — Draft a first-pass YAML (don't blind-guess)
 
 Write it as `<data root>/.tilewright/datasets/<KEY>.yml`, where `<KEY>` is `slug(label)`
-(the YAML and its manifests travel with the data). Copy the `examples/datasets/<source>.yml`
+(the YAML and its manifests travel with the data). Copy the `examples/<source>.yml`
 that matches and fill it from what you found. Set `label`; leave `key` for
 `tilewright manifest` to write. Keep the closed sections free of unknown keys — a typo
 there is a hard error, reported in one sentence naming the field.
@@ -264,7 +281,7 @@ region, a known artefact. That goes into the description, and any number in it b
 key the author names.
 
 **Predict the counts now, from what you inspected**, and keep them. The formulas per
-source are in `docs/reference/errors.md` under "Expected counts"; say how you got each
+source are in `reference/errors.md` under "Expected counts"; say how you got each
 number ("5 files × `/spectra` leading axis 2000 = 10,000 entities; 1 artifact each + 2
 shared axes"). These are what `tilewright manifest` will be checked against in Step 5.
 
@@ -275,7 +292,7 @@ concrete questions it leaves open: each `# TODO fill in`, each `# TODO confirm` 
 inference and why — right?), the `label` (it becomes the key, and on a shared server it
 should carry the surname or group; show them the key it slugs to, since `slug()` keeps
 A-Z and 0-9 only and an accented name comes out spelled with `_` — the choices when that
-spelling will not do are in `docs/ONBOARDING.md`, step 1), the `contact`, the
+spelling will not do are in `reference/walkthrough.md`, step 1), the `contact`, the
 identity choice, and the
 artifact/shared `type` names you chose. **Wait for their answers**, apply them, show the
 result, and iterate until they say it's right. Only then move on. Never fill a blank from
@@ -286,8 +303,8 @@ is local and re-runnable, but it bakes the label into a key and snapshots the YA
 manifests, which presents decisions the user hasn't made yet as settled.
 `tilewright manifest --check` is the exception, and the tool for this step: it validates
 the contract and prints the key the label slugs to, and writes nothing — neither the `key:`
-line nor a manifest (`docs/reference/cli.md`, `tilewright manifest`). Run it to show the
-user the key, as `docs/ONBOARDING.md` step 1 says.
+line nor a manifest (`tilewright manifest --help`). Run it to show the
+user the key, as `reference/walkthrough.md` step 1 says.
 
 ## Step 5 — Manifest, compare — then stop
 
@@ -318,7 +335,7 @@ Before reporting "good to register", two checks:
   `server_base_dir`; mounts it elsewhere → set it; cannot see it at all →
   `tilewright register --upload` (trial with `-n 5`, verify, re-run). The rules —
   `readable_storage`, the physical-path caveat, what "the server's view" means — are
-  **`docs/ONBOARDING.md` step 3**; follow that section rather than reasoning it out here,
+  **`reference/walkthrough.md` step 3**; follow that section rather than reasoning it out here,
   and **do not assume a host or facility**: the path the user gave you is where the data is.
 - **Is the key already on the target server?** `list(from_uri(URL, api_key=KEY))`. If so,
   tell the user. `tilewright register` will compare fingerprints: the same data proceeds
@@ -334,7 +351,7 @@ tilewright register .tilewright/datasets/<KEY>.yml --url <URL> --api-key <KEY>
 (or `tilewright register --upload ...` — trial with `-n 5` first, verify, re-run without
 `-n`; `TILED_URL` / `TILED_API_KEY` in the environment replace the flags). Above a few
 thousand entities, tell the user how long the run will take *before* starting it: time
-`-n 100` and multiply out (`docs/ONBOARDING.md` step 4, "How long a pointer run takes").
+`-n 100` and multiply out (`reference/walkthrough.md` step 4, "How long a pointer run takes").
 Read the summary
 block, not the exit code: `Artifact errors` must be 0, `Broken nodes` must be absent, and
 `Entities` + `Skipped` should equal the entity count from Step 5. Any
@@ -348,16 +365,17 @@ but serve nothing: each is named with its key, and the fix is `tilewright delete
 Registration never opens the files: a pointer the server cannot follow registers with
 `Artifact errors: 0` and fails only at first read. So the proof is a **read-back through
 the server**, not the register summary. Run the read-back snippet in
-**`docs/ONBOARDING.md` step 5** with the same URL and key you registered with.
+**`reference/walkthrough.md` step 5** with the same URL and key you registered with.
 
 Pass = the entity count matches, and one artifact array **and each shared axis** come back
 with the shapes the manifest recorded, with a small slice read from one of them. Ask the
 array client for `.shape`; never read `[:]` of a multi-gigabyte artifact to prove a
 pointer works. A `table` has no array, so its pass is the entity count, one row's
 metadata, and a `Key` search. Report those numbers. A bare `500` on the read is
-the path/adapter/allowlist problem — `docs/reference/errors.md` decodes it, and every
-other failure you are likely to meet, by symptom; fix the YAML, regenerate,
-**delete the dataset** (`docs/ONBOARDING.md` step 6), re-register — an existing artifact
+the path/adapter/allowlist problem — the Troubleshooting table in `reference/walkthrough.md` decodes it, and
+[the operator errors page](https://github.com/slaclab/tilewright/blob/main/docs/reference/errors.md) every other failure after
+`manifest`, by symptom; fix the YAML, regenerate,
+**delete the dataset** (`reference/walkthrough.md` step 6), re-register — an existing artifact
 is never rewritten. A metadata-only correction needs no delete: edit the YAML and run
 `tilewright register --update`.
 

@@ -1,6 +1,6 @@
 # The `tilewright` command line
 
-`tilewright` dispatches three subcommands. Run bare or with `-h` / `--help` for the list;
+`tilewright` dispatches four subcommands. Run bare or with `-h` / `--help` for the list;
 an unrecognized subcommand exits `1`.
 
 ```
@@ -9,6 +9,7 @@ tilewright <command> [args]
   manifest    Validate a dataset YAML, derive its key, write its Parquet manifests
   register    Register manifests into a running Tiled server over HTTP
   delete      Delete registered data from a running Tiled server
+  skills      Install the Claude Code skills that ship with the package
 ```
 
 Pipeline order is `manifest` → `register`; the walkthrough is
@@ -47,7 +48,7 @@ parameter named like a locator) names the file and the path and exits `1`.
 
 Each artifact's `shape` and `dtype` are captured here, which is what lets registration run
 without opening a single HDF5 file, and why the manifest must be regenerated when the data
-changes shape or dtype. See [The Parquet manifest](manifest.md).
+changes shape or dtype. See [The Parquet manifest](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/manifest.md).
 
 ---
 
@@ -83,7 +84,7 @@ tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-
 - **Checks the key against the server.** A new key is created with `storage`,
   `fingerprint` and `registered_at` stamped. An existing key with the same fingerprint
   proceeds; a different fingerprint is refused with both printed; a container without one
-  needs `--adopt` ([identity and keys](../explanation/identity.md)).
+  needs `--adopt` ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md)).
 - **Incremental.** An entity whose key already exists is skipped, so a re-run resumes
   rather than duplicates. A skipped artifact whose source file changed on disk since it
   was registered (modification time or size, stamped at registration) is reported as
@@ -142,3 +143,25 @@ container.
 Exit status: `0` deleted (or dry run); `1` a target does not exist, or with `all` any
 container failed; `2` bad arguments, or a confirmation was needed in a non-interactive
 shell without `--yes` / `--confirm`.
+
+---
+
+## `tilewright skills`
+
+Installs the Claude Code skills that ship inside the package, so the skill an agent reads
+always describes the `tilewright` it runs.
+
+```
+tilewright skills install [--force]
+```
+
+Symlinks each shipped skill (today, `onboarding`) into `~/.claude/skills/<name>`. A link
+that already points at this install is left alone, so rerunning is safe; after an upgrade
+the link still resolves to the upgraded package.
+
+| Flag | Effect |
+|---|---|
+| `--force` | Replace an existing symlink that points somewhere else. A real file or directory is never replaced |
+
+Exit status: `0` installed or already up to date; `1` a path is in the way; `2` bad
+arguments.
