@@ -5,8 +5,9 @@
 # registration. An alias only changes spelling; it never fills another field.
 #
 # Values not listed here register as written, with a warning. To add one: edit this file
-# in a pull request (see CONTRIBUTING.md, "Adding a vocabulary term"); the vocab-review
-# skill and scripts/vocab_report.py show what is off-list on a live server.
+# in a pull request to the TileWright repository (its CONTRIBUTING.md, "Adding a vocabulary
+# term"); the repository's vocab-review skill and scripts/vocab_report.py show what is
+# off-list on a live server. Neither ships with the package.
 #
 # Which *fields* exist is defined once, in contract.py — not here.
 

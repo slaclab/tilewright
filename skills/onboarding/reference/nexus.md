@@ -1,19 +1,11 @@
-# NeXus support
+# NeXus
 
-TileWright does not implement NeXus classes. Its generic contract can describe
-NeXus-structured HDF5, and the onboarding skill knows how to map between them. See
+**Read this when** any group carries an `NX_class` attribute (Step 2): the file is NeXus,
+so map it with the conventions below rather than guessing. See
 `../examples/files_nexus.yml` for a complete example.
 
-## Why the contract grew
-
-A SEQUOIA S(Q,E) dataset exposed two gaps. Its entity parameters were spread across
-`NXinstrument`, `NXcollection`, and `NXsample`, while the contract could name only one
-parameter group. Its `NXdata` arrays also carried relationships and units that disappeared
-when registered as independent artifacts.
-
-Requiring users to restructure valid NeXus files would make onboarding harder. Hard-coding
-NeXus classes would undermine the dataset-agnostic design. The contract therefore gained
-generic ways to preserve the useful structure.
+TileWright does not implement NeXus classes. Its generic contract can describe
+NeXus-structured HDF5, and this page maps between them.
 
 ## How NeXus concepts map
 
@@ -29,7 +21,7 @@ generic ways to preserve the useful structure.
 | Repeated runs with identical settings | `identity: provenance` | One entity per file, never a collision |
 | HDF5 soft or external links | h5py resolves the link; *below* the params group, `recursive: true` follows only what stays inside it ([`recursive`](dataset-yaml.md#params)) | The configured path is recorded |
 
-The onboarding skill maps a tree using these conventions:
+Map a tree using these conventions:
 
 ```text
 NXroot@default -> entry                 one NXentry per file -> files
@@ -43,6 +35,22 @@ NXentry@default -> data
   NXprocess program and version         -> metadata.producer, metadata.code_version
   values constant across files          -> dataset metadata, after user review
 ```
+
+In practice:
+
+- **Entities.** One `NXentry` per file → `files`; several per file → `groups`.
+- **Artifacts.** Follow `@default` to the `NXdata` group: its `@signal` field, the `@axes`
+  fields and any `FIELDNAME_errors` are the artifacts. Axes go to `shared:` only if
+  identical across the files you sampled; say which in a comment.
+- **Parameters.** `NXsample` / `NXinstrument` / `NXparameters` / `NXcollection` → one
+  `params.groups` entry each, named after the group, with large string fields (JSON blobs)
+  listed in `exclude`. Root-level `definition` / `title` / `start_time` → a group entry
+  pointing at the entry itself.
+- **Metadata.** `NXprocess` (`program`, `version`) → `producer` and a `code_version` key.
+  Fields constant across every sampled file (`sample/chemical_formula`, `instrument/name`,
+  `definition`) are candidates for dataset `metadata`: propose them, mapped onto vocabulary
+  ids, marked as read from the files (`# read from all 12 files: "NiPS3"`), for the owner to
+  keep or drop.
 
 For `params.groups`, names become metadata prefixes. A field `Ei` in the group named
 `instrument` becomes `instrument.Ei`, which Tiled can query with
@@ -89,5 +97,15 @@ like any other. Two things to check:
 - **Units remain labels.** `Ei_units` is stored; nothing converts or validates units.
 
 For exact field behavior, see [the dataset YAML reference](dataset-yaml.md)
-and [the manifest reference](manifest.md). To register a real dataset, follow
-[How to publish a dataset](walkthrough.md).
+and [the manifest reference](manifest.md).
+
+## Background
+
+**Why the contract grew.** A SEQUOIA S(Q,E) dataset exposed two gaps. Its entity parameters were spread across
+`NXinstrument`, `NXcollection`, and `NXsample`, while the contract could name only one
+parameter group. Its `NXdata` arrays also carried relationships and units that disappeared
+when registered as independent artifacts.
+
+Requiring users to restructure valid NeXus files would make onboarding harder. Hard-coding
+NeXus classes would undermine the dataset-agnostic design. The contract therefore gained
+generic ways to preserve the useful structure.

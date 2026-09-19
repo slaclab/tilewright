@@ -1048,7 +1048,7 @@ class _Walker:
                                                           fsize, fmtime, ds.shape,
                                                           str(ds.dtype),
                                                           labels=_attrs(ds, label_of="")))
-            print(f"  {h5_path.name}: {count} entity groups")
+            print(f"  {h5_path.name}: {count} entity group{'' if count == 1 else 's'}")
         return ent_rows, art_rows
 
     # -- table ---------------------------------------------------------------

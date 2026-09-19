@@ -1,5 +1,8 @@
 # The Parquet manifest
 
+**Read this when** you need one manifest column, what an attribute carries, or the names
+the manifest keeps for itself.
+
 `tilewright manifest` writes two Parquet files per dataset; `tilewright register` reads
 them and nothing else. They are the contract between the two halves of the pipeline.
 
@@ -15,7 +18,7 @@ One row per entity.
 
 | Column | Required | Description |
 |---|---|---|
-| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](identity.md)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
+| `uid` | **yes** | Entity identity: 16 hex characters, a hash of the parameter values, of the provenance, or of a table's `id` column(s) ([identity and keys](params-and-identity.md#identity-and-keys)). The Tiled key is `{DATASET_KEY}_{uid[:13]}` |
 | `source_group` | `groups` only | The entity's HDF5 group |
 | *(any others)* | no | Become the entity container's queryable metadata. A dotted column (`instrument.Ei`) is nested on registration; a `<field>_<attr>` column is that field's attribute label, holding a string, a number, a boolean or a list of them (an array attribute as its list) |
 
@@ -49,7 +52,7 @@ string in another (a parameter that changes type between files). Parquet has one
 column: such a column is written as each value's JSON text (`[0.5, 1.5]`, `"half"`), with
 one note naming it, and the run finishes. A query on that key then compares text, so a
 parameter that lands there is usually worth fixing in the data
-([the note](errors.md#tilewright-manifest-the-data)).
+([the note](troubleshooting.md#tilewright-manifest-the-data)).
 
 ## What an attribute describes
 
@@ -160,7 +163,7 @@ a dataset declares, `path_<type>`, `dataset_<type>` and `index_<type>` are reser
 `tilewright manifest` refuses a parameter, an attribute label, a `params.groups` name or
 a named group of `params.location` that is one of them (a dotted parameter nests under
 its first part, so that part counts), and the message names it
-([the fix](errors.md#tilewright-manifest-the-data)).
+([the fix](troubleshooting.md#tilewright-manifest-the-data)).
 
 - A `table` declares no artifacts, so its columns are never refused.
 - A shared axis has no locator on the entity, so its `type` reserves nothing.
@@ -221,5 +224,5 @@ Nothing else is reserved for an entity parameter. A parameter called `index`, `s
 down, for an **array's** attributes: an attribute called `uid`, `type`, `file`, `dataset`,
 `index`, `shape`, `dtype`, `file_size` or `file_mtime` would overwrite its own row in
 `artifacts.parquet`, so it is dropped with one warning
-([the message](errors.md#tilewright-manifest-the-data)) and the array is registered
+([the message](troubleshooting.md#tilewright-manifest-the-data)) and the array is registered
 without it.

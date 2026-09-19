@@ -67,6 +67,8 @@ def render():
 *Generated from `src/tilewright/contract.py` by `scripts/build_yaml_reference.py`; edit
 the models, not this page.*
 
+**Read this when** you need one field's exact rules.
+
 One YAML describes one dataset. To author one, see [How to publish a dataset](walkthrough.md);
 to copy a working file, see `../examples/<source>.yml`, one per source tag with its
 expected counts in the header.
@@ -97,14 +99,14 @@ sentence each, as `contract error: <field> <what to do>`.
 
 Values of the facets marked *vocabulary facet* are soft-checked: a known alias is rewritten
 to its id, an unknown value warns and registers as written
-([the soft vocabulary](vocabulary.md)).
+([the soft vocabulary](metadata-and-vocabulary.md#spelling-a-value-the-soft-vocabulary)).
 
 {table(contract.DatasetMetadata)}
 
 ## `source`
 
 Exactly one of the four tags. Each owns only the keys below, so an illegal combination
-cannot be written ([sources](sources.md)). `identity` and `pattern` belong
+cannot be written ([source and entity](source-and-entity.md)). `identity` and `pattern` belong
 to the three HDF5 tags; a `table` has neither.
 
 """]
@@ -118,7 +120,7 @@ and `batch`, the entity group for `groups`, which a path can leave with `..`; se
 queryable metadata; each field's own HDF5 attributes ride along as `<field>_<attr>`
 labels, stored beside the value and never part of the identity. `location` adds the
 values that only the entity's path holds: a number in a file or directory name, a group
-name, a batch row number ([parameters from the location](sources.md#parameters-from-the-location)).
+name, a batch row number ([parameters from the location](params-and-identity.md#parameters-from-the-location)).
 Entities that read different parameters get null for the ones they lack
 ([the data model](https://github.com/slaclab/tilewright/blob/main/docs/explanation/data-model.md#entities-with-different-parameters)).
 

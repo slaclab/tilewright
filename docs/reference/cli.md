@@ -84,7 +84,7 @@ tilewright register YAML [YAML ...] [--url URL] [--api-key KEY] [-n NUM] [--max-
 - **Checks the key against the server.** A new key is created with `storage`,
   `fingerprint` and `registered_at` stamped. An existing key with the same fingerprint
   proceeds; a different fingerprint is refused with both printed; a container without one
-  needs `--adopt` ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/identity.md)).
+  needs `--adopt` ([identity and keys](https://github.com/slaclab/tilewright/blob/main/skills/onboarding/reference/params-and-identity.md#identity-and-keys)).
 - **Incremental.** An entity whose key already exists is skipped, so a re-run resumes
   rather than duplicates. A skipped artifact whose source file changed on disk since it
   was registered (modification time or size, stamped at registration) is reported as

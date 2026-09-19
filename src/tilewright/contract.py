@@ -90,8 +90,10 @@ class DatasetMetadata(BaseModel):
         min_length=1,
         description="Scientific methods, e.g. ['RIXS']; at least one. A method is how the "
         "values were obtained, so a field of study ('geophysics'), a file format and the "
-        "name of a code are not methods -- the code is 'producer'. Data produced by no "
-        "method at all (a reference table compiled from the literature, a solver "
+        "name of a code are not methods -- the code is 'producer'. A simulation has a "
+        "method too: the numerical technique that computed it ('DFT', 'particle-in-cell', "
+        "'regional climate model'), in the vocabulary's spelling where it has one. Data "
+        "produced by no method at all (a reference table compiled from the literature, a solver "
         "benchmark, model weights) takes ['not_applicable'], the escape hatch 'material' "
         "has, and there is no other way to say it: the field is required and may not be "
         "empty. The vocabulary lists no 'not_applicable' among the methods, so it "
@@ -124,7 +126,10 @@ class DatasetMetadata(BaseModel):
         default=None,
         description="Code that produced or reduced the data ('sunny_jl', 'mantid'). When "
         "a chain of codes made the files, it names the last one that shaped the arrays "
-        "being registered; name the earlier steps in 'description'. Vocabulary facet.",
+        "being registered; name the earlier steps in 'description'. When that last code "
+        "only post-processed a model's output (a regridder or a format converter such as "
+        "CDO), readers will search for the model: name it in 'description' and in a key "
+        "of its own, 'model: COSMO-CLM2', beside 'producer'. Vocabulary facet.",
     )
     project: str | None = Field(
         default=None,
@@ -158,7 +163,7 @@ class DatasetMetadata(BaseModel):
         "the summary. The test for both halves is one question -- would anyone write a "
         "Key('...') == query on that number to find datasets? A count, a size, a rate, a "
         "temperature: yes, so it needs a key. A year in a name, a version string, a DOI, "
-        "a dtype ('uint8'), a formula ('NiPS3'), and a value quoted to explain what it "
+        "a dtype ('uint8'), a formula ('NiPS3'), a dimensionality ('2-D'), and a value quoted to explain what it "
         "means ('0 is a valid reading, not a gap'): no, they are prose and need none. An "
         "entity parameter is not a key of this block, so a number that describes the "
         "entities as a set ('tilt runs from 0 to 30 degrees') takes dataset keys of its "
