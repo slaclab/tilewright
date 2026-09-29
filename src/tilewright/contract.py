@@ -152,7 +152,9 @@ class ParamsSpec(BaseModel):
     )
     exclude: list[str] = Field(
         default_factory=list,
-        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say.",
+        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. "
+        "Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: "
+        "`/operator_note` skips the root's attribute 'operator_note'.",
     )
 
     @model_validator(mode="after")

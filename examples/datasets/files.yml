@@ -27,7 +27,7 @@ source:
   files:
     directory: /abs/path/to/runs
     pattern: "*.h5"
-    # params defaults to {group: /, from: datasets}: every 0-dim (or size-1) dataset at the root.
+    # params defaults to {group: /, from: datasets}: every 0-dim dataset at the root.
     # params: {group: /, from: attrs}      # root attributes instead
     # params: {group: /, from: attrs, exclude: [/version]}   # an attribute's path is <group>/<name>
     # params: null                         # no per-entity parameters (identity: provenance)
