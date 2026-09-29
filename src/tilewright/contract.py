@@ -35,7 +35,9 @@ class StrEnum(str, Enum):
 
 
 class Identity(StrEnum):
-    """How an entity's uid is computed (``source.<tag>.identity``).
+    """How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+    ``batch`` and ``groups``; a ``table`` has no ``identity`` key, its uid hashes its ``id``
+    column).
 
     - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
       entity across re-registration and file moves; two entities with identical
@@ -187,10 +189,6 @@ class _SourceBase(BaseModel):
         description="The same root as the Tiled server sees it, when its mount differs. "
         "Ignored for --upload.",
     )
-    identity: Identity = Field(
-        default=Identity.params,
-        description="How entity uids are computed; see Identity. Write it only to override.",
-    )
 
     @model_validator(mode="after")
     def _paths(self):
@@ -200,7 +198,17 @@ class _SourceBase(BaseModel):
         return self
 
 
-class FilesSource(_SourceBase):
+class _HDF5SourceBase(_SourceBase):
+    """The HDF5 sources choose how an entity's uid is computed; a ``table`` does not (its
+    uid hashes its ``id`` column)."""
+
+    identity: Identity = Field(
+        default=Identity.params,
+        description="How entity uids are computed; see Identity. Write it only to override.",
+    )
+
+
+class FilesSource(_HDF5SourceBase):
     """One HDF5 file per entity."""
 
     pattern: str = Field(
@@ -215,7 +223,7 @@ class FilesSource(_SourceBase):
     )
 
 
-class BatchSource(_SourceBase):
+class BatchSource(_HDF5SourceBase):
     """Many entities stacked along axis 0 of each file's datasets; entity i is row i."""
 
     pattern: str = Field(
@@ -229,7 +237,7 @@ class BatchSource(_SourceBase):
     )
 
 
-class GroupsSource(_SourceBase):
+class GroupsSource(_HDF5SourceBase):
     """One HDF5 group per entity inside each file."""
 
     pattern: str = Field(
