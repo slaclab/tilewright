@@ -82,9 +82,10 @@ that cannot see your files be handed pointers to them anyway.
 
 Tiled's stock HDF5 adapter would defeat this: it materializes the whole
 `(10000, 151, 40)` dataset through dask before applying the user's slice. So arrays are
-registered against `LazyHDF5ArrayAdapter` (`src/tilewright/adapter.py`), which evaluates
-`h5py.Dataset[base_index][user_slice]` in one step and never reads more than was asked
-for. Cheap slicing is not an optimization bolted on afterwards; it is what makes the
+registered against `LazyHDF5ArrayAdapter` (`src/tilewright/adapter.py`), which hands
+h5py the row and the user's slice as one index, `h5py.Dataset[base_index, *user_slice]`,
+so HDF5 reads only the chunks that slice touches. Indexing the row first and slicing it
+in memory would read the whole row. `tilewright.client.load` reads the same way. Cheap slicing is not an optimization bolted on afterwards; it is what makes the
 entity level possible for batch data. A server has to be told about the adapter
 ([How to host a server](../host-a-server.md)).
 

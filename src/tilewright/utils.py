@@ -79,6 +79,27 @@ def to_json_safe(value):
     return value
 
 
+def read_slice(ds, row, slc):
+    """``ds[row][slc]`` for an h5py dataset, reading only what ``slc`` selects.
+
+    ``row`` is a batch entity's index on axis 0, or None for a whole dataset. The row and
+    ``slc`` go to h5py as one index, so HDF5 reads only the chunks the slice touches;
+    indexing the row first would read all of it. h5py takes ints, ``...`` and slices with
+    a positive step; anything else (a negative step, an index list, a mask) reads the row
+    and slices it in numpy.
+    """
+    row = () if row is None else (row,)
+    if slc is None:
+        return ds[row]
+    slc = slc if isinstance(slc, tuple) else (slc,)
+    if all(s is Ellipsis
+           or isinstance(s, slice) and (s.step or 1) > 0
+           or isinstance(s, (int, np.integer)) and not isinstance(s, bool)
+           for s in slc):
+        return ds[row + slc]
+    return ds[row][slc]
+
+
 def check_server(url=None, api_key=None):
     """Check if a Tiled server is running.
 

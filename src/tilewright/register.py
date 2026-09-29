@@ -157,8 +157,9 @@ def create_data_source(art_row, base_dir, server_base_dir=None):
 
     # Create data source. Default dispatches to the broker's
     # LazyHDF5ArrayAdapter (server config must map it) — reads only the
-    # bytes a user slice asks for, unlike stock application/x-hdf5 which
-    # pulls the whole dataset into dask before slicing.
+    # chunks a user slice touches (row and slice in one h5py index), unlike
+    # stock application/x-hdf5 which pulls the whole dataset into dask before
+    # slicing.
     data_source = DataSource(
         mimetype=(
             to_json_safe(art_row["mimetype"])
