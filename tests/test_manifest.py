@@ -1,6 +1,7 @@
 """``tilewright manifest`` against synthetic HDF5: every source tag, parameter reading,
 labels, shared axes, identity, collisions, key stamping and where the output lands."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,10 +11,14 @@ import pandas as pd
 import pytest
 from ruamel.yaml import YAML
 
-from tilewright.contract import ContractError
-from tilewright.manifest import generate_manifests, main, manifest_dir
+from tilewright.contract import ContractError, Source
+from tilewright.manifest import _check_collisions, generate_manifests, main, manifest_dir
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
+
+
+def sha16(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def write_yaml(path, cfg):
@@ -205,7 +210,59 @@ class TestGroups:
 
 # ---------------------------------------------------------------------------
 
+def systems_table(tmp_path, ids="system_id"):
+    """Like osti/1846021: system_id repeats, and each repeat differs in one other column."""
+    d = tmp_path / "pvdaq"
+    d.mkdir(exist_ok=True)
+    pd.DataFrame({"system_id": [1332, 1332, 4901, 4901, 7],
+                  "tilt": [16.77, 60.0, 20.0, 20.0, 10.0],
+                  "azimuth": [180, 180, 270, 90, 180],
+                  "site": ["a", "a", "b", "b", "c"]}).to_csv(d / "systems.csv", index=False)
+    return {"label": "Systems", "metadata": dict(META),
+            "source": {"table": {"directory": str(d), "path": "systems.csv", "id": ids}}}
+
+
 class TestTable:
+
+    def test_repeated_ids_report_the_columns_that_differ(self, tmp_path):
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, systems_table(tmp_path))
+        lines = str(exc.value).splitlines()
+        assert lines[0] == "SYSTEMS: 4 entities share 2 uids; every entity must be distinct."
+        assert lines[1:] == [
+            f"  uid {sha16('SYSTEMS:1332')}: system_id=1332 at table rows 0, 1 "
+            "(first data row = 0)",
+            "    tilt: 16.77 | 60.0",
+            f"  uid {sha16('SYSTEMS:4901')}: system_id=4901 at table rows 2, 3 "
+            "(first data row = 0)",
+            "    azimuth: 270 | 90",
+            "Fix: for each uid, list one of the columns that differ in 'id', so that "
+            "together they are unique, e.g. id: [system_id, tilt, azimuth].",
+        ]
+
+    def test_composite_id_resolves_repeated_ids(self, tmp_path):
+        ent, _ = run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt", "azimuth"]))
+        assert len(ent) == 5 and ent["uid"].nunique() == 5
+        assert ent.loc[0, "uid"] == sha16('SYSTEMS:[1332, 16.77, 180]')
+        assert list(ent["system_id"]) == [1332, 1332, 4901, 4901, 7]
+
+    def test_rows_equal_in_every_column_must_be_deduplicated(self, tmp_path):
+        cfg = systems_table(tmp_path, ids=["system_id", "tilt", "azimuth"])
+        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv")
+        pd.concat([df, df.iloc[[4]]]).to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[1:] == [
+            f"  uid {sha16('SYSTEMS:[7, 10.0, 180]')}: system_id=7, tilt=10.0, azimuth=180 "
+            "at table rows 4, 5 (first data row = 0)",
+            "    no column differs",
+            "Fix: these rows are equal in every column; de-duplicate the table.",
+        ]
+
+    def test_missing_id_column_is_named(self, tmp_path):
+        with pytest.raises(KeyError, match="id column 'tilt_deg' not among"):
+            run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt_deg"]))
 
     def test_rows_are_entities(self, tmp_path):
         d = tmp_path / "cncs"
@@ -217,6 +274,8 @@ class TestTable:
                                     "locator": {"url": "https://x/{filename}"}}}}
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 2 and list(ent["url"]) == ["https://x/a.gz", "https://x/b.gz"]
+        # one id column: sha256('<KEY>:<value>'), as before
+        assert list(ent["uid"]) == [sha16("TABLE_TEST:1"), sha16("TABLE_TEST:2")]
         assert len(art) == 0 and list(art.columns)[:4] == ["uid", "type", "file", "dataset"]
 
 
@@ -339,6 +398,39 @@ class TestIdentity:
         msg = str(exc.value)
         assert "3 entities share 1 uids" in msg and "run_0.h5" in msg
         assert "identity: provenance" in msg
+
+    def test_params_collision_report_shows_every_uid_and_what_differs(self, tmp_path):
+        cfg = files_dataset(tmp_path, n=4)
+        for i in range(4):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["temperature"][...] = 300.0 + i % 2
+                f["run"][...] = i % 2
+                f["temperature"].attrs["units"] = "degK" if i > 1 else "K"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[0] == "FILES_TEST: 4 entities share 2 uids; every entity must be distinct."
+        assert lines[1].endswith(": run_0.h5, run_2.h5") and lines[4].endswith(": run_1.h5, run_3.h5")
+        assert lines[2] == lines[5] == '    temperature_units: "K" | "degK"'
+        assert lines[3] == '    equal: {"run": 0, "temperature": 300.0}'
+        assert lines[6] == '    equal: {"run": 1, "temperature": 301.0}'
+        assert lines[7].startswith("Fix: add a field that distinguishes them")
+
+    @pytest.mark.parametrize("tag, identity, fix", [
+        ("files", "provenance", "the pattern or entity_group is matching the same thing twice"),
+        ("groups", "provenance", "the pattern or entity_group is matching the same thing twice"),
+        ("batch", "params", "or set 'identity: provenance' under the source"),
+    ])
+    def test_the_fix_line_follows_the_source(self, tag, identity, fix):
+        source = Source.model_validate({tag: {"directory": "/d", "identity": identity}})
+        rows = [{"uid": "u", "a": 1, "_provenance": "f.h5"},
+                {"uid": "u", "a": 1, "_provenance": "f.h5"}]
+        with pytest.raises(ValueError) as exc:
+            _check_collisions(rows, "K", source)
+        lines = str(exc.value).splitlines()
+        assert lines[1:3] == ["  uid u: f.h5, f.h5", "    no parameter differs"]
+        assert lines[-1].startswith("Fix: ") and fix in lines[-1]
+        assert ("pattern" in lines[-1]) == (identity == "provenance")
 
     def test_no_params_without_declaring_it_is_an_error(self, tmp_path):
         cfg = files_dataset(tmp_path)

@@ -17,7 +17,7 @@ data is the fingerprint.
 
 `tilewright manifest` hashes the facts that identify *which data* a YAML describes: the
 source tag, the directory as the server sees it, the file pattern or table path, the
-params spec, and the identity mode. Not the label, not the metadata. The hash goes into
+params spec, the identity mode, and a table's `id` when it is a list. Not the label, not the metadata. The hash goes into
 the manifest, and `tilewright register` stamps it on the dataset container as
 `fingerprint`.
 
@@ -46,7 +46,8 @@ parameter, or switch identity.
 
 **`provenance`**: a hash of where the entity came from, the file path relative to the
 directory plus its row or group. It never collides. It is forced when a source declares
-`params: null` and for `table` sources, where the `id` column is the identity, and it is
+`params: null` and for `table` sources, where the `id` column (or columns, when `id` is a
+list) is the identity, and it is
 the right choice for run-oriented experimental data where repeated measurements share
 every setting. Moving the whole directory changes nothing; renaming a file inside it
 changes that entity's key.

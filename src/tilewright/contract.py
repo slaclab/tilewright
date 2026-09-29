@@ -23,7 +23,9 @@ import re
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator,
+)
 
 TOP_LEVEL_KEYS = frozenset({"label", "key", "metadata", "source", "artifacts", "shared"})
 SOURCE_TAGS = ("files", "batch", "groups", "table")
@@ -256,15 +258,30 @@ class TableSource(_SourceBase):
         description="Parquet or CSV file, relative to 'directory'. Every column becomes "
         "entity metadata.",
     )
-    id: str = Field(
-        min_length=1,
-        description="Column whose value identifies a row; it is the entity's identity.",
+    id: str | list[str] = Field(
+        description="The entity's identity: one column, or a list of columns when no "
+        "single column is unique ('id: [system_id, tilt]'); together their values must be "
+        "unique across rows. Changing it re-keys every entity: delete the registered "
+        "dataset, then register again. A list is part of the fingerprint, so 'register' "
+        "refuses a change to, from or between lists until you do.",
     )
     locator: dict[str, str] = Field(
         default_factory=dict,
         description="Extra metadata rendered per row from '{column}' templates, e.g. "
         "{globus_url: 'https://.../{filename}'}.",
     )
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _id_columns(cls, value):
+        names = [value] if isinstance(value, str) else value
+        if not (isinstance(names, list) and names
+                and all(isinstance(n, str) and n for n in names)):
+            raise ValueError("must be a column name or a list of column names, none of "
+                             "them empty")
+        if len(set(names)) != len(names):
+            raise ValueError("names a column more than once")
+        return value
 
 
 class Source(BaseModel):
@@ -494,9 +511,13 @@ def load_dataset(raw):
 def source_fingerprint(cfg: DatasetConfig):
     """16 hex chars identifying *which data* a YAML describes, independent of its label
     or metadata: the source tag, the directory as the server sees it, the file pattern
-    or table path, the params spec and the identity mode. Two YAMLs for the same files
-    share it; the same label over different files does not (``tilewright register``
-    refuses that)."""
+    or table path, the params spec, the identity mode, and a table's ``id`` when it is a
+    list. Two YAMLs for the same files share it; the same label over different files
+    does not (``tilewright register`` refuses that).
+
+    A single-column ``id`` is not hashed, so no existing table's fingerprint changes; a
+    list is, so switching a table to a composite id (which re-keys every entity) is
+    refused as different data rather than registered beside the old keys."""
     body = cfg.source.body
     params = getattr(body, "params", None)
     facts = {
@@ -507,4 +528,6 @@ def source_fingerprint(cfg: DatasetConfig):
         "entity_group": getattr(body, "entity_group", None),
         "identity": str(cfg.source.identity),
     }
+    if isinstance(getattr(body, "id", None), list):
+        facts["id"] = body.id
     return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]

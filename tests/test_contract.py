@@ -5,7 +5,10 @@ trip into a DatasetConfig. The concept budget at the bottom pins the contract's 
 that growth fails a test, not a review.
 """
 
+from pathlib import Path
+
 import pytest
+from ruamel.yaml import YAML
 
 from tilewright.contract import (
     SOURCE_TAGS, TOP_LEVEL_KEYS, ContractError, DatasetConfig, Identity, load_dataset,
@@ -14,6 +17,7 @@ from tilewright.contract import (
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
+EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
 
 
 def files_cfg(**over):
@@ -82,6 +86,13 @@ class TestAccepted:
         t = load_dataset(table)[0]
         assert t.source.tag == "table" and t.source.identity == Identity.provenance
 
+    def test_table_id_is_one_column_or_several(self):
+        for id_ in ("system_id", ["system_id", "tilt"]):
+            raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": id_}},
+                            artifacts=[])
+            cfg, warnings = load_dataset(raw)
+            assert warnings == [] and cfg.source.body.id == id_
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -136,6 +147,18 @@ class TestRejected:
     def test_batch_params_cannot_be_null(self):
         raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
         assert any("source.batch.params" in e for e in errors_of(raw))
+
+    @pytest.mark.parametrize("id_", ["", [], ["run", ""], ["run", 3], 3, None])
+    def test_table_id_must_name_columns(self, id_):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": id_}},
+                        artifacts=[])
+        assert errors_of(raw) == ["source.table.id: must be a column name or a list of "
+                                  "column names, none of them empty"]
+
+    def test_table_id_names_a_column_once(self):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv",
+                                          "id": ["run", "run"]}}, artifacts=[])
+        assert errors_of(raw) == ["source.table.id: names a column more than once"]
 
     def test_drifted_key(self):
         errs = errors_of(files_cfg(key="OLD_NAME"))
@@ -196,6 +219,41 @@ class TestKeyAndFingerprint:
         raw["source"]["files"]["directory"] = "/data/other"
         b, _ = load_dataset(raw)
         assert source_fingerprint(a) != source_fingerprint(b)
+
+    # Computed on b268731. A contract change must not re-fingerprint an existing YAML: a
+    # changed value here means registered datasets would be refused.
+    GOLDEN = {"batch": "2577590f34841be2", "files": "5dd61ef0e916076d",
+              "files_nexus": "05ba87a48b5c5ce7", "groups": "983ce13fccafbc8e",
+              "table": "fb36ed8c86a417f5"}
+
+    def test_fingerprint_of_every_example_is_pinned(self):
+        found = {}
+        for path in sorted(EXAMPLES.glob("*.yml")):
+            cfg, _ = load_dataset(YAML().load(path.read_text()))
+            found[path.stem] = source_fingerprint(cfg)
+        assert found == self.GOLDEN
+
+    # A table's id is a fact only as a list: a single column leaves the fingerprint alone,
+    # and a list re-keys every entity, so it is different data.
+    GOLDEN_TABLE_IDS = [
+        (["run_number", "Ei"], "1f158c1accc9890f"),
+        (["Ei", "run_number"], "f4a58535f478d8bb"),
+        (["run_number"], "b0caa823904594f8"),
+    ]
+
+    @staticmethod
+    def table_fingerprint(table_id):
+        raw = YAML(typ="safe").load((EXAMPLES / "table.yml").read_text())
+        raw["source"]["table"]["id"] = table_id
+        return source_fingerprint(load_dataset(raw)[0])
+
+    def test_single_column_id_keeps_the_fingerprint(self):
+        assert self.table_fingerprint("run_number") == self.GOLDEN["table"]
+
+    @pytest.mark.parametrize("table_id, expected", GOLDEN_TABLE_IDS,
+                             ids=["run_number,Ei", "Ei,run_number", "one-element"])
+    def test_fingerprint_of_a_list_id_is_pinned(self, table_id, expected):
+        assert self.table_fingerprint(table_id) == expected
 
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()
