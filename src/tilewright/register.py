@@ -78,6 +78,29 @@ _DEFAULT_MAX_WORKERS = 8
 INHERITED_KEYS = ("amsc_public",)
 
 
+def infinite_value_notes(dataset_key, dataset_metadata, ent_df, art_df):
+    """One note per key that holds ``inf`` or ``-inf``, which is not a JSON number: the
+    Tiled client sends it as null. The manifest keeps the value, so no uid changes."""
+    notes = []
+
+    def walk(value, key):
+        if isinstance(value, Mapping):
+            for k, v in value.items():
+                walk(v, f"{key}.{k}" if key else str(k))
+        elif isinstance(value, float) and np.isinf(value):
+            notes.append(f"note: {dataset_key} metadata {key} = {value} is not a JSON "
+                         f"number; stored as null")
+
+    walk(dataset_metadata, "")
+    for name, df in (("entities", ent_df), ("artifacts", art_df)):
+        for col in df.select_dtypes("number").columns:
+            n = int(np.isinf(df[col]).sum())
+            if n:
+                notes.append(f"note: {dataset_key} {col} is inf or -inf in {n} {name}, "
+                             f"which is not a JSON number; stored as null")
+    return notes
+
+
 def require_shape_dtype(art_df):
     """Require the shape/dtype columns registration reads.
 
@@ -482,6 +505,8 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
                                       fingerprint, update=update, adopt=adopt)
 
     require_shape_dtype(art_df)
+    for note in infinite_value_notes(dataset_key, dataset_metadata, ent_df, art_df):
+        print(f"  {note}")
     ent_columns = list(ent_df.columns)
     art_columns = list(art_df.columns)
     inherited = {k: dataset_metadata[k] for k in INHERITED_KEYS if k in dataset_metadata}
