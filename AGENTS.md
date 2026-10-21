@@ -42,6 +42,9 @@ a valid YAML is means the surface has a gap; fix the surface.
 - Every documented fact has one home (`CONTRIBUTING.md`). Link, do not repeat.
 - Tests are offline by default; server tests carry `@pytest.mark.integration`.
 - Do not edit `vocabulary.yml` while onboarding; that is the `vocab-review` skill's job.
+- Branches, issues, PRs and commits follow `CONTRIBUTING.md` ("Issues, pull requests,
+  branches and commits") and the templates in `.github/`. Labels, assignee and reviewers
+  are set by a person, not by you.
 
 ## Where things are
 

@@ -59,7 +59,7 @@ metadata besides the data itself (see Step 2). Don't go looking for more on your
 Explore **only two things**: (a) the data path, and (b) the codebase/context the user
 named in Step 1. Do **not** hunt for context elsewhere in the repo or its history — not the
 `examples/`, not deleted files showing in `git status`, not `git show`/`git log`, not
-`config.yml`'s storage roots, not example keys in `README.md`/`CLAUDE.md`, not old
+`config.yml`'s storage roots, not example keys in `README.md`/`AGENTS.md`, not old
 manifests. Those describe *other* datasets and deployments; copying values from them
 fabricates provenance for this one. If you notice such a file, ignore it and — if it seems
 relevant — *mention* it to the user and let them decide whether to hand it to you.
