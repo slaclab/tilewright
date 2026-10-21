@@ -5,7 +5,7 @@ One concern per PR. Set labels, assignee and reviewers by hand after opening.
 Rules: CONTRIBUTING.md, "Issues, pull requests, branches and commits".
 -->
 
-<!-- The problem, in one paragraph: what broke, for whom, and a real dataset where it showed up if there is one. -->
+<!-- The problem, in two or three sentences: what broke and for whom. Name a real dataset if there is one. Everything else goes under Details. -->
 
 **Fix:**
 - 
