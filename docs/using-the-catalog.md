@@ -142,3 +142,36 @@ Theta = manifest[["sigma", "gamma"]].to_numpy()
 
 None of this works for a dataset registered with `--upload`: the server holds the bytes
 and there is no external file to open. Read through the server instead; same array.
+
+## Stream file entities
+
+A dataset registered with `entity: file` has one entity per batch file, each holding `rows`
+samples, and its `fields` say what every file contains
+([why](explanation/data-model.md#an-entity-is-a-slice-or-a-file)). A loader that reads
+files front to back needs nothing else from the catalog:
+
+```python
+ds = c["MAIQMAG_CHALLENGE_YBBI2IO4"]
+ds.metadata["rows"]                       # samples over all files
+fields = ds.metadata["fields"]
+fields["cef"]                             # {'role': 'artifact', 'dataset': '/cef', 'shape': [264, 101], 'dtype': 'float32'}
+theta = [k for k, f in fields.items() if f["role"] == "row_parameter"]   # the per-row parameters
+
+from tilewright.client import locate
+files = [(locate(ent)["cef"]["file"], ent.metadata["rows"])
+         for ent in ds.search(Key("source_run") == "ybbio_broad_v2").values()]
+```
+
+`shape` is one row's; the artifact under the entity has the leading axis back
+(`ent["cef"].shape` is `(rows, 264, 101)`). Through the server, a slab is one read:
+`ent["cef"][0:1563]`. On the filesystem, open the file the locator names and read the
+same slab with h5py, together with the row parameters it belongs to:
+
+```python
+with h5py.File(os.path.join(base_dir, file), "r") as f:
+    x = f[fields["cef"]["dataset"]][0:1563]
+    y = np.stack([f[fields[k]["dataset"]][0:1563] for k in theta], axis=1)
+```
+
+Read slabs that match the file's HDF5 chunks and each compressed chunk is decompressed
+once per epoch; `h5py.Dataset.chunks` says what they are.

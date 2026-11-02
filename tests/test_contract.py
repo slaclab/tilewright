@@ -82,6 +82,15 @@ class TestAccepted:
         t = load_dataset(table)[0]
         assert t.source.tag == "table" and t.source.identity == Identity.provenance
 
+    def test_batch_entity_file(self):
+        raw = files_cfg(source={"batch": {"directory": "/d", "pattern": "*.h5", "entity": "file",
+                                          "params": {"from": "attrs"},
+                                          "row_params": {"group": "/params"}}})
+        cfg, _ = load_dataset(raw)
+        assert cfg.source.body.entity == "file" and cfg.source.body.row_params.group == "/params"
+        default, _ = load_dataset(files_cfg(source={"batch": {"directory": "/d"}}))
+        assert default.source.body.entity == "row" and default.source.body.row_params is None
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -136,6 +145,15 @@ class TestRejected:
     def test_batch_params_cannot_be_null(self):
         raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
         assert any("source.batch.params" in e for e in errors_of(raw))
+
+    def test_row_params_need_file_entities(self):
+        raw = files_cfg(source={"batch": {"directory": "/d", "row_params": {"group": "/p"}}})
+        assert any("'row_params' applies only with 'entity: file'" in e for e in errors_of(raw))
+        raw = files_cfg(source={"batch": {"directory": "/d", "entity": "file",
+                                          "row_params": {"group": "/", "from": "attrs"}}})
+        assert any("'row_params' reads 1-D datasets" in e for e in errors_of(raw))
+        raw = files_cfg(source={"batch": {"directory": "/d", "entity": "sample"}})
+        assert any(e.startswith("source.batch.entity must be one of") for e in errors_of(raw))
 
     def test_drifted_key(self):
         errs = errors_of(files_cfg(key="OLD_NAME"))
@@ -196,6 +214,14 @@ class TestKeyAndFingerprint:
         raw["source"]["files"]["directory"] = "/data/other"
         b, _ = load_dataset(raw)
         assert source_fingerprint(a) != source_fingerprint(b)
+
+    def test_fingerprint_sees_file_entities_but_not_the_default(self):
+        base = {"directory": "/d", "pattern": "*.h5"}
+        row, _ = load_dataset(files_cfg(source={"batch": base}))
+        explicit, _ = load_dataset(files_cfg(source={"batch": {**base, "entity": "row"}}))
+        per_file, _ = load_dataset(files_cfg(source={"batch": {**base, "entity": "file"}}))
+        assert source_fingerprint(row) == source_fingerprint(explicit)  # existing batches keep theirs
+        assert source_fingerprint(row) != source_fingerprint(per_file)
 
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()

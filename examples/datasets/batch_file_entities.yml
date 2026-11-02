@@ -1,0 +1,40 @@
+# batch with entity: file — the same stacked layout as batch.yml, but each file is ONE
+# entity that keeps its rows. For data a loader streams file by file (prior samples,
+# millions of rows) rather than queries row by row.
+#
+#   /abs/path/to/challenge/
+#   ├── ybbio_broad_v1/batch_0/simulations.h5
+#   │   ├── @source_run, @round_number      → the file's parameters (attributes)
+#   │   ├── /cef           (50000, 264, 101) → artifact, registered whole
+#   │   ├── /magnon        (50000, 90, 39)   → artifact
+#   │   ├── /log_probs     (50000,)          → row parameter, listed once in 'fields'
+#   │   └── /params/J1A    (50000,)          → row parameter
+#   ├── ybbio_broad_v1/batch_1/simulations.h5
+#   └── ...
+#
+# Expected: entities = files matched (183), artifacts = entities × 2, rows = Σ leading axes.
+# The dataset's metadata gets 'rows' and a 'fields' dictionary naming every row parameter
+# and artifact with its HDF5 path, dtype and one row's shape.
+
+label: Example Batch File Entities
+key: EXAMPLE_BATCH_FILE_ENTITIES
+
+metadata:
+  method: [INS]
+  data_type: simulation
+  material: YbBi2IO4
+  producer: sunny_jl
+  project: MAIQMag
+
+source:
+  batch:
+    directory: /abs/path/to/challenge
+    pattern: "*/batch_*/simulations.h5"
+    entity: file
+    identity: provenance                  # the files' attributes repeat; the path is the identity
+    params: {from: attrs, exclude: [/source_chunk_ids]}   # per-file attributes; a 5000-long one skipped
+    row_params: {group: /, recursive: true}               # 1-D datasets of length N: /log_probs, /params/*
+
+artifacts:
+  - {type: cef, dataset: /cef}
+  - {type: magnon, dataset: /magnon}

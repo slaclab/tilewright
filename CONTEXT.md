@@ -13,7 +13,8 @@ a small, fixed set of supported sources.
 description). Holds entities. _Avoid_: collection, repo.
 
 **Entity**: a container whose physics parameters are queryable metadata; the unit a query
-selects. _Avoid_: sample, record, row.
+selects. In a `batch` source it is a row by default or, with `entity: file`, the file.
+_Avoid_: sample, record, row.
 
 **Artifact**: an array child of an entity (a spectrum, an image). The thing arrays load
 from. _Avoid_: observable (the physics word), output.
@@ -33,6 +34,13 @@ manifest is the output.
 **Source**: where entities come from, one of exactly four tags (ADR-0006): `files` (one
 file per entity), `batch` (stacked on axis 0), `groups` (one group per entity), `table`
 (rows of a sidecar table, no arrays). Each tag owns only its keys. _Avoid_: layout, format.
+
+**Row parameter**: a 1-D dataset with one value per row of a file entity (`row_params`).
+Listed in the field dictionary, never expanded into entities.
+
+**Field dictionary**: `fields`, stamped on the dataset: one entry per parameter, row
+parameter, artifact and shared axis, with role, dtype, HDF5 path and shape. What a
+consumer reads before opening a file.
 
 **Identity**: how an entity's uid is computed (ADR-0007). `params` (default): a hash of
 parameter values. `provenance`: a hash of file path plus row or group; forced when there

@@ -3,7 +3,9 @@
 Reads the contract (``contract.py``), walks the data once, and writes
 ``entities.parquet`` (uid + one column per parameter) and ``artifacts.parquet`` (uid,
 type, file, dataset, index, shape, dtype, ...; a ``shared:`` axis is a row with no uid).
-Shape and dtype are captured here so registration never opens a file.
+Shape and dtype are captured here so registration never opens a file. The schema
+metadata of both files carries a field dictionary (``fields``: one entry per parameter,
+row parameter, artifact and shared axis) that ``register`` stamps on the dataset.
 
 Also the step that derives the catalog key: if the YAML has no ``key:``, slug(label) is
 written into it. Identity follows ADR-0007: parameter-value hash by default, provenance
@@ -103,10 +105,11 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
     output_dir = Path(output_dir) if output_dir else manifest_dir(yaml_path, key)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_uids = set()
+    existing_uids, old_fields = set(), {}
     ent_path, art_path = output_dir / "entities.parquet", output_dir / "artifacts.parquet"
     if append and ent_path.exists():
         existing_uids = set(pd.read_parquet(ent_path, columns=["uid"])["uid"])
+        old_fields = json.loads((pq.read_schema(ent_path).metadata or {}).get(b"fields", b"{}"))
         print(f"  append: {len(existing_uids)} existing entities will be skipped")
 
     tag, body = cfg.source.tag, cfg.source.body
@@ -135,6 +138,9 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
         art_df = pd.concat([old_art, art_df], ignore_index=True)
         print(f"  merged: {len(old_ent)} existing + {len(ent_rows)} new entities")
 
+    per_file = tag == "batch" and body.entity == "file"
+    fields = _field_dictionary(cfg, ent_df, walker.label_keys, art_df, walker.row_fields,
+                               per_row=per_file, old=old_fields)
     meta = {
         b"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().encode(),
         b"generator": b"tilewright",
@@ -146,14 +152,19 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
         b"entity_count": str(len(ent_df)).encode(),
         b"artifact_count": str(len(art_rows)).encode(),
         b"shared_count": str(len(shared_rows)).encode(),
+        b"fields": json.dumps(fields).encode(),
     }
+    rows = ""
+    if per_file:
+        meta[b"rows"] = str(int(ent_df["rows"].sum())).encode()
+        rows = f" rows={meta[b'rows'].decode()}"
     for df, path in ((ent_df, ent_path), (art_df, art_path)):
         table = pa.Table.from_pandas(df, preserve_index=False)
         table = table.replace_schema_metadata({**(table.schema.metadata or {}), **meta})
         pq.write_table(table, path)
 
     print(f"dataset={key} entities={len(ent_df)} artifacts={len(art_rows)} "
-          f"shared={len(shared_rows)} -> {output_dir}")
+          f"shared={len(shared_rows)}{rows} -> {output_dir}")
     return str(ent_path), str(art_path)
 
 
@@ -252,11 +263,14 @@ def _attrs(obj, label_of=None, skip=()):
     return out
 
 
-def _read_params(container, spec: ParamsSpec, batch_size=None):
+def _read_params(container, spec: ParamsSpec, batch_size=None, describe=False):
     """One entity's (or one batch file's) parameters from its container.
 
     Returns ``(params, labels)``. ``params`` maps dotted keys (``instrument.Ei``) to values,
     or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
+    With ``describe`` (batch mode, ``entity: file``) nothing is read: each 1-D parameter
+    maps to ``{"dataset": <HDF5 path>, "dtype": <numpy dtype>}`` and 0-dim datasets are
+    skipped, since they are the file's own parameters, not per-row ones.
     """
     groups = spec.groups or {"": spec.group or "/"}
     exclude = {p.strip("/") for p in spec.exclude}
@@ -296,10 +310,13 @@ def _read_params(container, spec: ParamsSpec, batch_size=None):
                     continue
                 key = ".".join(p for p in (gname, *rel.split("/")) if p)
                 if obj.ndim == 0:
+                    if describe:
+                        continue
                     val = _to_python(obj[()])
                     out[key] = np.full(batch_size, val) if batch_size else val
                 elif batch_size and obj.ndim == 1 and obj.shape[0] == batch_size:
-                    out[key] = obj[:]
+                    out[key] = ({"dataset": obj.name, "dtype": str(obj.dtype)} if describe
+                                else obj[:])
                 else:
                     continue
                 labels.update(_attrs(obj, label_of=key))
@@ -359,6 +376,8 @@ class _Walker:
         self.artifacts = cfg.artifacts
         self.existing = existing_uids
         self.root = Path(self.body.directory)
+        self.label_keys = set()      # ``<field>_<attr>`` columns: labels, not parameters
+        self.row_fields = OrderedDict()  # entity: file — the per-row parameters, described once
 
     def uid(self, params, provenance, where):
         if self.identity == Identity.params:
@@ -369,12 +388,15 @@ class _Walker:
             return _params_uid(self.key, params)
         return _uid(f"{self.key}:{provenance}")
 
-    def entity(self, uid, params, labels, provenance, source_group=None):
+    def entity(self, uid, params, labels, provenance, source_group=None, rows=None):
         row = OrderedDict(uid=uid)
         if source_group is not None:
             row["source_group"] = source_group
+        if rows is not None:
+            row["rows"] = rows
         row.update(params)
         row.update(labels)
+        self.label_keys.update(labels)
         row["_provenance"] = provenance  # dropped before writing; used by collision report
         return row
 
@@ -406,8 +428,13 @@ class _Walker:
     # -- batch ---------------------------------------------------------------
 
     def batch(self, paths):
+        """``entity: row``: one entity per row, artifact shapes with the leading axis
+        dropped and the row in ``index``. ``entity: file``: one entity per file with its
+        full-shape artifacts, the row count in ``rows``, and the per-row parameters
+        described once (``row_fields``) rather than expanded."""
         ent_rows, art_rows = [], []
         spec = self.body.params
+        per_file = self.body.entity == "file"
         for h5_path in paths:
             rel = h5_path.relative_to(self.root).as_posix()
             fsize, fmtime = _file_fingerprint(h5_path)
@@ -426,7 +453,29 @@ class _Walker:
                         raise ValueError(f"{h5_path}: artifact {art.type!r} has {ds.shape[0]} "
                                          f"rows but {self.artifacts[0].type!r} has {n}; every "
                                          f"artifact's leading axis is the entity axis")
-                    art_info[art.type] = (ds.shape[1:], str(ds.dtype), _attrs(ds, label_of=""))
+                    shape = ds.shape if per_file else ds.shape[1:]
+                    art_info[art.type] = (shape, str(ds.dtype), _attrs(ds, label_of=""))
+                if per_file:
+                    params, labels = _read_params(f, spec)
+                    if "rows" in params:
+                        raise ValueError(f"{h5_path}: a parameter named 'rows' clashes with "
+                                         f"the row count 'entity: file' records under that "
+                                         f"name; exclude it or rename it in the file")
+                    if self.body.row_params is not None:
+                        described, _ = _read_params(f, self.body.row_params, batch_size=n,
+                                                    describe=True)
+                        self._record_row_fields(rel, described)
+                    uid = self.uid(params, rel, str(h5_path))
+                    if uid not in self.existing:
+                        ent_rows.append(self.entity(uid, params, labels, rel, rows=n))
+                        for art in self.artifacts:
+                            if art.type in art_info:
+                                shape, dtype, alabels = art_info[art.type]
+                                art_rows.append(_artifact_row(uid, art.type, rel, art.dataset,
+                                                              None, fsize, fmtime, shape, dtype,
+                                                              labels=alabels))
+                    print(f"  {h5_path.name}: 1 entity, {n} rows")
+                    continue
                 columns, labels = _read_params(f, spec, batch_size=n)
                 for i in range(n):
                     params = {k: _to_python(v[i]) for k, v in columns.items()}
@@ -443,6 +492,24 @@ class _Walker:
                                                       fsize, fmtime, shape, dtype, labels=alabels))
             print(f"  {h5_path.name}: {n} entities")
         return ent_rows, art_rows
+
+    def _record_row_fields(self, rel, described):
+        """The row parameters of one file; every file must describe the same set, since
+        a loader reads them by the names the dataset announces."""
+        if not self.row_fields:
+            self.row_fields.update(described)
+            self._row_fields_from = rel
+            return
+        if described == self.row_fields:
+            return
+        first, here = set(self.row_fields), set(described)
+        diffs = [f"only in {self._row_fields_from}: {sorted(first - here)}" if first - here else "",
+                 f"only in {rel}: {sorted(here - first)}" if here - first else "",
+                 "same names, different dtypes" if first == here else ""]
+        raise ValueError(f"row parameters differ between {self._row_fields_from} and {rel} "
+                         f"({'; '.join(d for d in diffs if d)}); every file must carry the "
+                         f"same row parameters. Exclude the odd ones under 'row_params', "
+                         f"or split the dataset.")
 
     # -- groups --------------------------------------------------------------
 
@@ -503,6 +570,45 @@ class _Walker:
             ent_rows.append(self.entity(uid, params, {}, prov))
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
+
+
+def _dtype_name(series):
+    """A column's value type for the field dictionary: numpy's name for numbers, the
+    Python type of the first value otherwise (``str``, ``list``, ``bool``)."""
+    values = series.dropna()
+    if len(values) == 0:
+        return "null"
+    if series.dtype != object:
+        return str(series.dtype)
+    return type(values.iloc[0]).__name__
+
+
+def _field_dictionary(cfg, ent_df, label_keys, art_df, row_fields, per_row=False, old=None):
+    """One entry per field a consumer may ask for: ``role`` (parameter, row_parameter,
+    artifact, shared), ``dtype``, and for arrays the declared HDF5 path and the shape of
+    one entity's array (one row's, with ``entity: file``) when it is the same everywhere,
+    else null. Written into both manifests' schema metadata; ``register`` stamps it on
+    the dataset container as ``fields``. Entries of a previous run (``--append``) are kept.
+    """
+    fields = OrderedDict(old or {})
+    skip = {"uid", "source_group", "rows"} | set(label_keys)
+    for col in ent_df.columns:
+        if col in skip or col in fields:
+            continue
+        fields[col] = {"role": "parameter", "dtype": _dtype_name(ent_df[col])}
+    for name, info in row_fields.items():
+        fields[name] = {"role": "row_parameter", **info}
+    for specs, role in ((cfg.artifacts, "artifact"), (cfg.shared, "shared")):
+        for spec in specs:
+            rows = art_df[(art_df["type"] == spec.type)
+                          & (art_df["uid"].isna() if role == "shared" else art_df["uid"].notna())]
+            shapes = {tuple(json.loads(s)[1:] if per_row and role == "artifact" else json.loads(s))
+                      for s in rows["shape"]}
+            dtypes = set(rows["dtype"])
+            fields[spec.type] = {"role": role, "dataset": spec.dataset,
+                                 "shape": list(shapes.pop()) if len(shapes) == 1 else None,
+                                 "dtype": dtypes.pop() if len(dtypes) == 1 else None}
+    return fields
 
 
 def _shared_axis_rows(paths, root, shared: list[SharedAxisSpec]):

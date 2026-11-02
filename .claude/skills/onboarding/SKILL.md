@@ -76,7 +76,11 @@ say — in **one batched round**, not field-by-field across many turns. Build th
 - **Inspect the HDF5** with `h5py`: open representative files; list groups/datasets,
   shapes, dtypes, and attributes. Decide the **source** from how entities are packed (one
   file each → `files`; stacked on axis 0 → `batch`; one group each → `groups`; not HDF5 at
-  all, with a sidecar table → `table`), the **artifacts** (the array datasets and good
+  all, with a sidecar table → `table`). Stacked files that a training loader streams front
+  to back, with rows nobody would query one by one (prior samples, millions of rows) →
+  `batch` with `entity: file`, `row_params` naming the per-row 1-D datasets, and usually
+  `identity: provenance` (see `examples/datasets/batch_file_entities.yml`); then the
+  **artifacts** (the array datasets and good
   `type` names; `optional: true` for one that some entities lack), the **parameters**
   (`params.group`, or `params.groups` when the scalars are spread over several groups —
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;

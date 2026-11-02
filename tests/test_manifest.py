@@ -7,6 +7,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from ruamel.yaml import YAML
 
@@ -184,6 +185,64 @@ class TestBatch:
         assert len(arts) == 6 and json.loads(arts.iloc[0]["shape"]) == [5, 2]
         assert sorted(arts["index"].astype(int)) == [0, 0, 1, 1, 2, 2]
 
+    def test_one_entity_per_file(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"].update(entity="file", row_params={"group": "/params"})
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 2 and list(ent["rows"]) == [3, 3] and sorted(ent["seed"]) == [0, 1]
+        assert "alpha" not in ent.columns                  # a row parameter, not expanded
+        arts = art[art["uid"].notna()]
+        assert len(arts) == 2 and json.loads(arts.iloc[0]["shape"]) == [3, 5, 2]
+        assert arts["index"].isna().all()
+        meta = pq.read_schema(tmp_path / "manifests" / "BATCH_TEST" / "entities.parquet").metadata
+        assert meta[b"rows"] == b"6" and meta[b"entity_count"] == b"2"
+        fields = json.loads(meta[b"fields"])
+        assert fields["alpha"] == {"role": "row_parameter", "dataset": "/params/alpha",
+                                   "dtype": "float64"}
+        assert fields["beta"]["role"] == "row_parameter" and "seed" in fields
+        assert fields["seed"] == {"role": "parameter", "dtype": "int64"}   # 0-dim: the file's
+        assert fields["spectrum"] == {"role": "artifact", "dataset": "/spectra",
+                                      "shape": [5, 2], "dtype": "float64"}  # one row's shape
+        assert fields["eloss"] == {"role": "shared", "dataset": "/eloss",
+                                   "shape": [5], "dtype": "float64"}
+
+    def test_file_entities_ignore_row_params_unless_asked(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        ent, _ = run(tmp_path, cfg)
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "BATCH_TEST" / "entities.parquet").metadata[b"fields"])
+        assert "alpha" not in fields and "alpha" not in ent.columns
+
+    def test_file_entities_record_the_same_row_parameters_everywhere(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"].update(entity="file", row_params={"group": "/params"})
+        with h5py.File(tmp_path / "sim" / "batch_1" / "sim.h5", "a") as f:
+            f["params"].create_dataset("gamma", data=np.zeros(3))
+        with pytest.raises(ValueError, match=r"row parameters differ.*only in batch_1/sim.h5: \['gamma'\]"):
+            run(tmp_path, cfg)
+
+    def test_file_entities_refuse_a_parameter_named_rows(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params"].create_dataset("rows", data=b)
+        with pytest.raises(ValueError, match="a parameter named 'rows' clashes"):
+            run(tmp_path, cfg)
+
+    def test_file_entities_identity_is_the_file_when_params_repeat(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params/seed"][...] = 0
+        with pytest.raises(ValueError, match="2 entities share 1 uids"):
+            run(tmp_path, cfg)
+        cfg["source"]["batch"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert len(set(ent["uid"])) == 2
+
     def test_shared_axis_must_agree_across_files(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         with h5py.File(tmp_path / "sim" / "batch_1" / "sim.h5", "a") as f:
@@ -204,6 +263,33 @@ class TestBatch:
         cfg["artifacts"].append({"type": "other", "dataset": "/other", "optional": True})
         with pytest.raises(ValueError, match="leading axis is the entity axis"):
             run(tmp_path, cfg)
+
+
+# ---------------------------------------------------------------------------
+
+class TestFieldDictionary:
+
+    def test_every_source_announces_its_fields(self, tmp_path):
+        run(tmp_path, files_dataset(tmp_path))
+        meta = pq.read_schema(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata
+        fields = json.loads(meta[b"fields"])
+        assert fields["temperature"] == {"role": "parameter", "dtype": "float64"}
+        assert "temperature_units" not in fields          # a label of temperature, not a field
+        assert fields["spectrum"] == {"role": "artifact", "dataset": "/spectrum",
+                                      "shape": [4, 2], "dtype": "float32"}
+        assert fields["energy"] == {"role": "shared", "dataset": "/energy",
+                                    "shape": [4], "dtype": "float64"}
+        assert b"rows" not in meta                        # only entity: file counts rows
+
+    def test_a_shape_that_varies_is_null(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            del f["spectrum"]
+            f.create_dataset("spectrum", data=np.zeros((9, 2), dtype="float32"))
+        run(tmp_path, cfg)
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata[b"fields"])
+        assert fields["spectrum"]["shape"] is None and fields["spectrum"]["dtype"] == "float32"
 
 
 # ---------------------------------------------------------------------------
@@ -437,3 +523,6 @@ class TestCli:
         assert main([str(yaml_path), "--append"]) == 0
         ent = pd.read_parquet(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet")
         assert len(ent) == 4 and "merged: 3 existing + 1 new" in capsys.readouterr().out
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata[b"fields"])
+        assert fields["temperature"]["role"] == "parameter" and "spectrum" in fields

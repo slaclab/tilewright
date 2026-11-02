@@ -88,6 +88,44 @@ for. Cheap slicing is not an optimization bolted on afterwards; it is what makes
 entity level possible for batch data. A server has to be told about the adapter
 ([How to host a server](../host-a-server.md)).
 
+## An entity is a slice, or a file
+
+The slice is the right entity when a query selects rows: a sweep of ten thousand runs,
+each asked for by its parameters. It is the wrong one for a prior-sampled training set.
+The MAIQMag challenge set is 183 batch files of 50,000 simulations each, 9.1 million rows
+in 870 GB of gzip-compressed HDF5. Nobody asks the catalog for the row whose `J1A` is
+0.02: the rows are draws from a prior, the parameters are the training targets, and the
+loader reads each file front to back in slabs aligned to its HDF5 chunks. A row per entity
+would mean 9 million containers and 46 million array nodes, about two and a half days of
+registration at the 40 entities per second measured on the shared server
+([tilewright#63](https://github.com/slaclab/tilewright/issues/63)), and a catalog that
+answers a question nobody asks. A read of one row through the server would decompress every
+chunk it touches, and each chunk spans 1,563 rows.
+
+So a `batch` source can say `entity: file`. Each file is then one entity: its parameters
+are the file's own (0-dim datasets, or attributes), its artifacts are the full stacked
+arrays, and its metadata carries `rows`, the length of the leading axis. The per-row
+parameters are not expanded. `row_params` says where they are, and the dataset's field
+dictionary (below) lists each one's HDF5 path and dtype. A loader asks the catalog for the
+files, their row counts and the fields, then reads the arrays itself, through the server a
+slab at a time or straight from the files. The entity is still the unit a query selects,
+by `source_run` or any other per-file parameter; the row is the unit the loader selects.
+
+What is given up: nothing is searchable below the file. That is the point. The per-row
+values stay in the files, where the loader reads them in bulk, instead of in a catalog
+database that would hold them one row at a time.
+
+## The field dictionary
+
+A consumer of a dataset, a loader or an agent, needs to know what is in it before opening a
+file: which parameters an entity carries, which arrays, at what shape and dtype, and for
+file entities which per-row parameters sit inside. Each of those is the same for every
+entity, so it is recorded once. `tilewright manifest` builds a dictionary with one entry per
+parameter, row parameter, artifact and shared axis, and `register` stamps it on the dataset
+container as `fields` ([the Parquet manifest](../reference/manifest.md#the-field-dictionary)).
+It describes the dataset's shape, not its meaning: units, descriptions and axes are a later
+addition, and attribute labels stay on the entities for now.
+
 ## Two ways in
 
 Serving slices over HTTP is enough for interactive work, not for a training loop pulling
