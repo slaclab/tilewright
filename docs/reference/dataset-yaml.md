@@ -45,7 +45,7 @@ to its id, an unknown value warns and registers as written
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `method` | list of str | **yes** |  | Scientific methods, e.g. ['RIXS']; at least one. Vocabulary facet. |
-| `data_type` | str | **yes** |  | 'simulation', 'experimental' or 'benchmark'. Vocabulary facet. |
+| `data_type` | str | **yes** |  | What produced the data, e.g. 'simulation' or 'experimental'; the ids are 'data_types' in vocabulary.yml. Vocabulary facet. |
 | `material` | str | **yes** |  | Material or system studied, e.g. 'NiPS3'; 'not_applicable' for non-physical data. Vocabulary facet. |
 | `producer` | str | no |  | Code that produced or reduced the data ('sunny_jl', 'mantid'). Vocabulary facet. |
 | `project` | str | no |  | Project or collaboration ('MAIQMag'). Vocabulary facet. |
@@ -118,7 +118,7 @@ labels, stored beside the value and never part of the identity.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `group` | str | no |  | One HDF5 group whose fields become flat metadata keys. '/' is the container itself. Default '/' when neither 'group' nor 'groups' is given. |
+| `group` | str | no |  | One HDF5 group whose fields become flat metadata keys. '/' is the entity's own container: the file's root under 'files' and 'batch', the entity group under 'groups'. Default '/' when neither 'group' nor 'groups' is given. |
 | `groups` | dict[str, str] | None | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
 | `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': 0-dim and size-1 datasets (shape (1,), as NeXus writes scalars) in the group are parameters (in 'batch', a 1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 attributes are the parameters. |
 | `recursive` | bool | no | `False` | Descend into subgroups, nesting one level per subgroup. |

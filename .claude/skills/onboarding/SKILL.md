@@ -102,6 +102,9 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `metadata` — propose them as `# TODO confirm — "NiPS3" in all 12 files`, mapped onto
   `vocabulary.yml` ids. See `examples/datasets/files_nexus.yml` and
   `docs/explanation/nexus.md`.
+- **If variables carry `scale_factor` / `add_offset` or a `grid_mapping`, the file is
+  CF** (netCDF-4): read "netCDF-4 and CF files" in `docs/ONBOARDING.md` before choosing
+  artifacts and parameters.
 - **Read the codebase / context** to infer metadata (`method`, `data_type`, `material`,
   `producer`, `project`, `facility`, `instrument`, `proposal`). Map values onto canonical
   ids in `vocabulary.yml`; never invent vocabulary. A value with no id is fine — it

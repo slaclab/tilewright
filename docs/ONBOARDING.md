@@ -78,6 +78,21 @@ Then edit:
 NeXus files start from `examples/datasets/files_nexus.yml`. Full field list:
 [the dataset YAML reference](reference/dataset-yaml.md).
 
+### netCDF-4 and CF files
+
+A netCDF-4 file is HDF5 and registers like any other, but two CF conventions keep a
+variable's meaning in attributes TileWright does not interpret:
+
+- **Packed variables.** An integer variable with `scale_factor` and `add_offset` holds
+  stored values; the physical value is `stored × scale_factor + add_offset`. Nothing
+  unpacks it: the artifact registers as the stored integers, both factors ride along as
+  its metadata, and a reader who ignores them sees counts (−32766 to 32766, say, for a
+  cloud fraction). Say so in the `description`.
+- **Grid-mapping variables.** A 0-dim variable such as `spatial_ref = 0` carries the
+  coordinate reference system in its attributes, not its value. As a parameter it is the
+  same meaningless number on every entity (broadcast to all of them under `batch`).
+  List it in `params.exclude` and copy the projection into `metadata`.
+
 ### The two fields the transport changes
 
 === "Server reads the files"
@@ -225,9 +240,14 @@ entity = ds[entities[0]]
 len(entities)                          # the entity count manifest printed (or -n)
 print(dict(ds.metadata))               # the facets you wrote, plus storage/fingerprint/registered_at
 print(dict(entity.metadata))           # this entity's physics parameters
-print(entity["spectrum"][:].shape)     # the array itself, at the shape the manifest recorded
-[ds[k][:].shape for k in shared]       # every shared axis
+arr = entity["spectrum"]
+arr.shape                              # the shape the manifest recorded; moves no array data
+arr[:2]                                # a small slice, read from the file through the server
+[ds[k].shape for k in shared]          # every shared axis
 ```
+
+`arr[:]` (or `arr.read()`) pulls the whole array through the server, gigabytes for a
+large artifact, so check shapes on the array client and read a slice.
 
 Metadata on the dataset, parameters on the entity, an array at the shape you registered:
 the whole contract, proven. Collaborators need nothing beyond the Tiled client.
