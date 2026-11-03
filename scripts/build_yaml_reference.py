@@ -24,7 +24,6 @@ def _type(annotation):
     text = str(annotation).replace("typing.", "").replace("tilewright.contract.", "")
     text = text.replace("<class '", "").replace("'>", "")
     return {"str | None": "str", "list[str]": "list of str", "dict[str, str]": "mapping",
-            "str | list[str]": "str or list of str",
             "Literal['datasets', 'attrs']": "`datasets` \\| `attrs`",
             "list[ArtifactSpec]": "list", "list[SharedAxisSpec]": "list",
             "ParamsSpec | None": "mapping or `null`", "ParamsSpec": "mapping",

@@ -7,16 +7,15 @@
 **Entity identity.** An entity's uid is a hash of its parameter values by default
 (`identity: params`), so the same physics is the same entity across re-registration and
 file moves. A source may say `identity: provenance` to hash the file path relative to the
-directory plus its row or group instead; that mode is forced when `params: null`. A
-`table` source's uid hashes its `id` column, or its columns when `id` is a list. `tilewright manifest` fails on duplicate uids, naming the colliding
+directory plus its row or group instead; that mode is forced when `params: null` and for
+`table` sources. `tilewright manifest` fails on duplicate uids, naming the colliding
 entities and the parameters they share, with both fixes in the message.
 
 **Dataset key.** `key = slug(label)`, written into the YAML by `tilewright manifest`. A key
 that drifted from its label is an error, never a rewrite. The `stamp-key` command is gone.
 
 **Fingerprint.** `manifest` hashes the facts that identify which data a YAML describes
-(tag, server-visible directory, pattern or table path, params spec, identity mode, and a
-table's `id` when it is a list), not
+(tag, server-visible directory, pattern or table path, params spec, identity mode), not
 the label or metadata, into the Parquet schema; `register` stamps it on the container.
 On an existing key: same fingerprint proceeds (and `--update` merge-patches metadata,
 revisioned by Tiled); a different fingerprint is refused with both printed; no fingerprint

@@ -236,33 +236,38 @@ class TestTable:
             f"  uid {sha16('SYSTEMS:4901')}: system_id=4901 at table rows 2, 3 "
             "(first data row = 0)",
             "    azimuth: 270 | 90",
-            "Fix: for each uid, list one of the columns that differ in 'id', so that "
-            "together they are unique, e.g. id: [system_id, tilt, azimuth].",
+            "Fix: 'id' must name a column that is unique per row. Add one to the table "
+            "that joins system_id with the columns that differ (tilt, azimuth), and name "
+            "it in 'id'.",
         ]
 
-    def test_composite_id_resolves_repeated_ids(self, tmp_path):
-        ent, _ = run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt", "azimuth"]))
+    def test_an_added_unique_column_resolves_repeated_ids(self, tmp_path):
+        cfg = systems_table(tmp_path, ids="array_id")
+        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv")
+        df["array_id"] = df["system_id"].astype(str) + "-" + df["azimuth"].astype(str) \
+            + "-" + df["tilt"].astype(str)
+        df.to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
+        ent, _ = run(tmp_path, cfg)
         assert len(ent) == 5 and ent["uid"].nunique() == 5
-        assert ent.loc[0, "uid"] == sha16('SYSTEMS:[1332, 16.77, 180]')
-        assert list(ent["system_id"]) == [1332, 1332, 4901, 4901, 7]
+        assert ent.loc[0, "uid"] == sha16("SYSTEMS:1332-180-16.77")
 
     def test_rows_equal_in_every_column_must_be_deduplicated(self, tmp_path):
-        cfg = systems_table(tmp_path, ids=["system_id", "tilt", "azimuth"])
-        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv")
-        pd.concat([df, df.iloc[[4]]]).to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
+        cfg = systems_table(tmp_path)
+        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv").iloc[[4]]
+        pd.concat([df, df]).to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
         with pytest.raises(ValueError) as exc:
             run(tmp_path, cfg)
         lines = str(exc.value).splitlines()
         assert lines[1:] == [
-            f"  uid {sha16('SYSTEMS:[7, 10.0, 180]')}: system_id=7, tilt=10.0, azimuth=180 "
-            "at table rows 4, 5 (first data row = 0)",
+            f"  uid {sha16('SYSTEMS:7')}: system_id=7 at table rows 0, 1 "
+            "(first data row = 0)",
             "    no column differs",
             "Fix: these rows are equal in every column; de-duplicate the table.",
         ]
 
     def test_missing_id_column_is_named(self, tmp_path):
         with pytest.raises(KeyError, match="id column 'tilt_deg' not among"):
-            run(tmp_path, systems_table(tmp_path, ids=["system_id", "tilt_deg"]))
+            run(tmp_path, systems_table(tmp_path, ids="tilt_deg"))
 
     def test_rows_are_entities(self, tmp_path):
         d = tmp_path / "cncs"

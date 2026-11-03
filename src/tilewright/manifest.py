@@ -187,16 +187,15 @@ def _check_collisions(ent_rows, key, source):
         return
     table = source.tag == "table"
     by_params = not table and source.identity == Identity.params
-    ids = source.body.id if table else []
-    ids = [ids] if isinstance(ids, str) else list(ids)
     lines = [f"{key}: {sum(len(r) for r in dupes.values())} entities share "
              f"{len(dupes)} uids; every entity must be distinct."]
     cover, some_equal = [], False  # one differing column per uid tells every group apart
     for u, rows in dupes.items():
         where = ", ".join(str(r.get("_provenance", "?")) for r in rows)
         if table:
-            where = (", ".join(f"{c}={json.dumps(rows[0].get(c), default=str)}" for c in ids)
-                     + f" at table rows {where} (first data row = 0)")
+            column = source.body.id
+            where = (f"{column}={json.dumps(rows[0].get(column), default=str)} at table "
+                     f"rows {where} (first data row = 0)")
         lines.append(f"  uid {u}: {where}")
         names = [k for k in dict.fromkeys(k for r in rows for k in r)
                  if k not in ("uid", "source_group") and not k.startswith("_")]
@@ -218,8 +217,9 @@ def _check_collisions(ent_rows, key, source):
         if by_params and equal:
             lines.append(f"    equal: {json.dumps(equal, default=str)[:160]}")
     if table and cover:
-        lines.append(f"Fix: for each uid, list one of the columns that differ in 'id', so "
-                     f"that together they are unique, e.g. id: [{', '.join(ids + cover)}]."
+        lines.append(f"Fix: 'id' must name a column that is unique per row. Add one to the "
+                     f"table that joins {source.body.id} with the columns that differ "
+                     f"({', '.join(cover)}), and name it in 'id'."
                      + (" Rows equal in every column are duplicates: de-duplicate the "
                         "table." if some_equal else ""))
     elif table:
@@ -515,10 +515,8 @@ class _Walker:
         if not path.exists():
             raise FileNotFoundError(f"{path}: table not found")
         df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        ids = self.body.id
-        for column in [ids] if isinstance(ids, str) else ids:
-            if column not in df.columns:
-                raise KeyError(f"{path}: id column {column!r} not among {list(df.columns)}")
+        if self.body.id not in df.columns:
+            raise KeyError(f"{path}: id column {self.body.id!r} not among {list(df.columns)}")
         if "uid" in df.columns:
             raise ValueError(f"{path}: 'uid' is a reserved column name")
         ent_rows = []
@@ -526,13 +524,10 @@ class _Walker:
             params = {k: _to_python(v) for k, v in record.items()}
             for name, template in self.body.locator.items():
                 params[name] = template.format(**record)
-            # one column: its value, as before; several: the JSON list of their values
-            value = (str(record[ids]) if isinstance(ids, str) else
-                     json.dumps([_to_python(record[c]) for c in ids], default=str))
-            uid = _uid(f"{self.key}:{value}")
+            uid = _uid(f"{self.key}:{record[self.body.id]}")
             if uid in self.existing:
                 continue
-            ent_rows.append(self.entity(uid, params, {}, i))
+            ent_rows.append(self.entity(uid, params, {}, i))  # row number, for the report
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
 

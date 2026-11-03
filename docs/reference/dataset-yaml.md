@@ -107,7 +107,7 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `path` | str | **yes** |  | Parquet or CSV file, relative to 'directory'. Every column becomes entity metadata. |
-| `id` | str or list of str | **yes** |  | The entity's identity: one column, or a list of columns when no single column is unique ('id: [system_id, tilt]'); together their values must be unique across rows. Changing it re-keys every entity: delete the registered dataset, then register again. A list is part of the fingerprint, so 'register' refuses a change to, from or between lists until you do. |
+| `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity and must be unique across rows. When no column is, add one to the table (system_id and tilt joined, say). Changing it re-keys every entity: delete the registered dataset, then register again. |
 | `locator` | mapping | no |  | Extra metadata rendered per row from '{column}' templates, e.g. {globus_url: 'https://.../{filename}'}. |
 
 ### `params`

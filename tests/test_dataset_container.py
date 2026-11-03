@@ -1,17 +1,12 @@
 """The four fingerprint cases of ``register.dataset_container`` and ``--update``, against a
 mock Tiled client. No server needed."""
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from ruamel.yaml import YAML
 
-from tilewright.contract import load_dataset, source_fingerprint
 from tilewright.register import dataset_container
 from tilewright.utils import FINGERPRINT_KEY, STORAGE_EXTERNAL, STORAGE_KEY, STORAGE_UPLOADED
-
-EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3", "label": "X",
         "description": "the original"}
@@ -78,16 +73,3 @@ def test_transport_mismatch_is_refused_first():
     client, _ = client_with({**META, STORAGE_KEY: STORAGE_UPLOADED, FINGERPRINT_KEY: "abc123"})
     with pytest.raises(ValueError, match="storage='uploaded'"):
         dataset_container(client, "X", META, STORAGE_EXTERNAL, "abc123")
-
-
-def test_table_switched_to_a_list_id_is_refused():
-    """A list id re-keys every entity, so it is not the data already registered."""
-    raw = YAML(typ="safe").load((EXAMPLES / "table.yml").read_text())
-    registered = source_fingerprint(load_dataset(raw)[0])
-    raw["source"]["table"]["id"] = ["run_number", "Ei"]
-    now = source_fingerprint(load_dataset(raw)[0])
-    client, node = client_with({**META, STORAGE_KEY: STORAGE_EXTERNAL,
-                                FINGERPRINT_KEY: registered})
-    with pytest.raises(ValueError, match="already holds different data"):
-        dataset_container(client, "X", META, STORAGE_EXTERNAL, now)
-    node.update_metadata.assert_not_called()
