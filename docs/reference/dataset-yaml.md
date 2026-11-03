@@ -105,7 +105,6 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `path` | str | **yes** |  | Parquet or CSV file, relative to 'directory'. Every column becomes entity metadata. |
 | `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity and must be unique across rows. When no column is, add one to the table (system_id and tilt joined, say). Changing it re-keys every entity: delete the registered dataset, then register again. |
 | `locator` | mapping | no |  | Extra metadata rendered per row from '{column}' templates, e.g. {globus_url: 'https://.../{filename}'}. |
@@ -130,7 +129,9 @@ queryable as `Key("instrument.Ei") > 50`.
 
 ### `identity`
 
-How an entity's uid is computed (``source.<tag>.identity``).
+How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+    ``batch`` and ``groups``; a ``table`` has no ``identity`` key, its uid hashes its ``id``
+    column).
 
     - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
       entity across re-registration and file moves; two entities with identical

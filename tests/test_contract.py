@@ -143,6 +143,11 @@ class TestRejected:
         raw["source"]["files"]["params"] = {"group": "/p", "groups": {"a": "/a"}}
         assert any("mutually exclusive" in e for e in errors_of(raw))
 
+    def test_table_has_no_identity(self):
+        raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": "run",
+                                          "identity": "provenance"}}, artifacts=[])
+        assert errors_of(raw) == ["source.table.identity is not a contract key"]
+
     def test_drifted_key(self):
         errs = errors_of(files_cfg(key="OLD_NAME"))
         assert any("does not match slug(label) 'TEST_FILES'" in e for e in errs)
