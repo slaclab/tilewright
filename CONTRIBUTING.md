@@ -9,7 +9,7 @@
 | `src/tilewright/manifest.py` | YAML → Parquet manifests; key stamping; identity and collisions |
 | `src/tilewright/register.py` | manifests → Tiled over HTTP; both transports; fingerprint cases; verify |
 | `src/tilewright/delete.py`, `client.py`, `adapter.py` | deletion; same-filesystem reads; the server-side array adapter |
-| `examples/datasets/` | one annotated YAML per source tag; tests assert they validate with zero warnings |
+| `examples/datasets/` | one annotated YAML per source tag, plus `batch_file_entities.yml` for `entity: file`; tests assert they validate with zero warnings |
 | `tests/` | offline by default; `-m integration` needs `TILED_URL`/`TILED_API_KEY` and a server with data |
 | `docs/` | the site; `docs/adr/` is internal and unpublished |
 | `scripts/` | maintainer tools, not installed, not on the CLI |

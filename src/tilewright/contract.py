@@ -152,7 +152,9 @@ class ParamsSpec(BaseModel):
     )
     exclude: list[str] = Field(
         default_factory=list,
-        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say.",
+        description="HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. "
+        "Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: "
+        "`/operator_note` skips the root's attribute 'operator_note'.",
     )
 
     @model_validator(mode="after")
@@ -216,17 +218,50 @@ class FilesSource(_SourceBase):
 
 
 class BatchSource(_SourceBase):
-    """Many entities stacked along axis 0 of each file's datasets; entity i is row i."""
+    """Many entities stacked along axis 0 of each file's datasets. Entity i is row i, or
+    with ``entity: file`` each file is one entity that keeps its rows (the data model
+    page, "An entity is a slice, or a file")."""
 
     pattern: str = Field(
         default="**/*.h5",
         description="Glob for the batch files under 'directory'.",
     )
+    entity: Literal["row", "file"] = Field(
+        default="row",
+        description="What one entity is. 'row': entity i is row i of every artifact, so a "
+        "file of N rows registers N entities. 'file': each file is one entity whose "
+        "artifacts keep their leading axis, for data a loader streams file by file rather "
+        "than queries row by row (millions of rows). Its row count is stamped as 'rows' "
+        "and the per-row parameters are listed once, under 'row_params'.",
+    )
     params: ParamsSpec = Field(
         default_factory=ParamsSpec,
         description="Group holding one 1-D dataset of length N per parameter (0-dim "
-        "datasets are broadcast to every entity in the file).",
+        "datasets are broadcast to every entity in the file). With 'entity: file', the "
+        "file's own parameters, as for 'files': 0-dim datasets, or attributes with "
+        "'from: attrs'; 1-D datasets are not read.",
     )
+    row_params: ParamsSpec | None = Field(
+        default=None,
+        description="'entity: file' only. Where the per-row parameters are: 1-D datasets "
+        "of length N under the group ('recursive' to descend). They are not expanded into "
+        "entities; each one's name, HDF5 path and dtype is recorded once in the dataset's "
+        "field dictionary ('fields' in its metadata), so a loader finds them without a "
+        "naming convention.",
+    )
+
+    @model_validator(mode="after")
+    def _row_params_need_file_entities(self):
+        if self.row_params is not None:
+            if self.entity != "file":
+                raise ValueError("'row_params' applies only with 'entity: file'; under "
+                                 "'entity: row' every 1-D dataset in 'params' is already "
+                                 "one value per entity")
+            if self.row_params.from_ == "attrs":
+                raise ValueError("'row_params' reads 1-D datasets, one value per row; an "
+                                 "attribute has one value per file, so it belongs under "
+                                 "'params'")
+        return self
 
 
 class GroupsSource(_SourceBase):
@@ -494,9 +529,9 @@ def load_dataset(raw):
 def source_fingerprint(cfg: DatasetConfig):
     """16 hex chars identifying *which data* a YAML describes, independent of its label
     or metadata: the source tag, the directory as the server sees it, the file pattern
-    or table path, the params spec and the identity mode. Two YAMLs for the same files
-    share it; the same label over different files does not (``tilewright register``
-    refuses that)."""
+    or table path, the params spec, the identity mode and, for ``batch``, whether the
+    entity is the file. Two YAMLs for the same files share it; the same label over
+    different files does not (``tilewright register`` refuses that)."""
     body = cfg.source.body
     params = getattr(body, "params", None)
     facts = {
@@ -507,4 +542,7 @@ def source_fingerprint(cfg: DatasetConfig):
         "entity_group": getattr(body, "entity_group", None),
         "identity": str(cfg.source.identity),
     }
+    if getattr(body, "entity", "row") == "file":
+        # Only when set: a batch registered before this key existed keeps its fingerprint.
+        facts["entity"] = "file"
     return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()[:16]

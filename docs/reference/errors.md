@@ -18,6 +18,8 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `contract error: source: exactly one of files \| batch \| groups \| table is required` | No tag, or two | Keep one |
 | `contract error: source.<tag>.directory must be an absolute path` | A relative directory | Write the full path (`pwd -P`) |
 | `contract error: source.<tag>.params: 'group' and 'groups' are mutually exclusive` | Both given | Keep one; to nest a single group, name it under `groups` |
+| `contract error: source.batch: 'row_params' applies only with 'entity: file'` | `row_params` under the default `entity: row` | Set `entity: file`, or drop it: under `entity: row` every 1-D parameter is already one value per entity |
+| `contract error: source.batch: 'row_params' reads 1-D datasets, one value per row` | `row_params: {from: attrs}` | An attribute has one value per file; put it under `params` |
 | `contract error: key '<K>' does not match slug(label)` | `label` changed after the key was written | Restore the label, or delete the `key:` line and rerun. A drifted key is never silently rewritten, because the old key may already hold registered data |
 | `contract error: a 'table' source has no readable arrays: remove 'artifacts'` | `artifacts` on a table source | Remove it |
 | `contract error: artifact types must be unique` | Two artifacts or shared axes share a `type` | Rename one; types become node keys |
@@ -31,6 +33,8 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `OSError: Unable to open file ... file signature not found` | The pattern matched a non-HDF5 sibling: a NetCDF twin, a Parquet sidecar, a `.gz` | Tighten `pattern` |
 | `<file>: artifact type=... dataset '...' not found (mark it 'optional: true' if some entities lack it)` | Wrong HDF5 path, or an array that only some entities have; in `groups`, an absolute path where a group-relative one is expected | Dump one file (`h5py.File(p).visititems(print)`) and correct `dataset`, or add `optional: true` |
 | `<file>: artifact '<t>' has N rows but '<first>' has M; every artifact's leading axis is the entity axis` | A batch file whose arrays disagree on axis 0 | It is not one batch; split the artifact out or fix the file |
+| `<file>: a parameter named 'rows' clashes with the row count 'entity: file' records` | A 0-dim dataset or attribute called `rows` in a file entity | `exclude` it or rename it in the file; `rows` is the entity's row count |
+| `row parameters differ between a.h5 and b.h5 (only in ...)` | Under `entity: file`, two files do not hold the same 1-D parameters | Every file must announce the same row parameters. `exclude` the odd ones under `row_params`, or split the dataset |
 | `<file>: no parameters found, so no identity` | `params` points at a group with no scalars, and identity is `params` | Point `params` at the right group, declare `params: null`, or set `identity: provenance` |
 | `<KEY>: N entities share K uids; every entity must be distinct` | Repeated parameter sets under `identity: params`, or a pattern matching the same thing twice under `provenance` | The message names colliding entities and their shared parameters. Add a distinguishing parameter (run number, seed) or set `identity: provenance` |
 | `shared axis '<t>': dataset '...' not found in any of the N files` | Wrong path for a `shared` entry | Correct the path |
@@ -45,6 +49,7 @@ Every contract problem is reported at once, one line each, then exit `1`.
 |---|---|---|
 | `files` | files matched by `pattern` (`ls <directory>/<pattern> \| wc -l`) | entities × non-optional `artifacts` entries, plus optional ones where present |
 | `batch` | sum over files of the leading axis of `artifacts[0]` | entities × `artifacts` entries |
+| `batch`, `entity: file` | files matched by `pattern`; `rows=` is the sum of the leading axes | entities × `artifacts` entries |
 | `groups` | groups under `entity_group` (or top-level groups), summed over files | entities × `artifacts` entries |
 | `table` | rows of the table | 0 |
 
@@ -82,7 +87,7 @@ a byte. See the read-back below.
 | Read returns 500 for **some** entities only | Stale manifest: those files changed shape or dtype since `manifest`, and the adapter re-checks both against the file | Regenerate, delete, re-register |
 | Read returns 500 for **some artifact types** only, and the server log says `can't open directory (.../plugin)` or `required filter ... is not registered` (`tilewright.client.load` raises the same `OSError`) | The array is compressed with an HDF5 filter that neither HDF5 nor [`hdf5plugin`](https://pypi.org/project/hdf5plugin/) ships. Every TileWright read path loads `hdf5plugin`'s filters (LZ4, Bitshuffle, Blosc, Zstd, ...), so this is a rarer one | Install that filter's HDF5 plugin and point `HDF5_PLUGIN_PATH` at its directory, in the server's environment and in a direct reader's. `h5py.File(p)[dataset].id.get_create_plist().get_filter(0)` names the filter |
 | `KeyError: '<KEY>'` right after a clean register | You are reading a different server than you registered into | Use the same URL and key for both |
-| Array shape is not what you expect | For a `batch` source the manifest records the *per-entity* shape, leading axis dropped | Expected; see [sliced reads](../explanation/data-model.md#an-entity-is-a-slice) |
+| Array shape is not what you expect | For a `batch` source the manifest records the *per-entity* shape, leading axis dropped; under `entity: file` it keeps the axis, since the entity is the whole file | Expected; see [sliced reads](../explanation/data-model.md#an-entity-is-a-slice) |
 
 The symlink case is worth restating because it is silent and expensive: the server's
 containment check compares the path **as written** against `readable_storage` and never

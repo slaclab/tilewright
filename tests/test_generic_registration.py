@@ -56,6 +56,17 @@ def nips3_manifests():
     return ent_df, art_df, str(nips3_dir)
 
 
+@pytest.fixture
+def file_entity_manifests():
+    """``entity: file`` manifests: one entity per batch file, full-shape artifacts, no index."""
+    uid = "0123456789abcdef"
+    ent_df = pd.DataFrame([{"uid": uid, "rows": 3, "source_run": "v1"}])
+    art_df = pd.DataFrame([{"uid": uid, "type": "cef", "file": "batch_0/sim.h5",
+                            "dataset": "/cef", "index": None, "file_size": 1, "file_mtime": "t",
+                            "shape": "[3, 5, 2]", "dtype": "float32"}])
+    return ent_df, art_df, "/data/sim"
+
+
 def on_server(art_rows):
     """What ``ent_container.items()`` returns for artifacts already registered from these
     manifest rows: (key, node) pairs whose metadata carries the file stamps."""
@@ -102,6 +113,22 @@ def register_entity(manifests, row=0, dataset_key="TEST_KEY",
         uploads={c.kwargs["key"]: (c.args[0], c.kwargs["metadata"])
                  for c in ent_container.write_array.call_args_list},
     )
+
+
+# ─── batch, entity: file — one file per entity, rows kept ────────────────────
+
+
+class TestFileEntityRegistration:
+
+    def test_rows_stamped_and_no_index_locator(self, file_entity_manifests):
+        reg = register_entity(file_entity_manifests)
+        assert reg.result == (1, 1, 0, 0, 0)
+        assert reg.metadata["rows"] == 3 and reg.metadata["source_run"] == "v1"
+        assert reg.metadata["path_cef"] == "batch_0/sim.h5" and "index_cef" not in reg.metadata
+        source = reg.artifacts["cef"]["data_sources"][0]
+        assert "slice" not in source.parameters          # the whole stacked array
+        assert tuple(source.structure.shape) == (3, 5, 2)
+        assert reg.artifacts["cef"]["metadata"]["shape"] == [3, 5, 2]
 
 
 # ─── VDP-style: one file per entity ──────────────────────────────────────────

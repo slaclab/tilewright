@@ -1,6 +1,7 @@
 """CLI helpers that do not need a server: dataset-container metadata, manifest lookup,
 and the dispatcher."""
 
+import json
 import subprocess
 import sys
 
@@ -24,6 +25,20 @@ def test_build_dataset_metadata_keeps_extras_and_adds_shared_locators():
     assert md["shared_dataset_energy"] == "/energy"
     assert md["label"] == "X"
     assert "producer" not in md  # None fields are not written
+
+
+def test_manifest_stamps_come_from_the_schema_metadata(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from tilewright.cli import _manifest_stamps
+
+    fields = {"J1A": {"role": "row_parameter", "dataset": "/params/J1A", "dtype": "float64"}}
+    table = pa.table({"uid": ["a"]}).replace_schema_metadata(
+        {b"fields": json.dumps(fields).encode(), b"rows": b"42"})
+    pq.write_table(table, tmp_path / "entities.parquet")
+    assert _manifest_stamps(tmp_path / "entities.parquet") == {"fields": fields, "rows": 42}
+    pq.write_table(pa.table({"uid": ["a"]}), tmp_path / "old.parquet")
+    assert _manifest_stamps(tmp_path / "old.parquet") == {}   # a manifest from before
 
 
 def test_find_manifests_uses_the_key_layout(tmp_path):

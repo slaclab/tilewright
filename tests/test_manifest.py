@@ -7,6 +7,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from ruamel.yaml import YAML
 
@@ -66,6 +67,51 @@ class TestFiles:
     def test_root_attrs_as_params(self, tmp_path):
         ent, _ = run(tmp_path, files_dataset(tmp_path, attrs=True))
         assert sorted(ent["temperature"]) == [300.0, 301.0, 302.0]
+
+    def test_exclude_applies_to_attrs(self, tmp_path):
+        # an attribute is excluded by '<group path>/<name>', and is never read (#5)
+        cfg = files_dataset(tmp_path, attrs=True)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.attrs["note"] = "x"
+                entry = f.create_group("entry")
+                entry.attrs["title"] = f"scan {i}"
+                entry.attrs["version"] = "1.2"
+                # an attribute h5py cannot read at all: only excluding it lets manifest pass
+                h5py.h5a.create(entry.id, b"stamp", h5py.h5t.UNIX_D32LE,
+                                h5py.h5s.create(h5py.h5s.SCALAR))
+        cfg["source"]["files"]["params"]["exclude"] = ["/note"]
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "temperature", "run"}
+        cfg["source"]["files"]["params"] = {
+            "groups": {"root": "/", "entry": "/entry"}, "from": "attrs",
+            "exclude": ["/note", "/entry/version", "entry/stamp"]}
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert set(ent.columns) == {"uid", "root.temperature", "root.run", "entry.title"}
+
+    def test_empty_attribute_is_null(self, tmp_path):
+        # h5py.Empty, a null dataspace (netCDF's `version = ""`), is stored as null (#5)
+        cfg = files_dataset(tmp_path, attrs=True)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.attrs["version"] = h5py.Empty("S1") if i else "1.2"
+        ent, _ = run(tmp_path, cfg)
+        version = ent.sort_values("run")["version"]
+        assert version.iloc[0] == "1.2" and version.iloc[1:].isna().all()
+
+    def test_empty_dataset_is_null_and_empty_labels_are_left_out(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f.create_dataset("spare", data=h5py.Empty("f8"))
+                f["temperature"].attrs["comment"] = h5py.Empty("S1")
+                f["spectrum"].attrs["long_name"] = h5py.Empty("S1")
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 3 and ent["spare"].isna().all()
+        # labels and array metadata carry only str, int and float: an empty one is left out
+        assert "temperature_comment" not in ent.columns
+        assert (ent["temperature_units"] == "K").all()
+        assert "long_name" not in art.columns
 
     def test_shared_axis_row_has_no_uid(self, tmp_path):
         _, art = run(tmp_path, files_dataset(tmp_path))
@@ -139,6 +185,64 @@ class TestBatch:
         assert len(arts) == 6 and json.loads(arts.iloc[0]["shape"]) == [5, 2]
         assert sorted(arts["index"].astype(int)) == [0, 0, 1, 1, 2, 2]
 
+    def test_one_entity_per_file(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"].update(entity="file", row_params={"group": "/params"})
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 2 and list(ent["rows"]) == [3, 3] and sorted(ent["seed"]) == [0, 1]
+        assert "alpha" not in ent.columns                  # a row parameter, not expanded
+        arts = art[art["uid"].notna()]
+        assert len(arts) == 2 and json.loads(arts.iloc[0]["shape"]) == [3, 5, 2]
+        assert arts["index"].isna().all()
+        meta = pq.read_schema(tmp_path / "manifests" / "BATCH_TEST" / "entities.parquet").metadata
+        assert meta[b"rows"] == b"6" and meta[b"entity_count"] == b"2"
+        fields = json.loads(meta[b"fields"])
+        assert fields["alpha"] == {"role": "row_parameter", "dataset": "/params/alpha",
+                                   "dtype": "float64"}
+        assert fields["beta"]["role"] == "row_parameter" and "seed" in fields
+        assert fields["seed"] == {"role": "parameter", "dtype": "int64"}   # 0-dim: the file's
+        assert fields["spectrum"] == {"role": "artifact", "dataset": "/spectra",
+                                      "shape": [5, 2], "dtype": "float64"}  # one row's shape
+        assert fields["eloss"] == {"role": "shared", "dataset": "/eloss",
+                                   "shape": [5], "dtype": "float64"}
+
+    def test_file_entities_ignore_row_params_unless_asked(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        ent, _ = run(tmp_path, cfg)
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "BATCH_TEST" / "entities.parquet").metadata[b"fields"])
+        assert "alpha" not in fields and "alpha" not in ent.columns
+
+    def test_file_entities_record_the_same_row_parameters_everywhere(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"].update(entity="file", row_params={"group": "/params"})
+        with h5py.File(tmp_path / "sim" / "batch_1" / "sim.h5", "a") as f:
+            f["params"].create_dataset("gamma", data=np.zeros(3))
+        with pytest.raises(ValueError, match=r"row parameters differ.*only in batch_1/sim.h5: \['gamma'\]"):
+            run(tmp_path, cfg)
+
+    def test_file_entities_refuse_a_parameter_named_rows(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params"].create_dataset("rows", data=b)
+        with pytest.raises(ValueError, match="a parameter named 'rows' clashes"):
+            run(tmp_path, cfg)
+
+    def test_file_entities_identity_is_the_file_when_params_repeat(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["entity"] = "file"
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params/seed"][...] = 0
+        with pytest.raises(ValueError, match="2 entities share 1 uids"):
+            run(tmp_path, cfg)
+        cfg["source"]["batch"]["identity"] = "provenance"
+        ent, _ = run(tmp_path, cfg, name="ds2")
+        assert len(set(ent["uid"])) == 2
+
     def test_shared_axis_must_agree_across_files(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         with h5py.File(tmp_path / "sim" / "batch_1" / "sim.h5", "a") as f:
@@ -159,6 +263,33 @@ class TestBatch:
         cfg["artifacts"].append({"type": "other", "dataset": "/other", "optional": True})
         with pytest.raises(ValueError, match="leading axis is the entity axis"):
             run(tmp_path, cfg)
+
+
+# ---------------------------------------------------------------------------
+
+class TestFieldDictionary:
+
+    def test_every_source_announces_its_fields(self, tmp_path):
+        run(tmp_path, files_dataset(tmp_path))
+        meta = pq.read_schema(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata
+        fields = json.loads(meta[b"fields"])
+        assert fields["temperature"] == {"role": "parameter", "dtype": "float64"}
+        assert "temperature_units" not in fields          # a label of temperature, not a field
+        assert fields["spectrum"] == {"role": "artifact", "dataset": "/spectrum",
+                                      "shape": [4, 2], "dtype": "float32"}
+        assert fields["energy"] == {"role": "shared", "dataset": "/energy",
+                                    "shape": [4], "dtype": "float64"}
+        assert b"rows" not in meta                        # only entity: file counts rows
+
+    def test_a_shape_that_varies_is_null(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        with h5py.File(tmp_path / "runs" / "run_0.h5", "a") as f:
+            del f["spectrum"]
+            f.create_dataset("spectrum", data=np.zeros((9, 2), dtype="float32"))
+        run(tmp_path, cfg)
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata[b"fields"])
+        assert fields["spectrum"]["shape"] is None and fields["spectrum"]["dtype"] == "float32"
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +523,6 @@ class TestCli:
         assert main([str(yaml_path), "--append"]) == 0
         ent = pd.read_parquet(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet")
         assert len(ent) == 4 and "merged: 3 existing + 1 new" in capsys.readouterr().out
+        fields = json.loads(pq.read_schema(
+            tmp_path / "manifests" / "FILES_TEST" / "entities.parquet").metadata[b"fields"])
+        assert fields["temperature"]["role"] == "parameter" and "spectrum" in fields

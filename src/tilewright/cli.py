@@ -44,6 +44,23 @@ def _build_dataset_metadata(cfg):
     return md
 
 
+def _manifest_stamps(ent_path):
+    """What the dataset container carries from the manifest rather than the YAML: the
+    field dictionary (``fields``) and, for ``entity: file``, the total row count
+    (``rows``). Both are read from the Parquet schema metadata ``tilewright manifest``
+    wrote; a manifest from before they existed stamps nothing."""
+    import json
+    import pyarrow.parquet as pq
+
+    meta = pq.read_schema(ent_path).metadata or {}
+    stamps = {}
+    if b"fields" in meta:
+        stamps["fields"] = json.loads(meta[b"fields"])
+    if b"rows" in meta:
+        stamps["rows"] = int(meta[b"rows"])
+    return stamps
+
+
 def _find_manifests(config_path, key):
     """The manifest pair for a YAML, or (None, None)."""
     from .manifest import manifest_dir
@@ -200,7 +217,7 @@ def register_main():
         if args.max_entities is not None:
             ent_df = ent_df.head(args.max_entities)
 
-        dataset_metadata = _build_dataset_metadata(cfg)
+        dataset_metadata = {**_build_dataset_metadata(cfg), **_manifest_stamps(ent_path)}
 
         kwargs = {}
         if max_workers is not None:

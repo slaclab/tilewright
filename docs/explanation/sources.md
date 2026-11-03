@@ -32,6 +32,10 @@ run.h5
     └── F2_dd  (10000,)
 ```
 
+With `entity: file`, the same layout registers one entity per *file* that keeps its rows,
+for data a loader streams rather than queries
+([an entity is a slice, or a file](data-model.md#an-entity-is-a-slice-or-a-file)).
+
 **`groups`**: one HDF5 *group* per entity inside a file, each group self-contained.
 
 ```
@@ -83,6 +87,9 @@ ADR.
 - **`batch`**: the manifest records each artifact's per-entity shape, leading axis dropped,
   and stores the row number in `index`. An entity is a slice, read by slicing in h5py
   rather than pulling the whole stacked dataset ([sliced reads](data-model.md#an-entity-is-a-slice)).
+  With `entity: file` the shape keeps its leading axis, `index` is empty, and the entity
+  carries `rows` and the per-file parameters; the per-row ones are listed once in the
+  dataset's `fields`.
 - **`groups`**: an artifact's `dataset` path resolves relative to each entity group.
 - **`files`**: the file is the entity boundary, so there is no index.
 - **`table`**: entity identity is the `id` column; nothing is served as an array.

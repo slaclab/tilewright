@@ -74,7 +74,9 @@ One HDF5 file per entity.
 
 ### `source.batch`
 
-Many entities stacked along axis 0 of each file's datasets; entity i is row i.
+Many entities stacked along axis 0 of each file's datasets. Entity i is row i, or
+    with ``entity: file`` each file is one entity that keeps its rows (the data model
+    page, "An entity is a slice, or a file").
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -82,7 +84,9 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the batch files under 'directory'. |
-| `params` | mapping | no |  | Group holding one 1-D dataset of length N per parameter (0-dim datasets are broadcast to every entity in the file). |
+| `entity` | `row` \| `file` | no | `row` | What one entity is. 'row': entity i is row i of every artifact, so a file of N rows registers N entities. 'file': each file is one entity whose artifacts keep their leading axis, for data a loader streams file by file rather than queries row by row (millions of rows). Its row count is stamped as 'rows' and the per-row parameters are listed once, under 'row_params'. |
+| `params` | mapping | no |  | Group holding one 1-D dataset of length N per parameter (0-dim datasets are broadcast to every entity in the file). With 'entity: file', the file's own parameters, as for 'files': 0-dim datasets, or attributes with 'from: attrs'; 1-D datasets are not read. |
+| `row_params` | mapping or `null` | no |  | 'entity: file' only. Where the per-row parameters are: 1-D datasets of length N under the group ('recursive' to descend). They are not expanded into entities; each one's name, HDF5 path and dtype is recorded once in the dataset's field dictionary ('fields' in its metadata), so a loader finds them without a naming convention. |
 
 ### `source.groups`
 
@@ -123,7 +127,7 @@ labels, stored beside the value and never part of the identity.
 | `groups` | dict[str, str] | None | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
 | `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': 0-dim datasets in the group are parameters (in 'batch', a 1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 attributes are the parameters. |
 | `recursive` | bool | no | `False` | Descend into subgroups, nesting one level per subgroup. |
-| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. |
+| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: `/operator_note` skips the root's attribute 'operator_note'. |
 
 `groups` nests: `{instrument: /entry/instrument}` puts `Ei` at `metadata.instrument.Ei`,
 queryable as `Key("instrument.Ei") > 50`.
