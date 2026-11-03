@@ -8,9 +8,9 @@ the user slice is applied (see debug/MODE_B_ROOT_CAUSE.md §4).
 
 This adapter is a drop-in replacement that honors the `parameters["dataset"]`
 and `parameters["slice"]` kwargs that the broker already stores on each
-data_source, and does direct `h5py.Dataset[base_index][user_slice]` indexing.
-That hits h5py's native per-chunk path and reads only the bytes the client
-asked for.
+data_source, and hands h5py the row and the user slice as one index,
+`h5py.Dataset[base_index, *user_slice]` (`utils.read_slice`). HDF5 then reads
+only the chunks the slice touches, not the whole row.
 
 Dispatched via `adapters_by_mimetype` on the private mimetype
 `application/x-hdf5-broker`, so it coexists with stock `application/x-hdf5`.
@@ -32,6 +32,8 @@ from tiled.structures.core import Spec, StructureFamily
 from tiled.structures.data_source import DataSource
 from tiled.type_aliases import JSON
 from tiled.utils import path_from_uri
+
+from .utils import read_slice
 
 
 class LazyHDF5ArrayAdapter(Adapter[ArrayStructure]):
@@ -143,29 +145,20 @@ class LazyHDF5ArrayAdapter(Adapter[ArrayStructure]):
         debug/bench_open_cost.py). Avoids cross-thread file-handle sharing.
         """
         with h5py.File(self._file_path, "r", locking=False) as f:
-            ds = f[self._dataset_path]
-            if self._base_index is not None:
-                # h5py reads exactly the bytes of the one chunk at base_index.
-                row = ds[self._base_index]
-                arr = row[tuple(slice)] if slice else row
-            else:
-                arr = ds[tuple(slice)] if slice else ds[...]
-            return numpy.asarray(arr)
+            return numpy.asarray(read_slice(f[self._dataset_path], self._base_index,
+                                            tuple(slice) if slice else None))
 
     def read_block(
         self,
         block: NDBlock,
         slice: NDSlice = NDSlice(...),
     ) -> NDArray[Any]:
-        """Read a dask-style block of the registered entity."""
+        """Read a dask-style block of the registered entity, then ``slice`` within it.
+
+        Only the block is read; a block is one chunk of the registered structure, so
+        slicing it in memory costs at most one chunk.
+        """
         block_slice = block.slice_from_chunks(self._structure.chunks)
         with h5py.File(self._file_path, "r", locking=False) as f:
-            ds = f[self._dataset_path]
-            if self._base_index is not None:
-                row = ds[self._base_index]
-                arr = row[tuple(block_slice)]
-            else:
-                arr = ds[tuple(block_slice)]
-            if slice:
-                arr = arr[tuple(slice)]
-            return numpy.asarray(arr)
+            arr = read_slice(f[self._dataset_path], self._base_index, tuple(block_slice))
+        return numpy.asarray(arr[tuple(slice)] if slice else arr)
