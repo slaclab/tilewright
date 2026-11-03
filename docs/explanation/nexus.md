@@ -20,6 +20,7 @@ generic ways to preserve the useful structure.
 | NeXus need | Contract feature | Catalog result |
 |---|---|---|
 | Scalars in several groups | `params.groups` | Nested, queryable entity metadata |
+| Scalars written as length-1 arrays, shape `(1,)` | Automatic: read like 0-dim scalars | Scalar metadata, strings decoded |
 | Nested groups such as `NXdetector` | `params.recursive: true` | Deeper nested metadata |
 | Collections containing unwanted datasets | `params.exclude` | Selected paths are skipped |
 | Attributes on scalar fields | Automatic capture | Labels such as `instrument.Ei_units` |

@@ -19,16 +19,19 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from .contract import (
     ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec, SharedAxisSpec,
@@ -63,11 +66,52 @@ def read_yaml(yaml_path):
 
 
 def stamp_key(yaml_path, raw, key):
-    """Write ``key:`` into the YAML right after ``label:`` (comments kept)."""
+    """Write ``key:`` into the YAML as one new line right after the ``label:`` line.
+
+    Every other byte stays as the author wrote it: comments, quoting, flow lists, folded
+    text, line widths. A label that spans several lines gets the key line just before
+    it instead. A placement is kept only if the file then parses to its old data plus
+    ``key``; when neither does (an empty ``key:``, a top-level flow mapping), the
+    document is dumped whole, which keeps comments but not the layout. Returns whether
+    the file was written.
+    """
     if raw.get("key") == key:
         return False
-    pos = list(raw.keys()).index("label") + 1 if "label" in raw else 0
-    raw.insert(pos, "key", key)
+    with open(yaml_path, newline="") as f:
+        text = f.read()
+    safe = YAML(typ="safe")
+
+    def parses_as_before_plus_key(candidate):
+        try:
+            got = safe.load(candidate)
+        except YAMLError:
+            return False
+        return isinstance(got, dict) and got.pop("key", None) == key and repr(got) == before
+
+    try:
+        before = repr(safe.load(text))
+    except YAMLError:
+        before = None
+    if before is not None and "label" in raw and "key" not in raw:
+        line, col = raw.lc.key("label")
+        # Split where the YAML reader counts lines, keeping each line's own break.
+        parts = re.split(r"(\r\n|[\r\n\x85\u2028\u2029])", text)
+        breaks = parts[1::2]
+        lines = [s + b for s, b in zip(parts[0::2], breaks + [""])]
+        eol = breaks[line] if line < len(breaks) else (breaks[0] if breaks else "\n")
+        stamp = " " * col + f"key: {key}"
+        for at in (line + 1, line):
+            head, tail = "".join(lines[:at]), "".join(lines[at:])
+            candidate = head + stamp + eol + tail if at < len(lines) else head + eol + stamp
+            if parses_as_before_plus_key(candidate):
+                with open(yaml_path, "w", newline="") as f:
+                    f.write(candidate)
+                return True
+
+    if "key" in raw:
+        raw["key"] = key
+    else:
+        raw.insert(list(raw.keys()).index("label") + 1 if "label" in raw else 0, "key", key)
     with open(yaml_path, "w") as f:
         _yaml().dump(raw, f)
     return True
@@ -121,7 +165,7 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
                               "groups": walker.groups}[tag](files)
         shared_rows = _shared_axis_rows(files, Path(body.directory), cfg.shared)
 
-    _check_collisions(ent_rows, key, identity)
+    _check_collisions(ent_rows, key, cfg.source)
     for row in ent_rows:
         row.pop("_provenance", None)
 
@@ -171,23 +215,60 @@ def _sha256_file(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _check_collisions(ent_rows, key, identity):
-    """Two entities with the same uid is a contract error, named, never a silent merge."""
+def _check_collisions(ent_rows, key, source):
+    """Two entities with the same uid is a contract error, named, never a silent merge.
+
+    For every shared uid the report says where each entity came from and lists each
+    column (parameter) whose values differ between them, one value per entity in that
+    order; under ``identity: params`` it also shows the parameters they share. One Fix
+    line follows, chosen by the source's tag and identity.
+    """
     by_uid = {}
     for row in ent_rows:
         by_uid.setdefault(row["uid"], []).append(row)
     dupes = {u: rows for u, rows in by_uid.items() if len(rows) > 1}
     if not dupes:
         return
+    table = source.tag == "table"
+    by_params = not table and source.identity == Identity.params
     lines = [f"{key}: {sum(len(r) for r in dupes.values())} entities share "
              f"{len(dupes)} uids; every entity must be distinct."]
-    for u, rows in list(dupes.items())[:3]:
-        where = ", ".join(str(r.get("_provenance", "?")) for r in rows[:4])
-        shared = {k: v for k, v in rows[0].items()
-                  if not k.startswith("_") and k not in ("uid", "source_group")}
-        lines.append(f"  uid {u}: {where}" + (f" ... ({len(rows)} entities)" if len(rows) > 4 else "")
-                     + f"  params {json.dumps(shared, default=str)[:160]}")
-    if identity == Identity.params:
+    cover, some_equal = [], False  # one differing column per uid tells every group apart
+    for u, rows in dupes.items():
+        where = ", ".join(str(r.get("_provenance", "?")) for r in rows)
+        if table:
+            column = source.body.id
+            where = (f"{column}={json.dumps(rows[0].get(column), default=str)} at table "
+                     f"rows {where} (first data row = 0)")
+        lines.append(f"  uid {u}: {where}")
+        names = [k for k in dict.fromkeys(k for r in rows for k in r)
+                 if k not in ("uid", "source_group") and not k.startswith("_")]
+        equal, differing = {}, []
+        for name in names:
+            values = [json.dumps(r[name], default=str, sort_keys=True) if name in r
+                      else "(absent)" for r in rows]
+            if len(set(values)) == 1:
+                equal[name] = rows[0][name]
+                continue
+            lines.append(f"    {name}: " + " | ".join(
+                v if len(v) <= 60 else v[:57] + "..." for v in values))
+            differing.append(name)
+        if differing and not set(differing) & set(cover):
+            cover.append(differing[0])
+        if len(equal) == len(names):
+            some_equal = True
+            lines.append(f"    no {'column' if table else 'parameter'} differs")
+        if by_params and equal:
+            lines.append(f"    equal: {json.dumps(equal, default=str)[:160]}")
+    if table and cover:
+        lines.append(f"Fix: 'id' must name a column that is unique per row. Add one to the "
+                     f"table that joins {source.body.id} with the columns that differ "
+                     f"({', '.join(cover)}), and name it in 'id'."
+                     + (" Rows equal in every column are duplicates: de-duplicate the "
+                        "table." if some_equal else ""))
+    elif table:
+        lines.append("Fix: these rows are equal in every column; de-duplicate the table.")
+    elif by_params:
         lines.append("Fix: add a field that distinguishes them (a run number, a seed) to the "
                      "parameters, or set 'identity: provenance' under the source.")
     else:
@@ -218,7 +299,8 @@ def _to_python(val):
     if isinstance(val, np.generic):
         return val.item()
     if isinstance(val, np.ndarray):
-        return val.item() if val.size == 1 else val.tolist()
+        # a size-1 array is a scalar; its item can be bytes (an '|S' array), so convert it too
+        return _to_python(val.item()) if val.size == 1 else val.tolist()
     return val
 
 
@@ -295,7 +377,11 @@ def _read_params(container, spec: ParamsSpec, batch_size=None):
                 if not isinstance(obj, h5py.Dataset):
                     continue
                 key = ".".join(p for p in (gname, *rel.split("/")) if p)
-                if obj.ndim == 0:
+                # A scalar is a 0-dim or a size-1 dataset (NeXus writes scalars as shape
+                # (1,)). In 'batch' a scalar is broadcast to every row whatever N is, and a
+                # 1-D dataset of length N > 1 is one value per row. With N == 1 a length-1
+                # dataset is both, and both readings give the one row the same value.
+                if obj.ndim == 0 or obj.size == 1:
                     val = _to_python(obj[()])
                     out[key] = np.full(batch_size, val) if batch_size else val
                 elif batch_size and obj.ndim == 1 and obj.shape[0] == batch_size:
@@ -315,7 +401,12 @@ def _uid(payload):
 
 
 def _params_uid(key, params):
-    canonical = {k: round(v, 12) if isinstance(v, float) else v
+    # A float keeps 12 decimal places or 12 significant digits, whichever is more digits.
+    # From |v| >= 0.1 that is round(v, 12), the rule before #4, so those uids (nan and inf
+    # included) are unchanged. Below 0.1 it is 12 significant digits, so SI-unit values
+    # (1e-13 s) stay apart: 12 decimal places turned every |v| < 5e-13 into 0.0.
+    canonical = {k: (float(f"{v:.12g}") if abs(v) < 0.1 else round(v, 12))
+                 if isinstance(v, float) else v
                  for k, v in sorted(params.items())}
     return _uid(json.dumps({"ns": key, "params": canonical}, sort_keys=True, default=str))
 
@@ -427,7 +518,8 @@ class _Walker:
                                          f"rows but {self.artifacts[0].type!r} has {n}; every "
                                          f"artifact's leading axis is the entity axis")
                     art_info[art.type] = (ds.shape[1:], str(ds.dtype), _attrs(ds, label_of=""))
-                columns, labels = _read_params(f, spec, batch_size=n)
+                columns, labels = (_read_params(f, spec, batch_size=n)
+                                   if spec is not None else ({}, {}))
                 for i in range(n):
                     params = {k: _to_python(v[i]) for k, v in columns.items()}
                     prov = f"{rel}:{i}"
@@ -492,15 +584,14 @@ class _Walker:
         if "uid" in df.columns:
             raise ValueError(f"{path}: 'uid' is a reserved column name")
         ent_rows = []
-        for record in df.to_dict(orient="records"):
+        for i, record in enumerate(df.to_dict(orient="records")):
             params = {k: _to_python(v) for k, v in record.items()}
             for name, template in self.body.locator.items():
                 params[name] = template.format(**record)
-            prov = str(record[self.body.id])
-            uid = _uid(f"{self.key}:{prov}")
+            uid = _uid(f"{self.key}:{record[self.body.id]}")
             if uid in self.existing:
                 continue
-            ent_rows.append(self.entity(uid, params, {}, prov))
+            ent_rows.append(self.entity(uid, params, {}, i))  # row number, for the report
         print(f"  {path.name}: {len(ent_rows)} rows")
         return ent_rows
 

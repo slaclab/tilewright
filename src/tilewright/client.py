@@ -30,8 +30,11 @@ Usage:
 import os
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy as np
 import pandas as pd
+
+from .utils import read_slice
 
 
 def query_catalog(client, artifact_type, limit=None):
@@ -126,9 +129,8 @@ def load(entity, artifact_type, base_dir, slc=None):
 
     For readers on the same filesystem as the data. ``slc`` is applied *after* the batch
     row index (``ds[index][slc]``), which is the one detail that is easy to get wrong.
+    Both go to h5py as one index, so only what ``slc`` selects is read.
     """
     loc = locate(entity)[artifact_type]
     with h5py.File(os.path.join(base_dir, loc["file"]), "r") as f:
-        ds = f[loc["dataset"]]
-        arr = ds[loc["index"]] if loc["index"] is not None else ds[()]
-    return arr if slc is None else arr[slc]
+        return read_slice(f[loc["dataset"]], loc["index"], slc)

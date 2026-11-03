@@ -44,6 +44,16 @@ parameters would collide, so `tilewright manifest` refuses that, names the colli
 entities and the parameters they share, and offers the two fixes: add a distinguishing
 parameter, or switch identity.
 
+A float is hashed at 12 decimal places, or at 12 significant digits when that keeps more
+digits, which is below 0.1. So float noise such as `0.1 + 0.2` is not a new entity, times
+of 1e-13 s are as distinct as temperatures of 300 K, and timestamps in seconds a
+millisecond apart stay apart. (At 12 decimal places alone, every value below 5e-13 would
+hash as 0.0.) From about 1e4 up, 12 decimal places are more digits than a float64 holds,
+so there any difference in the stored value is a new entity. Two floats that are equal at
+the kept precision are one entity: `2.0` and `2.0000000000001`, or `4e-15` and
+`4.0000000000001e-15`. Entities that differ only in such values collide; the fixes are
+the same two.
+
 **`provenance`**: a hash of where the entity came from, the file path relative to the
 directory plus its row or group. It never collides. It is forced when a source declares
 `params: null` and for `table` sources, where the `id` column is the identity, and it is
