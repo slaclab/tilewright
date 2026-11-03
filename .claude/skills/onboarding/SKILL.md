@@ -82,7 +82,8 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
   `exclude` for blobs, `recursive` for subgroups), and any **shared axes** (arrays
   *identical* in every file → `shared:`; an axis that varies per entity is an artifact).
-  Field attributes (`units`, ...) are captured automatically — nothing to declare.
+  Field attributes (`units`, ...) are captured automatically — nothing to declare. A
+  size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.
 - **Decide identity.** The default hashes parameter values, so two entities with identical
   parameters would collide — `tilewright manifest` refuses that and names them. Repeated
   measurements (same settings, different runs) are the usual case: put a run number in the

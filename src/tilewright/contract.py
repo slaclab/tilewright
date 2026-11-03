@@ -144,9 +144,9 @@ class ParamsSpec(BaseModel):
     from_: Literal["datasets", "attrs"] = Field(
         default="datasets",
         alias="from",
-        description="'datasets': 0-dim datasets in the group are parameters (in 'batch', a "
-        "1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 "
-        "attributes are the parameters.",
+        description="'datasets': 0-dim and size-1 datasets (shape (1,), as NeXus writes "
+        "scalars) in the group are parameters (in 'batch', a 1-D dataset of length N is "
+        "one value per entity). 'attrs': the group's HDF5 attributes are the parameters.",
     )
     recursive: bool = Field(
         default=False,

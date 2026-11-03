@@ -166,6 +166,30 @@ class TestBatch:
         with pytest.raises(KeyError, match="shared axis 'nope'"):
             run(tmp_path, cfg)
 
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_size_one_member_is_broadcast_whatever_the_batch_length(self, tmp_path, identity):
+        # a NeXus-style scalar, shape (1,), in batches of 3 rows and in a batch of 1 row (#4)
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["identity"] = identity
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params"].create_dataset("gain", data=[1.5 + b])
+        (tmp_path / "sim" / "batch_2").mkdir()
+        with h5py.File(tmp_path / "sim" / "batch_2" / "sim.h5", "w") as f:
+            g = f.create_group("params")
+            g.create_dataset("alpha", data=[99.0])  # length N == 1: one value per row, too
+            g.create_dataset("beta", data=[0.5])
+            g.create_dataset("seed", data=2)
+            g.create_dataset("gain", data=[3.5])
+            f.create_dataset("spectra", data=np.zeros((1, 5, 2)))
+            f.create_dataset("eloss", data=np.linspace(0, 1, 5))
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 7 and ent["uid"].nunique() == 7
+        assert dict(zip(ent["alpha"], ent["gain"])) == {
+            0: 1.5, 1: 1.5, 2: 1.5, 10: 2.5, 11: 2.5, 12: 2.5, 99: 3.5}
+        assert set(ent["beta"]) == {0.5} and sorted(set(ent["seed"])) == [0, 1, 2]
+        assert sorted(art.loc[art["file"] == "batch_2/sim.h5", "index"].dropna()) == [0]
+
     def test_params_null_gives_provenance_uids(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         cfg["source"]["batch"]["params"] = None
@@ -353,6 +377,29 @@ def nexus(tmp_path):
                           {"type": "E", "dataset": "/entry/data/E"}]}
 
 
+def nexus_shape_one_dataset(tmp_path, identity):
+    """Two scans whose scalars are all shape (1,): float, float32, int32, '|S' and vlen str."""
+    d = tmp_path / "dmc"
+    d.mkdir()
+    for i, temp in enumerate((4.0017, 300.0)):
+        with h5py.File(d / f"dmc{i + 1:02d}.h5", "w") as f:
+            s = f.create_group("entry1/sample")
+            s.create_dataset("sample_temperature", data=[temp]).attrs["units"] = "K"
+            s.create_dataset("sample_name", data=np.array([b"Ga0.94Mn0.04Sb_8mm"]))
+            s.create_dataset("comment", data=["powder, 8 mm can"], dtype=h5py.string_dtype())
+            s.create_dataset("mass", data=0.5)
+            m = f.create_group("entry1/monochromator")
+            lam = m.create_dataset("lambda", data=np.array([2.5666], dtype="float32"))
+            lam.attrs["units"] = "Angstrom"
+            m.create_dataset("scan_index", data=np.array([i + 1], dtype="int32"))
+            f.create_dataset("entry1/data/counts", data=np.arange(4) * i)
+    return {"label": "DMC Test", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*.h5", "identity": identity,
+                                 "params": {"groups": {"sample": "/entry1/sample",
+                                                       "monochromator": "/entry1/monochromator"}}}},
+            "artifacts": [{"type": "counts", "dataset": "/entry1/data/counts"}]}
+
+
 class TestParameterGroups:
 
     def test_groups_become_dotted_columns(self, tmp_path, nexus):
@@ -383,6 +430,21 @@ class TestParameterGroups:
         by_type = art.set_index("type")
         assert by_type.loc["data", "long_name"].iloc[0] == "Intensity"
         assert by_type.loc["E", "units"].iloc[0] == "meV"
+
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_shape_one_scalars_are_parameters(self, tmp_path, identity):
+        # SINQ DMC-style NeXus: every scalar is a length-1 array, none is 0-dim (#4)
+        ent, _ = run(tmp_path, nexus_shape_one_dataset(tmp_path, identity))
+        assert len(ent) == 2 and ent["uid"].nunique() == 2
+        row = ent.sort_values("sample.sample_temperature").iloc[0]
+        assert row["sample.sample_temperature"] == 4.0017
+        assert row["sample.sample_temperature_units"] == "K"
+        assert row["sample.sample_name"] == "Ga0.94Mn0.04Sb_8mm"  # decoded, not bytes
+        assert row["sample.comment"] == "powder, 8 mm can"
+        assert row["sample.mass"] == 0.5  # a 0-dim dataset beside them
+        assert row["monochromator.lambda"] == pytest.approx(2.5666)
+        assert row["monochromator.lambda_units"] == "Angstrom"
+        assert row["monochromator.scan_index"] == 1
 
     def test_links_are_resolved_by_the_library(self, tmp_path):
         d = tmp_path / "links"
