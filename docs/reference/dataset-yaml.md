@@ -70,7 +70,7 @@ One HDF5 file per entity.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the entity files under 'directory'. |
-| `params` | mapping or `null` | no |  | Where the parameters live in each file; default: 0-dim datasets at the root. 'null' declares that entities have no parameters (identity becomes provenance). |
+| `params` | mapping or `null` | no |  | Where the parameters live in each file; default: the root. Only scalar datasets are parameters (see 'from'); any other member, a (6,) array say, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.batch`
 
@@ -82,7 +82,7 @@ Many entities stacked along axis 0 of each file's datasets; entity i is row i.
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the batch files under 'directory'. |
-| `params` | mapping | no |  | Group holding one 1-D dataset of length N per parameter (0-dim datasets are broadcast to every entity in the file). |
+| `params` | mapping or `null` | no |  | Where the parameters live in each file; default: the root. N is the file's leading axis (that of the first artifact). Only 1-D datasets of length N are per-entity values, one per row; 0-dim datasets are broadcast to every entity in the file; any other member, (N, 1) included, is skipped without a message. 'null' declares that entities have no parameters (identity becomes provenance). |
 
 ### `source.groups`
 
@@ -95,7 +95,7 @@ One HDF5 group per entity inside each file.
 | `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `pattern` | str | no | `**/*.h5` | Glob for the files under 'directory'. |
 | `entity_group` | str | no |  | Group whose subgroups are the entities ('/samples'). Default: the file's top-level groups. |
-| `params` | mapping or `null` | no |  | Where the parameters live, relative to each entity group; default: the entity group's own 0-dim datasets. 'null' declares none. |
+| `params` | mapping or `null` | no |  | Where the parameters live, relative to each entity group; default: the entity group itself. Only scalar datasets are parameters (see 'from'); any other member, a (6,) array say, is skipped without a message. 'null' declares none. |
 
 ### `source.table`
 
@@ -105,9 +105,8 @@ A sidecar table whose rows are the entities: for data Tiled cannot read.
 |---|---|---|---|---|
 | `directory` | str | **yes** |  | Absolute path of the data root on the machine that runs 'tilewright manifest' (and '--upload'). |
 | `server_base_dir` | str | no |  | The same root as the Tiled server sees it, when its mount differs. Ignored for --upload. |
-| `identity` | <enum 'Identity | no | `params` | How entity uids are computed; see Identity. Write it only to override. |
 | `path` | str | **yes** |  | Parquet or CSV file, relative to 'directory'. Every column becomes entity metadata. |
-| `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity. |
+| `id` | str | **yes** |  | Column whose value identifies a row; it is the entity's identity and must be unique across rows. When no column is, add one to the table (system_id and tilt joined, say). Changing it re-keys every entity: delete the registered dataset, then register again. |
 | `locator` | mapping | no |  | Extra metadata rendered per row from '{column}' templates, e.g. {globus_url: 'https://.../{filename}'}. |
 
 ### `params`
@@ -130,7 +129,9 @@ queryable as `Key("instrument.Ei") > 50`.
 
 ### `identity`
 
-How an entity's uid is computed (``source.<tag>.identity``).
+How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+    ``batch`` and ``groups``; a ``table`` has no ``identity`` key, its uid hashes its ``id``
+    column).
 
     - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
       entity across re-registration and file moves; two entities with identical

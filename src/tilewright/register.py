@@ -45,6 +45,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy as np
 import pandas as pd
 from dask.array.core import normalize_chunks
@@ -76,6 +77,29 @@ _DEFAULT_MAX_WORKERS = 8
 # walking the hierarchy. Manifest columns of the same name win via
 # setdefault.
 INHERITED_KEYS = ("amsc_public",)
+
+
+def infinite_value_notes(dataset_key, dataset_metadata, ent_df, art_df):
+    """One note per key that holds ``inf`` or ``-inf``, which is not a JSON number: the
+    Tiled client sends it as null. The manifest keeps the value, so no uid changes."""
+    notes = []
+
+    def walk(value, key):
+        if isinstance(value, Mapping):
+            for k, v in value.items():
+                walk(v, f"{key}.{k}" if key else str(k))
+        elif isinstance(value, float) and np.isinf(value):
+            notes.append(f"note: {dataset_key} metadata {key} = {value} is not a JSON "
+                         f"number; stored as null")
+
+    walk(dataset_metadata, "")
+    for name, df in (("entities", ent_df), ("artifacts", art_df)):
+        for col in df.select_dtypes("number").columns:
+            n = int(np.isinf(df[col]).sum())
+            if n:
+                notes.append(f"note: {dataset_key} {col} is inf or -inf in {n} {name}, "
+                             f"which is not a JSON number; stored as null")
+    return notes
 
 
 def require_shape_dtype(art_df):
@@ -157,8 +181,9 @@ def create_data_source(art_row, base_dir, server_base_dir=None):
 
     # Create data source. Default dispatches to the broker's
     # LazyHDF5ArrayAdapter (server config must map it) — reads only the
-    # bytes a user slice asks for, unlike stock application/x-hdf5 which
-    # pulls the whole dataset into dask before slicing.
+    # chunks a user slice touches (row and slice in one h5py index), unlike
+    # stock application/x-hdf5 which pulls the whole dataset into dask before
+    # slicing.
     data_source = DataSource(
         mimetype=(
             to_json_safe(art_row["mimetype"])
@@ -477,11 +502,16 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     art_fail_count = 0
     stale_count = 0
 
+    # Values loaded from a YAML are ruamel subclasses (ScalarFloat, ...), which the
+    # Tiled client cannot serialize; everything below sends plain JSON types.
+    dataset_metadata = to_json_safe(dataset_metadata)
     storage = STORAGE_UPLOADED if upload else STORAGE_EXTERNAL
     parent_client = dataset_container(client, dataset_key, dataset_metadata, storage,
                                       fingerprint, update=update, adopt=adopt)
 
     require_shape_dtype(art_df)
+    for note in infinite_value_notes(dataset_key, dataset_metadata, ent_df, art_df):
+        print(f"  {note}")
     ent_columns = list(ent_df.columns)
     art_columns = list(art_df.columns)
     inherited = {k: dataset_metadata[k] for k in INHERITED_KEYS if k in dataset_metadata}
@@ -565,7 +595,7 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
                            shared_added, shared_skipped, stale_count)
 
 
-def verify_registration_http(client, dataset_keys=None):
+def verify_registration_http(client, dataset_keys=None, artifact_rows=None):
     """Smoke-probe the datasets just registered (or the first one on the server).
 
     For each key: the dataset container, its shared axes, its first entity and that
@@ -573,6 +603,11 @@ def verify_registration_http(client, dataset_keys=None):
     check; it catches structural breakage (empty container, no array children) without
     walking the catalog. A registration can pass this and still serve nothing: the
     read-back in the onboarding skill is the real proof.
+
+    ``artifact_rows`` maps a dataset key to the number of entity artifact rows in the
+    manifest it was registered from. A dataset with none (a ``table`` source) has no
+    array children to probe, whatever its entities' metadata keys are called. A dataset
+    not in the mapping is probed, and an entity with no array children is a warning.
     """
     print("\n" + "=" * 50)
     print("Verification")
@@ -584,10 +619,10 @@ def verify_registration_http(client, dataset_keys=None):
         print("No datasets registered yet.")
         return
     for ds_key in (dataset_keys or all_keys[:1]):
-        _verify_dataset(client, ds_key)
+        _verify_dataset(client, ds_key, (artifact_rows or {}).get(ds_key))
 
 
-def _verify_dataset(client, ds_key):
+def _verify_dataset(client, ds_key, artifact_rows=None):
     try:
         ds = client[ds_key]
     except KeyError:
@@ -620,6 +655,12 @@ def _verify_dataset(client, ds_key):
     path_keys = [k for k in ent_meta if k.startswith("path_")]
     print(f"\nEntity '{ent_key}':")
     print(f"  metadata keys: {len(ent_meta)} (locators: {len(path_keys)})")
+    if artifact_rows == 0:
+        # The manifest has no entity artifacts (a table source, by contract), so there
+        # are no array children to probe. A metadata key's name decides nothing here: a
+        # table column may be called path_<anything>.
+        print("  no artifacts declared: the entity is its metadata")
+        return
 
     art_keys = list(ent.keys()) if hasattr(ent, "keys") else []
     print(f"  artifact children: {len(art_keys)}")

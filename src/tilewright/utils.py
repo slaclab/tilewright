@@ -4,12 +4,14 @@ Shared Utilities.
 Common functions used across registration scripts.
 """
 
+import datetime
+import os
 import re
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
-
-import os
+from ruamel.yaml.scalarbool import ScalarBoolean
 
 
 def server_settings(url=None, api_key=None):
@@ -63,20 +65,56 @@ ARTIFACT_STANDARD_COLS = {"uid", "type", "file", "dataset", "index", "shape", "d
 
 
 def to_json_safe(value):
-    """Convert a value to a JSON-serializable type."""
-    if isinstance(value, (np.integer,)):
+    """Convert a value to plain JSON types: dict, list, str, int, float, bool or None.
+
+    Recurses into mappings, lists, tuples and arrays. A subclass of a builtin scalar
+    becomes the builtin: ruamel's round-trip loader returns ``ScalarFloat`` for every
+    float in a YAML, and the Tiled client's serializer (orjson) refuses float
+    subclasses. Dates and times become ISO 8601 strings; None, NaN and NaT become None.
+    """
+    if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.bool_):
         return bool(value)
-    if isinstance(value, (np.floating,)):
+    if isinstance(value, np.floating):
         return float(value)
-    if isinstance(value, (np.ndarray,)):
-        return value.tolist()
-    if isinstance(value, (list, dict)):
-        return value
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, Mapping):
+        return {str(k): to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_json_safe(v) for v in value]
     if pd.isna(value):
         return None
+    if isinstance(value, (bool, ScalarBoolean)):  # ScalarBoolean is an int subclass
+        return bool(value)
+    for plain in (str, int, float):
+        if isinstance(value, plain):
+            return plain(value)
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
     return value
+
+
+def read_slice(ds, row, slc):
+    """``ds[row][slc]`` for an h5py dataset, reading only what ``slc`` selects.
+
+    ``row`` is a batch entity's index on axis 0, or None for a whole dataset. The row and
+    ``slc`` go to h5py as one index, so HDF5 reads only the chunks the slice touches;
+    indexing the row first would read all of it. h5py takes ints, ``...`` and slices with
+    a positive step; anything else (a negative step, an index list, a mask) reads the row
+    and slices it in numpy.
+    """
+    row = () if row is None else (row,)
+    if slc is None:
+        return ds[row]
+    slc = slc if isinstance(slc, tuple) else (slc,)
+    if all(s is Ellipsis
+           or isinstance(s, slice) and (s.step or 1) > 0
+           or isinstance(s, (int, np.integer)) and not isinstance(s, bool)
+           for s in slc):
+        return ds[row + slc]
+    return ds[row][slc]
 
 
 def check_server(url=None, api_key=None):
