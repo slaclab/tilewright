@@ -24,6 +24,6 @@ source:
   table:
     directory: /abs/path/to/cncs
     path: runs.parquet
-    id: run_number
+    id: run_number          # unique per row; if no column is, add one to the table
     locator:
       globus_url: "https://app.globus.org/file-manager?origin_path=/cncs/{filename}"

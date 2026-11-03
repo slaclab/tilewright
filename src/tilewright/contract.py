@@ -217,9 +217,10 @@ class FilesSource(_HDF5SourceBase):
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live in each file; default: 0-dim datasets at "
-        "the root. 'null' declares that entities have no parameters (identity becomes "
-        "provenance).",
+        description="Where the parameters live in each file; default: the root. Only "
+        "scalar datasets are parameters (see 'from'); any other member, a (6,) array say, "
+        "is skipped without a message. 'null' declares that entities have no parameters "
+        "(identity becomes provenance).",
     )
 
 
@@ -230,10 +231,13 @@ class BatchSource(_HDF5SourceBase):
         default="**/*.h5",
         description="Glob for the batch files under 'directory'.",
     )
-    params: ParamsSpec = Field(
+    params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Group holding one 1-D dataset of length N per parameter (0-dim "
-        "datasets are broadcast to every entity in the file).",
+        description="Where the parameters live in each file; default: the root. N is the "
+        "file's leading axis (that of the first artifact). Only 1-D datasets of length N "
+        "are per-entity values, one per row; 0-dim datasets are broadcast to every entity "
+        "in the file; any other member, (N, 1) included, is skipped without a message. "
+        "'null' declares that entities have no parameters (identity becomes provenance).",
     )
 
 
@@ -252,7 +256,9 @@ class GroupsSource(_HDF5SourceBase):
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live, relative to each entity group; default: "
-        "the entity group's own 0-dim datasets. 'null' declares none.",
+        "the entity group itself. Only scalar datasets are parameters (see 'from'); any "
+        "other member, a (6,) array say, is skipped without a message. 'null' declares "
+        "none.",
     )
 
 
@@ -266,7 +272,10 @@ class TableSource(_SourceBase):
     )
     id: str = Field(
         min_length=1,
-        description="Column whose value identifies a row; it is the entity's identity.",
+        description="Column whose value identifies a row; it is the entity's identity and "
+        "must be unique across rows. When no column is, add one to the table (system_id "
+        "and tilt joined, say). Changing it re-keys every entity: delete the registered "
+        "dataset, then register again.",
     )
     locator: dict[str, str] = Field(
         default_factory=dict,

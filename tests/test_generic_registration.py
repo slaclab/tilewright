@@ -658,3 +658,41 @@ class TestStorageMarker:
             self._drive(vdp_manifests, existing_metadata={}, upload=True)
         # ...but re-registering them externally still works.
         self._drive(vdp_manifests, existing_metadata={}, upload=False)
+
+
+# ─── Infinite floats: what JSON cannot carry (#33) ──────────────────────────
+
+
+class TestInfiniteValues:
+    """inf and -inf are not JSON numbers, so the server stores null. register says so once
+    per key; the manifest, and so every uid, is untouched."""
+
+    def test_one_note_per_key_with_a_count(self, vdp_manifests, capsys):
+        from tilewright.register import register_dataset_http
+
+        ent_df, art_df, base_dir = vdp_manifests
+        ent_df = ent_df.head(2).copy()
+        ent_df["n_effective"] = float("inf")
+        uids = list(ent_df["uid"])
+        client = MagicMock()
+        client.__contains__.return_value = False
+        parent = client.create_container.return_value
+        parent.__contains__.return_value = False
+        capsys.readouterr()
+        register_dataset_http(client, ent_df, art_df, base_dir, "T", dataset_key="T",
+                              dataset_metadata={"limits": {"max_rate": float("-inf")}},
+                              max_workers=1)
+        notes = [line.strip() for line in capsys.readouterr().out.splitlines()
+                 if "is not a JSON number" in line]
+        assert notes == [
+            "note: T metadata limits.max_rate = -inf is not a JSON number; stored as null",
+            "note: T n_effective is inf or -inf in 2 entities, which is not a JSON number; "
+            "stored as null",
+        ]
+        assert list(ent_df["uid"]) == uids
+
+    def test_finite_values_give_no_note(self, vdp_manifests):
+        from tilewright.register import infinite_value_notes
+
+        ent_df, art_df, _ = vdp_manifests
+        assert infinite_value_notes("T", {"rate": 1.5, "n": 3}, ent_df, art_df) == []

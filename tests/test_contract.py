@@ -5,7 +5,10 @@ trip into a DatasetConfig. The concept budget at the bottom pins the contract's 
 that growth fails a test, not a review.
 """
 
+from pathlib import Path
+
 import pytest
+from ruamel.yaml import YAML
 
 from tilewright.contract import (
     SOURCE_TAGS, TOP_LEVEL_KEYS, ContractError, DatasetConfig, Identity, load_dataset,
@@ -14,6 +17,7 @@ from tilewright.contract import (
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
+EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
 
 
 def files_cfg(**over):
@@ -82,6 +86,12 @@ class TestAccepted:
         t = load_dataset(table)[0]
         assert t.source.tag == "table" and t.source.identity == Identity.provenance
 
+    def test_batch_params_null_forces_provenance(self):
+        raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
+        cfg, warnings = load_dataset(raw)
+        assert warnings == [] and cfg.source.body.params is None
+        assert cfg.source.identity == Identity.provenance
+
     def test_metadata_extras_kept(self):
         raw = files_cfg()
         raw["metadata"]["prior_distribution"] = "uniform"
@@ -132,10 +142,6 @@ class TestRejected:
         raw = files_cfg()
         raw["source"]["files"]["params"] = {"group": "/p", "groups": {"a": "/a"}}
         assert any("mutually exclusive" in e for e in errors_of(raw))
-
-    def test_batch_params_cannot_be_null(self):
-        raw = files_cfg(source={"batch": {"directory": "/d", "params": None}})
-        assert any("source.batch.params" in e for e in errors_of(raw))
 
     def test_table_has_no_identity(self):
         raw = files_cfg(source={"table": {"directory": "/d", "path": "t.csv", "id": "run",
@@ -202,6 +208,19 @@ class TestKeyAndFingerprint:
         b, _ = load_dataset(raw)
         assert source_fingerprint(a) != source_fingerprint(b)
 
+    # Computed on b268731. A contract change must not re-fingerprint an existing YAML: a
+    # changed value here means registered datasets would be refused.
+    GOLDEN = {"batch": "2577590f34841be2", "files": "5dd61ef0e916076d",
+              "files_nexus": "05ba87a48b5c5ce7", "groups": "983ce13fccafbc8e",
+              "table": "fb36ed8c86a417f5"}
+
+    def test_fingerprint_of_every_example_is_pinned(self):
+        found = {}
+        for path in sorted(EXAMPLES.glob("*.yml")):
+            cfg, _ = load_dataset(YAML().load(path.read_text()))
+            found[path.stem] = source_fingerprint(cfg)
+        assert found == self.GOLDEN
+
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()
         raw["source"]["files"]["server_base_dir"] = "/mnt/runs"
@@ -247,6 +266,36 @@ class TestVocabulary:
         md = {"producer": "Mantid"}
         resolve_aliases(md, vocab)
         assert md["producer"] == "mantid"
+
+    def test_aliases_are_resolved_in_place_so_a_flow_list_keeps_its_style(self):
+        """A list facet is the same list afterwards, changed only where an alias was
+        (#14): a YAML flow list written back stays a flow list."""
+        import io
+
+        from ruamel.yaml import YAML
+
+        yaml = YAML()
+        raw = yaml.load("metadata:\n  method: [RIXS, EDRIXS]\n  material: NiPS3\n"
+                        "  producer: [Mantid]\n")
+        md = raw["metadata"]
+        method, producer = md["method"], md["producer"]
+        notes = resolve_aliases(md, load_vocabulary())
+        assert notes == ["metadata.method: alias 'EDRIXS' -> 'RIXS'",
+                         "metadata.producer: alias 'Mantid' -> 'mantid'"]
+        assert md["method"] is method and md["producer"] is producer
+        out = io.StringIO()
+        yaml.dump(raw, out)
+        assert out.getvalue() == ("metadata:\n  method: [RIXS, RIXS]\n  material: NiPS3\n"
+                                  "  producer: [mantid]\n")
+
+    def test_a_list_without_aliases_is_left_alone(self):
+        from ruamel.yaml import YAML
+
+        raw = YAML().load("metadata:\n  method: [RIXS]\n  data_type: simulation\n"
+                          "  material: NiPS3\n")
+        method = raw["metadata"]["method"]
+        load_dataset({**files_cfg(), "metadata": raw["metadata"]})
+        assert raw["metadata"]["method"] is method and method.fa.flow_style()
 
 
 # ---------------------------------------------------------------------------

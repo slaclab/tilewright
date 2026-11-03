@@ -129,6 +129,10 @@ load(ent, "rixs_spectrum", base_dir="/mnt/shared/rixs/data/my_dataset")   # the 
 row index is applied before any slice you pass, which is the one detail that is easy to
 get wrong when writing this by hand.
 
+`tilewright.client` imports [`hdf5plugin`](https://pypi.org/project/hdf5plugin/), so
+arrays compressed with the filters it ships (LZ4, Bitshuffle, Blosc, Zstd, ...) read like
+gzip ones. If you open the files with h5py yourself, `import hdf5plugin` first.
+
 For query-then-bulk-load:
 
 ```python
