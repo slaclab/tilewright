@@ -42,7 +42,8 @@ def resolve_aliases(metadata, vocab):
     """Rewrite aliases in ``metadata`` (a dict, mutated in place) to canonical ids.
 
     Returns informational messages, one per rewrite. A facet that holds a list
-    (``method``) is rewritten element-wise. Nothing else in the metadata is touched.
+    (``method``) is rewritten element by element in the same list, so a YAML list keeps
+    its style. Only an alias is replaced; nothing else in the metadata is touched.
     """
     messages = []
     if not isinstance(metadata, dict):
@@ -52,16 +53,16 @@ def resolve_aliases(metadata, vocab):
         value = metadata.get(field)
         if value is None or not aliases:
             continue
-        values = value if isinstance(value, list) else [value]
-        resolved = []
-        for v in values:
+        if isinstance(value, list):
+            places = [(value, i) for i in range(len(value))]
+        else:
+            places = [(metadata, field)]
+        for holder, slot in places:
+            v = holder[slot]
             canonical = aliases.get(v)
-            if canonical is None:
-                resolved.append(v)
-                continue
-            resolved.append(canonical)
-            messages.append(f"metadata.{field}: alias '{v}' -> '{canonical}'")
-        metadata[field] = resolved if isinstance(value, list) else resolved[0]
+            if canonical is not None:
+                holder[slot] = canonical
+                messages.append(f"metadata.{field}: alias '{v}' -> '{canonical}'")
     return messages
 
 

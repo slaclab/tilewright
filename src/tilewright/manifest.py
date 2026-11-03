@@ -19,6 +19,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -30,6 +31,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from .contract import (
     ArtifactSpec, ContractError, DatasetConfig, Identity, ParamsSpec, SharedAxisSpec,
@@ -64,11 +66,52 @@ def read_yaml(yaml_path):
 
 
 def stamp_key(yaml_path, raw, key):
-    """Write ``key:`` into the YAML right after ``label:`` (comments kept)."""
+    """Write ``key:`` into the YAML as one new line right after the ``label:`` line.
+
+    Every other byte stays as the author wrote it: comments, quoting, flow lists, folded
+    text, line widths. A label that spans several lines gets the key line just before
+    it instead. A placement is kept only if the file then parses to its old data plus
+    ``key``; when neither does (an empty ``key:``, a top-level flow mapping), the
+    document is dumped whole, which keeps comments but not the layout. Returns whether
+    the file was written.
+    """
     if raw.get("key") == key:
         return False
-    pos = list(raw.keys()).index("label") + 1 if "label" in raw else 0
-    raw.insert(pos, "key", key)
+    with open(yaml_path, newline="") as f:
+        text = f.read()
+    safe = YAML(typ="safe")
+
+    def parses_as_before_plus_key(candidate):
+        try:
+            got = safe.load(candidate)
+        except YAMLError:
+            return False
+        return isinstance(got, dict) and got.pop("key", None) == key and repr(got) == before
+
+    try:
+        before = repr(safe.load(text))
+    except YAMLError:
+        before = None
+    if before is not None and "label" in raw and "key" not in raw:
+        line, col = raw.lc.key("label")
+        # Split where the YAML reader counts lines, keeping each line's own break.
+        parts = re.split(r"(\r\n|[\r\n\x85\u2028\u2029])", text)
+        breaks = parts[1::2]
+        lines = [s + b for s, b in zip(parts[0::2], breaks + [""])]
+        eol = breaks[line] if line < len(breaks) else (breaks[0] if breaks else "\n")
+        stamp = " " * col + f"key: {key}"
+        for at in (line + 1, line):
+            head, tail = "".join(lines[:at]), "".join(lines[at:])
+            candidate = head + stamp + eol + tail if at < len(lines) else head + eol + stamp
+            if parses_as_before_plus_key(candidate):
+                with open(yaml_path, "w", newline="") as f:
+                    f.write(candidate)
+                return True
+
+    if "key" in raw:
+        raw["key"] = key
+    else:
+        raw.insert(list(raw.keys()).index("label") + 1 if "label" in raw else 0, "key", key)
     with open(yaml_path, "w") as f:
         _yaml().dump(raw, f)
     return True
