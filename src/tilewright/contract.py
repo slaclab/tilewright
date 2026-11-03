@@ -35,7 +35,9 @@ class StrEnum(str, Enum):
 
 
 class Identity(StrEnum):
-    """How an entity's uid is computed (``source.<tag>.identity``).
+    """How an entity's uid is computed (``source.<tag>.identity``, for ``files``,
+    ``batch`` and ``groups``; a ``table`` has no ``identity`` key, its uid hashes its ``id``
+    column).
 
     - ``params`` (default) — sha256 of the parameter *values*. The same physics is the same
       entity across re-registration and file moves; two entities with identical
@@ -142,9 +144,9 @@ class ParamsSpec(BaseModel):
     from_: Literal["datasets", "attrs"] = Field(
         default="datasets",
         alias="from",
-        description="'datasets': 0-dim datasets in the group are parameters (in 'batch', a "
-        "1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 "
-        "attributes are the parameters.",
+        description="'datasets': 0-dim and size-1 datasets (shape (1,), as NeXus writes "
+        "scalars) in the group are parameters (in 'batch', a 1-D dataset of length N is "
+        "one value per entity). 'attrs': the group's HDF5 attributes are the parameters.",
     )
     recursive: bool = Field(
         default=False,
@@ -187,10 +189,6 @@ class _SourceBase(BaseModel):
         description="The same root as the Tiled server sees it, when its mount differs. "
         "Ignored for --upload.",
     )
-    identity: Identity = Field(
-        default=Identity.params,
-        description="How entity uids are computed; see Identity. Write it only to override.",
-    )
 
     @model_validator(mode="after")
     def _paths(self):
@@ -200,7 +198,17 @@ class _SourceBase(BaseModel):
         return self
 
 
-class FilesSource(_SourceBase):
+class _HDF5SourceBase(_SourceBase):
+    """The HDF5 sources choose how an entity's uid is computed; a ``table`` does not (its
+    uid hashes its ``id`` column)."""
+
+    identity: Identity = Field(
+        default=Identity.params,
+        description="How entity uids are computed; see Identity. Write it only to override.",
+    )
+
+
+class FilesSource(_HDF5SourceBase):
     """One HDF5 file per entity."""
 
     pattern: str = Field(
@@ -209,27 +217,31 @@ class FilesSource(_SourceBase):
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live in each file; default: 0-dim datasets at "
-        "the root. 'null' declares that entities have no parameters (identity becomes "
-        "provenance).",
+        description="Where the parameters live in each file; default: the root. Only "
+        "scalar datasets are parameters (see 'from'); any other member, a (6,) array say, "
+        "is skipped without a message. 'null' declares that entities have no parameters "
+        "(identity becomes provenance).",
     )
 
 
-class BatchSource(_SourceBase):
+class BatchSource(_HDF5SourceBase):
     """Many entities stacked along axis 0 of each file's datasets; entity i is row i."""
 
     pattern: str = Field(
         default="**/*.h5",
         description="Glob for the batch files under 'directory'.",
     )
-    params: ParamsSpec = Field(
+    params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Group holding one 1-D dataset of length N per parameter (0-dim "
-        "datasets are broadcast to every entity in the file).",
+        description="Where the parameters live in each file; default: the root. N is the "
+        "file's leading axis (that of the first artifact). Only 1-D datasets of length N "
+        "are per-entity values, one per row; 0-dim datasets are broadcast to every entity "
+        "in the file; any other member, (N, 1) included, is skipped without a message. "
+        "'null' declares that entities have no parameters (identity becomes provenance).",
     )
 
 
-class GroupsSource(_SourceBase):
+class GroupsSource(_HDF5SourceBase):
     """One HDF5 group per entity inside each file."""
 
     pattern: str = Field(
@@ -244,7 +256,9 @@ class GroupsSource(_SourceBase):
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live, relative to each entity group; default: "
-        "the entity group's own 0-dim datasets. 'null' declares none.",
+        "the entity group itself. Only scalar datasets are parameters (see 'from'); any "
+        "other member, a (6,) array say, is skipped without a message. 'null' declares "
+        "none.",
     )
 
 
@@ -258,7 +272,10 @@ class TableSource(_SourceBase):
     )
     id: str = Field(
         min_length=1,
-        description="Column whose value identifies a row; it is the entity's identity.",
+        description="Column whose value identifies a row; it is the entity's identity and "
+        "must be unique across rows. When no column is, add one to the table (system_id "
+        "and tilt joined, say). Changing it re-keys every entity: delete the registered "
+        "dataset, then register again.",
     )
     locator: dict[str, str] = Field(
         default_factory=dict,

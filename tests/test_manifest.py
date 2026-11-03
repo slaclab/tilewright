@@ -12,8 +12,10 @@ import pandas as pd
 import pytest
 from ruamel.yaml import YAML
 
-from tilewright.contract import ContractError
-from tilewright.manifest import _params_uid, generate_manifests, main, manifest_dir
+from tilewright.contract import ContractError, Source
+from tilewright.manifest import (
+    _check_collisions, _params_uid, generate_manifests, main, manifest_dir,
+)
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
 
@@ -107,6 +109,15 @@ class TestFiles:
         _, art = run(tmp_path, cfg, name="ds2")
         assert (art["type"] == "extra").sum() == 1
 
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert {"temperature", "run"} <= set(ent.columns)
+        assert not any(c.startswith(("frames", "spectrum", "energy")) for c in ent.columns)
+
     def test_no_files_match(self, tmp_path):
         cfg = files_dataset(tmp_path)
         cfg["source"]["files"]["pattern"] = "*.nxs"
@@ -158,6 +169,49 @@ class TestBatch:
         with pytest.raises(KeyError, match="shared axis 'nope'"):
             run(tmp_path, cfg)
 
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_size_one_member_is_broadcast_whatever_the_batch_length(self, tmp_path, identity):
+        # a NeXus-style scalar, shape (1,), in batches of 3 rows and in a batch of 1 row (#4)
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["identity"] = identity
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params"].create_dataset("gain", data=[1.5 + b])
+        (tmp_path / "sim" / "batch_2").mkdir()
+        with h5py.File(tmp_path / "sim" / "batch_2" / "sim.h5", "w") as f:
+            g = f.create_group("params")
+            g.create_dataset("alpha", data=[99.0])  # length N == 1: one value per row, too
+            g.create_dataset("beta", data=[0.5])
+            g.create_dataset("seed", data=2)
+            g.create_dataset("gain", data=[3.5])
+            f.create_dataset("spectra", data=np.zeros((1, 5, 2)))
+            f.create_dataset("eloss", data=np.linspace(0, 1, 5))
+        ent, art = run(tmp_path, cfg)
+        assert len(ent) == 7 and ent["uid"].nunique() == 7
+        assert dict(zip(ent["alpha"], ent["gain"])) == {
+            0: 1.5, 1: 1.5, 2: 1.5, 10: 2.5, 11: 2.5, 12: 2.5, 99: 3.5}
+        assert set(ent["beta"]) == {0.5} and sorted(set(ent["seed"])) == [0, 1, 2]
+        assert sorted(art.loc[art["file"] == "batch_2/sim.h5", "index"].dropna()) == [0]
+
+    def test_params_null_gives_provenance_uids(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"] = None
+        ent, art = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid"]
+        assert set(ent["uid"]) == {sha16(f"BATCH_TEST:batch_{b}/sim.h5:{i}")
+                                   for b in range(2) for i in range(3)}
+        assert len(art[art["uid"].notna()]) == 6
+
+    def test_only_1d_members_of_length_n_are_parameters(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params/column"] = np.zeros((3, 1))
+                f["params/bounds"] = np.zeros((3, 2))
+                f["params/axis"] = np.zeros(4)
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
+
     def test_artifact_row_mismatch(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
@@ -202,6 +256,14 @@ class TestGroups:
         ent, art = run(tmp_path, cfg)
         assert list(ent["source_group"]) == ["samples"]
 
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert "tenDq" in ent.columns and not any(c.startswith("frames") for c in ent.columns)
+
     def test_missing_artifact_names_the_group(self, tmp_path):
         cfg = groups_dataset(tmp_path)
         cfg["artifacts"] = [{"type": "s", "dataset": "/samples/sample_0/spectrum"}]
@@ -211,7 +273,64 @@ class TestGroups:
 
 # ---------------------------------------------------------------------------
 
+def systems_table(tmp_path, ids="system_id"):
+    """Like osti/1846021: system_id repeats, and each repeat differs in one other column."""
+    d = tmp_path / "pvdaq"
+    d.mkdir(exist_ok=True)
+    pd.DataFrame({"system_id": [1332, 1332, 4901, 4901, 7],
+                  "tilt": [16.77, 60.0, 20.0, 20.0, 10.0],
+                  "azimuth": [180, 180, 270, 90, 180],
+                  "site": ["a", "a", "b", "b", "c"]}).to_csv(d / "systems.csv", index=False)
+    return {"label": "Systems", "metadata": dict(META),
+            "source": {"table": {"directory": str(d), "path": "systems.csv", "id": ids}}}
+
+
 class TestTable:
+
+    def test_repeated_ids_report_the_columns_that_differ(self, tmp_path):
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, systems_table(tmp_path))
+        lines = str(exc.value).splitlines()
+        assert lines[0] == "SYSTEMS: 4 entities share 2 uids; every entity must be distinct."
+        assert lines[1:] == [
+            f"  uid {sha16('SYSTEMS:1332')}: system_id=1332 at table rows 0, 1 "
+            "(first data row = 0)",
+            "    tilt: 16.77 | 60.0",
+            f"  uid {sha16('SYSTEMS:4901')}: system_id=4901 at table rows 2, 3 "
+            "(first data row = 0)",
+            "    azimuth: 270 | 90",
+            "Fix: 'id' must name a column that is unique per row. Add one to the table "
+            "that joins system_id with the columns that differ (tilt, azimuth), and name "
+            "it in 'id'.",
+        ]
+
+    def test_an_added_unique_column_resolves_repeated_ids(self, tmp_path):
+        cfg = systems_table(tmp_path, ids="array_id")
+        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv")
+        df["array_id"] = df["system_id"].astype(str) + "-" + df["azimuth"].astype(str) \
+            + "-" + df["tilt"].astype(str)
+        df.to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
+        ent, _ = run(tmp_path, cfg)
+        assert len(ent) == 5 and ent["uid"].nunique() == 5
+        assert ent.loc[0, "uid"] == sha16("SYSTEMS:1332-180-16.77")
+
+    def test_rows_equal_in_every_column_must_be_deduplicated(self, tmp_path):
+        cfg = systems_table(tmp_path)
+        df = pd.read_csv(tmp_path / "pvdaq" / "systems.csv").iloc[[4]]
+        pd.concat([df, df]).to_csv(tmp_path / "pvdaq" / "systems.csv", index=False)
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[1:] == [
+            f"  uid {sha16('SYSTEMS:7')}: system_id=7 at table rows 0, 1 "
+            "(first data row = 0)",
+            "    no column differs",
+            "Fix: these rows are equal in every column; de-duplicate the table.",
+        ]
+
+    def test_missing_id_column_is_named(self, tmp_path):
+        with pytest.raises(KeyError, match="id column 'tilt_deg' not among"):
+            run(tmp_path, systems_table(tmp_path, ids="tilt_deg"))
 
     def test_rows_are_entities(self, tmp_path):
         d = tmp_path / "cncs"
@@ -223,6 +342,8 @@ class TestTable:
                                     "locator": {"url": "https://x/{filename}"}}}}
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 2 and list(ent["url"]) == ["https://x/a.gz", "https://x/b.gz"]
+        # one id column: sha256('<KEY>:<value>'), as before
+        assert list(ent["uid"]) == [sha16("TABLE_TEST:1"), sha16("TABLE_TEST:2")]
         assert len(art) == 0 and list(art.columns)[:4] == ["uid", "type", "file", "dataset"]
 
 
@@ -259,6 +380,29 @@ def nexus(tmp_path):
                           {"type": "E", "dataset": "/entry/data/E"}]}
 
 
+def nexus_shape_one_dataset(tmp_path, identity):
+    """Two scans whose scalars are all shape (1,): float, float32, int32, '|S' and vlen str."""
+    d = tmp_path / "dmc"
+    d.mkdir()
+    for i, temp in enumerate((4.0017, 300.0)):
+        with h5py.File(d / f"dmc{i + 1:02d}.h5", "w") as f:
+            s = f.create_group("entry1/sample")
+            s.create_dataset("sample_temperature", data=[temp]).attrs["units"] = "K"
+            s.create_dataset("sample_name", data=np.array([b"Ga0.94Mn0.04Sb_8mm"]))
+            s.create_dataset("comment", data=["powder, 8 mm can"], dtype=h5py.string_dtype())
+            s.create_dataset("mass", data=0.5)
+            m = f.create_group("entry1/monochromator")
+            lam = m.create_dataset("lambda", data=np.array([2.5666], dtype="float32"))
+            lam.attrs["units"] = "Angstrom"
+            m.create_dataset("scan_index", data=np.array([i + 1], dtype="int32"))
+            f.create_dataset("entry1/data/counts", data=np.arange(4) * i)
+    return {"label": "DMC Test", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*.h5", "identity": identity,
+                                 "params": {"groups": {"sample": "/entry1/sample",
+                                                       "monochromator": "/entry1/monochromator"}}}},
+            "artifacts": [{"type": "counts", "dataset": "/entry1/data/counts"}]}
+
+
 class TestParameterGroups:
 
     def test_groups_become_dotted_columns(self, tmp_path, nexus):
@@ -289,6 +433,21 @@ class TestParameterGroups:
         by_type = art.set_index("type")
         assert by_type.loc["data", "long_name"].iloc[0] == "Intensity"
         assert by_type.loc["E", "units"].iloc[0] == "meV"
+
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_shape_one_scalars_are_parameters(self, tmp_path, identity):
+        # SINQ DMC-style NeXus: every scalar is a length-1 array, none is 0-dim (#4)
+        ent, _ = run(tmp_path, nexus_shape_one_dataset(tmp_path, identity))
+        assert len(ent) == 2 and ent["uid"].nunique() == 2
+        row = ent.sort_values("sample.sample_temperature").iloc[0]
+        assert row["sample.sample_temperature"] == 4.0017
+        assert row["sample.sample_temperature_units"] == "K"
+        assert row["sample.sample_name"] == "Ga0.94Mn0.04Sb_8mm"  # decoded, not bytes
+        assert row["sample.comment"] == "powder, 8 mm can"
+        assert row["sample.mass"] == 0.5  # a 0-dim dataset beside them
+        assert row["monochromator.lambda"] == pytest.approx(2.5666)
+        assert row["monochromator.lambda_units"] == "Angstrom"
+        assert row["monochromator.scan_index"] == 1
 
     def test_links_are_resolved_by_the_library(self, tmp_path):
         d = tmp_path / "links"
@@ -345,6 +504,39 @@ class TestIdentity:
         msg = str(exc.value)
         assert "3 entities share 1 uids" in msg and "run_0.h5" in msg
         assert "identity: provenance" in msg
+
+    def test_params_collision_report_shows_every_uid_and_what_differs(self, tmp_path):
+        cfg = files_dataset(tmp_path, n=4)
+        for i in range(4):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["temperature"][...] = 300.0 + i % 2
+                f["run"][...] = i % 2
+                f["temperature"].attrs["units"] = "degK" if i > 1 else "K"
+        with pytest.raises(ValueError) as exc:
+            run(tmp_path, cfg)
+        lines = str(exc.value).splitlines()
+        assert lines[0] == "FILES_TEST: 4 entities share 2 uids; every entity must be distinct."
+        assert lines[1].endswith(": run_0.h5, run_2.h5") and lines[4].endswith(": run_1.h5, run_3.h5")
+        assert lines[2] == lines[5] == '    temperature_units: "K" | "degK"'
+        assert lines[3] == '    equal: {"run": 0, "temperature": 300.0}'
+        assert lines[6] == '    equal: {"run": 1, "temperature": 301.0}'
+        assert lines[7].startswith("Fix: add a field that distinguishes them")
+
+    @pytest.mark.parametrize("tag, identity, fix", [
+        ("files", "provenance", "the pattern or entity_group is matching the same thing twice"),
+        ("groups", "provenance", "the pattern or entity_group is matching the same thing twice"),
+        ("batch", "params", "or set 'identity: provenance' under the source"),
+    ])
+    def test_the_fix_line_follows_the_source(self, tag, identity, fix):
+        source = Source.model_validate({tag: {"directory": "/d", "identity": identity}})
+        rows = [{"uid": "u", "a": 1, "_provenance": "f.h5"},
+                {"uid": "u", "a": 1, "_provenance": "f.h5"}]
+        with pytest.raises(ValueError) as exc:
+            _check_collisions(rows, "K", source)
+        lines = str(exc.value).splitlines()
+        assert lines[1:3] == ["  uid u: f.h5, f.h5", "    no parameter differs"]
+        assert lines[-1].startswith("Fix: ") and fix in lines[-1]
+        assert ("pattern" in lines[-1]) == (identity == "provenance")
 
     def test_no_params_without_declaring_it_is_an_error(self, tmp_path):
         cfg = files_dataset(tmp_path)
@@ -484,3 +676,105 @@ class TestCli:
         assert main([str(yaml_path), "--append"]) == 0
         ent = pd.read_parquet(tmp_path / "manifests" / "FILES_TEST" / "entities.parquet")
         assert len(ent) == 4 and "merged: 3 existing + 1 new" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# key stamping leaves the author's YAML as written (#14)
+# ---------------------------------------------------------------------------
+
+HAND_WRITTEN = """\
+# A hand-written header comment.
+label: Files Test
+
+metadata:
+  method: [INS]            # a flow list
+  data_type: experimental
+  material: NiPS3
+  contact: 'Someone (Somewhere)'
+  description: >-
+    Three synthetic runs written by the test suite for the key-stamping check, with one
+    temperature each; the lines of this folded description are deliberately close to ninety
+    columns wide, as hand-written descriptions often are.
+  sample_length_mm: 1.50
+
+source:
+  files:
+    directory: {directory}
+    pattern: "*.h5"
+
+artifacts:
+  - {{type: spectrum,  dataset: /spectrum}}
+shared:
+- {{type: energy, dataset: /energy}}
+"""
+
+CONTRACT_TAIL = """\
+metadata: {method: [INS], data_type: experimental, material: NiPS3}
+source: {files: {directory: /d}}
+artifacts: [{type: s, dataset: /s}]
+"""
+
+
+def _stamped(tmp_path, text):
+    from tilewright.manifest import read_yaml, stamp_key
+
+    path = tmp_path / "ds.yml"
+    path.write_bytes(text.encode())
+    cfg, raw, _ = read_yaml(path)
+    assert stamp_key(path, raw, cfg.catalog_key) is True
+    return path.read_bytes().decode()
+
+
+class TestKeyStamp:
+
+    def test_first_run_adds_only_the_key_line(self, tmp_path):
+        files_dataset(tmp_path)
+        directory = tmp_path / ("a_directory_name_long_enough_to_push_the_directory_value_"
+                                "past_eighty_columns")
+        (tmp_path / "runs").rename(directory)
+        before = HAND_WRITTEN.format(directory=directory)
+        yaml_path = tmp_path / "ds.yml"
+        yaml_path.write_text(before)
+        generate_manifests(str(yaml_path))
+        after = yaml_path.read_text()
+        assert after == before.replace("label: Files Test\n",
+                                       "label: Files Test\nkey: FILES_TEST\n", 1)
+        generate_manifests(str(yaml_path))
+        assert yaml_path.read_text() == after
+
+    @pytest.mark.parametrize("eol", ["\r\n", "\r"])
+    def test_line_endings_are_kept(self, tmp_path, eol):
+        before = ("# header\nlabel: Eol Test\n" + CONTRACT_TAIL).replace("\n", eol)
+        assert _stamped(tmp_path, before) == before.replace(
+            f"label: Eol Test{eol}", f"label: Eol Test{eol}key: EOL_TEST{eol}")
+
+    def test_label_on_the_last_line_without_a_newline(self, tmp_path):
+        before = CONTRACT_TAIL + "label: Last Line  # the label comes last"
+        assert _stamped(tmp_path, before) == before + "\nkey: LAST_LINE"
+
+    @pytest.mark.parametrize("label", [
+        "label: >-\n  Folded\n  Label\n",
+        "label: Folded\n  Label\n",
+        "label:\n  Folded Label\n",
+        'label: "Folded\n  Label"\n',
+    ])
+    def test_a_label_on_several_lines_gets_the_key_line_before_it(self, tmp_path, label):
+        before = "# header\n" + label + CONTRACT_TAIL
+        after = _stamped(tmp_path, before)
+        assert after == "# header\nkey: FOLDED_LABEL\n" + label + CONTRACT_TAIL
+        assert YAML(typ="safe").load(after)["label"] == "Folded Label"
+
+    def test_an_empty_key_is_filled_in(self, tmp_path):
+        after = _stamped(tmp_path, "label: Empty Key\nkey:\n" + CONTRACT_TAIL)
+        data = YAML(typ="safe").load(after)
+        assert data["key"] == "EMPTY_KEY" and list(data)[:2] == ["label", "key"]
+
+    def test_an_alias_stays_as_written_and_resolves_on_every_load(self, tmp_path):
+        from tilewright.manifest import read_yaml
+
+        before = "label: Alias Test\n" + CONTRACT_TAIL.replace("[INS]", "[EDRIXS]")
+        after = _stamped(tmp_path, before)
+        assert after == before.replace("\n", "\nkey: ALIAS_TEST\n", 1)
+        cfg, _, notes = read_yaml(tmp_path / "ds.yml")
+        assert cfg.metadata.method == ["RIXS"]
+        assert "metadata.method: alias 'EDRIXS' -> 'RIXS'" in notes

@@ -7,7 +7,8 @@ frozen set of shapes still holds, now as four tags.
 
 A dataset YAML declares where its entities come from as one `source` block holding exactly
 one tag, `files | batch | groups | table`, and each tag accepts only the keys that mean
-something for it. `directory`, `server_base_dir`, `identity` are common; `pattern`,
+something for it. `directory` and `server_base_dir` are common; `identity` belongs to the
+three HDF5 tags, since a `table`'s uid is its `id` column; `pattern`,
 `params`, `entity_group`, `path`, `id`, `locator` belong to the tags that use them.
 `table` is new: the rows of a sidecar table are the entities and there are no arrays, for
 data Tiled cannot read.

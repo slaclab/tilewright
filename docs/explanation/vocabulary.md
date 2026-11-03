@@ -12,7 +12,10 @@ them, for seven facets: `method`, `material`, `producer`, `project`, `proposal`,
 An unknown value warns and validates. Your dataset onboards either way.
 
 - A known alias is rewritten to its canonical id: `EDRIXS` becomes `RIXS`, `nips3` becomes
-  `NiPS3`, `HRSTEM` becomes `STEM`. An alias changes spelling and nothing else.
+  `NiPS3`, `HRSTEM` becomes `STEM`. An alias changes spelling and nothing else. The
+  rewrite happens each time the YAML is read, and the file keeps what you wrote. The
+  exception is a YAML that `tilewright manifest` must write out whole to add its `key:`
+  ([when](../reference/cli.md#tilewright-manifest)): that file then holds the canonical ids.
 - An unknown value is left as you wrote it, and `tilewright manifest` prints a note.
 
 The stricter option would be to reject unknown values. That fails badly for the first
