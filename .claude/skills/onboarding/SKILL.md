@@ -80,7 +80,8 @@ say — in **one batched round**, not field-by-field across many turns. Build th
   `type` names; `optional: true` for one that some entities lack), the **parameters**
   (`params.group`, or `params.groups` when the scalars are spread over several groups —
   each nests under the name you give it; `from: attrs` when they are HDF5 attributes;
-  `exclude` for blobs, `recursive` for subgroups), and any **shared axes** (arrays
+  `exclude` for blobs — an attribute's path is `<group path>/<name>`, e.g. `/version` —
+  and `recursive` for subgroups), and any **shared axes** (arrays
   *identical* in every file → `shared:`; an axis that varies per entity is an artifact).
   Field attributes (`units`, ...) are captured automatically — nothing to declare. A
   size-1 dataset (shape `(1,)`, as NeXus writes scalars) counts as a scalar, like 0-dim.

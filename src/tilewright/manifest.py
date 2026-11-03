@@ -292,6 +292,8 @@ _reserved_warned = set()
 
 
 def _to_python(val):
+    if isinstance(val, h5py.Empty):  # a null dataspace (netCDF's empty attribute): no value
+        return None
     if isinstance(val, bytes):
         return val.decode("utf-8", errors="replace")
     if isinstance(val, np.generic):
@@ -302,16 +304,21 @@ def _to_python(val):
     return val
 
 
-def _attrs(obj, label_of=None):
+def _attrs(obj, label_of=None, skip=()):
     """HDF5 attributes of ``obj`` as native values, sorted by name.
 
     ``label_of`` None: every attribute (the ``from: attrs`` parameters). ``label_of`` a
     field name: scalar attributes as ``<field>_<attr>`` labels of that field. ``label_of``
     ``""``: bare names, for an artifact's own node metadata (manifest column names are
     dropped with a warning). Labels are stored beside a value, never hashed into the uid.
+    An empty attribute (``h5py.Empty``) is None: kept as a null parameter, and left out of
+    labels, which carry only str, int and float. Names in ``skip`` (``params.exclude``)
+    are never read.
     """
     out = OrderedDict()
     for name in sorted(obj.attrs.keys()):
+        if name in skip:
+            continue
         val = _to_python(obj.attrs[name])
         if label_of is None:
             out[name] = val
@@ -334,16 +341,18 @@ def _read_params(container, spec: ParamsSpec, batch_size=None):
     or in batch mode to length-N arrays; ``labels`` are the fields' attribute labels.
     """
     groups = spec.groups or {"": spec.group or "/"}
+    exclude = {p.strip("/") for p in spec.exclude}
     if spec.from_ == "attrs":
         out = OrderedDict()
         for gname, gpath in groups.items():
             gpath = gpath.strip("/")
             target = container[gpath] if gpath else container
-            for name, val in _attrs(target).items():
+            # an attribute's exclude path is '<group path>/<name>': '/version' at the root
+            skip = {n for n in target.attrs if f"{gpath}/{n}".strip("/") in exclude}
+            for name, val in _attrs(target, skip=skip).items():
                 key = f"{gname}.{name}" if gname else name
                 out[key] = np.full(batch_size, val) if batch_size else val
         return out, OrderedDict()
-    exclude = {p.strip("/") for p in spec.exclude}
     out, labels = OrderedDict(), OrderedDict()
     for gname, gpath in groups.items():
         gpath = gpath.strip("/")

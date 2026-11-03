@@ -122,7 +122,7 @@ labels, stored beside the value and never part of the identity.
 | `groups` | dict[str, str] | None | no |  | Several groups, keyed by the name each nests under: {instrument: /entry/instrument, sample: /entry/sample} -> metadata.instrument.Ei, metadata.sample.mass; queryable as Key('instrument.Ei'). |
 | `from` | `datasets` \| `attrs` | no | `datasets` | 'datasets': 0-dim and size-1 datasets (shape (1,), as NeXus writes scalars) in the group are parameters (in 'batch', a 1-D dataset of length N is one value per entity). 'attrs': the group's HDF5 attributes are the parameters. |
 | `recursive` | bool | no | `False` | Descend into subgroups, nesting one level per subgroup. |
-| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. |
+| `exclude` | list of str | no |  | HDF5 paths (same frame as the group paths) to skip: a JSON blob, say. Under 'from: attrs', an attribute's path is `<group path>/<attribute>`: `/operator_note` skips the root's attribute 'operator_note'. |
 
 `groups` nests: `{instrument: /entry/instrument}` puts `Ei` at `metadata.instrument.Ei`,
 queryable as `Key("instrument.Ei") > 50`.
