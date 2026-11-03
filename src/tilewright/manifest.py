@@ -20,8 +20,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from collections import OrderedDict
+from importlib.metadata import version
 from pathlib import Path
 
 import h5py
@@ -182,6 +185,8 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
     meta = {
         b"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().encode(),
         b"generator": b"tilewright",
+        b"generator_version": version("tilewright").encode(),
+        b"generator_commit": _generator_commit().encode(),
         b"key": key.encode(),
         b"source": tag.encode(),
         b"identity": str(identity).encode(),
@@ -208,6 +213,27 @@ def _find_files(directory, pattern):
     if not files:
         raise FileNotFoundError(f"no files match {pattern!r} under {directory}")
     return files
+
+
+def _generator_commit():
+    """The git commit TileWright runs from, with ``+dirty`` when its source has
+    uncommitted changes; ``""`` for an install that is not a checkout (#80).
+
+    The version alone does not say which rules wrote a manifest while there are no
+    releases. Only a work tree whose ``src/tilewright`` is this package counts: a
+    PyPI install in a virtualenv inside some other repository is not that repository.
+    """
+    package = Path(__file__).resolve().parent
+    if shutil.which("git") is None:
+        return ""
+    git = ["git", "-C", str(package)]
+    top = subprocess.run(git + ["rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if top.returncode or Path(top.stdout.strip()).resolve() / "src" / "tilewright" != package:
+        return ""
+    commit = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True)
+    dirty = subprocess.run(git + ["status", "--porcelain", "--", str(package)],
+                           capture_output=True, text=True).stdout.strip()
+    return commit.stdout.strip() + ("+dirty" if dirty else "")
 
 
 def _sha256_file(path):
