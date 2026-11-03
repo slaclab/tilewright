@@ -20,6 +20,7 @@ import copy
 from typing import Any, List, Optional, Tuple, Union
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy
 from numpy.typing import NDArray
 
