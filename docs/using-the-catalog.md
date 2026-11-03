@@ -24,8 +24,12 @@ c = from_uri("<URL>", api_key="<API_KEY>")
 list(c)                                   # dataset keys: ['BROAD_SIGMA', 'LCLS_RIXS_STATIC', ...]
 ds = c["BROAD_SIGMA"]                     # a dataset container
 dict(ds.metadata)                         # facets: method, material, contact, description, ...
-len(ds)                                   # entity count (+ one child per shared axis)
+len(list(ds))                             # entity count (+ one child per shared axis)
 ```
+
+Count the keys rather than calling `len(ds)`: right after a container is iterated or its
+keys listed, `len()` can return a cached lower bound for a moment (101 for a dataset of
+1,862 entities, on Tiled 0.2.18).
 
 Dataset containers sit at the root and everything else is beneath one, so always index
 the dataset first. Datasets are searchable by their facets too:

@@ -76,7 +76,8 @@ class DatasetMetadata(BaseModel):
     )
     data_type: str = Field(
         min_length=1,
-        description="'simulation', 'experimental' or 'benchmark'. Vocabulary facet.",
+        description="What produced the data, e.g. 'simulation' or 'experimental'; the ids "
+        "are 'data_types' in vocabulary.yml. Vocabulary facet.",
     )
     material: str = Field(
         min_length=1,
@@ -133,7 +134,8 @@ class ParamsSpec(BaseModel):
     group: str | None = Field(
         default=None,
         description="One HDF5 group whose fields become flat metadata keys. '/' is the "
-        "container itself. Default '/' when neither 'group' nor 'groups' is given.",
+        "entity's own container: the file's root under 'files' and 'batch', the entity "
+        "group under 'groups'. Default '/' when neither 'group' nor 'groups' is given.",
     )
     groups: dict[str, str] | None = Field(
         default=None,

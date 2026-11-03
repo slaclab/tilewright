@@ -24,14 +24,38 @@ uv run --with 'tiled[server]' tiled serve config config.yml --api-key <KEY>
 The key you pass is the one registrants use. For per-person keys with expiry, log in as an
 admin and mint them; `scripts/mint_api_keys.py` does that in bulk.
 
-## The two settings that matter for pointers
+## A whole pointer-serving config
+
+Without a checkout there is no `config.yml` to start from. This is a whole file, in
+Tiled's own format; save it as `config.yml` and replace the `readable_storage` root:
 
 ```yaml
-adapters_by_mimetype:
-  application/x-hdf5-broker: "tilewright.adapter:LazyHDF5ArrayAdapter"
-readable_storage:
-  - /mnt/shared/rixs
+uvicorn:
+  host: "127.0.0.1"          # 0.0.0.0 to accept registrants on other machines
+  port: 8005
+
+trees:
+  - path: /
+    tree: catalog
+    args:
+      uri: "sqlite:///catalog.db"    # a file in the directory the server starts from
+      init_if_not_exists: true       # create it on the first run
+      adapters_by_mimetype:
+        application/x-hdf5-broker: "tilewright.adapter:LazyHDF5ArrayAdapter"
+      readable_storage:
+        - /mnt/shared/rixs
 ```
+
+Start it from an environment that has `tilewright` installed:
+
+```bash
+tiled serve config config.yml --api-key <KEY>
+```
+
+The two pointer settings sit inside the tree's `args`, not at the top level. A server
+that also accepts `--upload` registrations adds `writable_storage: "storage"` beside
+them, as the repository's `config.yml` does; a shared deployment points `uri` at
+PostgreSQL.
 
 The adapter line makes the server slice batched arrays in h5py instead of materializing
 whole datasets ([sliced reads](explanation/data-model.md#an-entity-is-a-slice)). It is an import path
