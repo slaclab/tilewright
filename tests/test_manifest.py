@@ -3,6 +3,7 @@ labels, shared axes, identity, collisions, key stamping and where the output lan
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import h5py
@@ -12,7 +13,9 @@ import pytest
 from ruamel.yaml import YAML
 
 from tilewright.contract import ContractError, Source
-from tilewright.manifest import _check_collisions, generate_manifests, main, manifest_dir
+from tilewright.manifest import (
+    _check_collisions, _params_uid, generate_manifests, main, manifest_dir,
+)
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
 
@@ -546,6 +549,92 @@ class TestIdentity:
         cfg["source"]["files"]["params"] = None
         ent, _ = run(tmp_path, cfg)
         assert len(ent) == 3 and list(ent.columns) == ["uid"]
+
+    @pytest.mark.parametrize("identity", ["params", "provenance"])
+    def test_si_scale_parameters_stay_distinct(self, tmp_path, identity):
+        # openPMD-style timesteps in seconds: distinct, but all below 5e-13 (#4)
+        ent, _ = run(tmp_path, si_dataset(tmp_path, identity))
+        assert len(ent) == 3 and ent["uid"].nunique() == 3
+        assert sorted(ent["time"]) == SI_TIMES
+        assert (ent["dt"] == SI_DT).all()
+
+    def test_epoch_seconds_a_millisecond_apart_stay_distinct(self, tmp_path):
+        # review of #15: at 12 significant digits these three were one entity
+        d = tmp_path / "epoch"
+        d.mkdir()
+        for i, t in enumerate(EPOCHS):
+            with h5py.File(d / f"shot_{i}.h5", "w") as f:
+                f.create_dataset("start_epoch", data=t)
+                f.create_dataset("signal", data=np.full((2, 3), i, dtype="float32"))
+        cfg = {"label": "Epoch Test", "metadata": dict(META),
+               "source": {"files": {"directory": str(d), "pattern": "*.h5"}},
+               "artifacts": [{"type": "signal", "dataset": "/signal"}]}
+        ent, _ = run(tmp_path, cfg)
+        assert len(ent) == 3 and ent["uid"].nunique() == 3
+        assert sorted(ent["start_epoch"]) == EPOCHS
+
+    def test_floats_keep_12_decimals_or_12_significant_digits_whichever_is_finer(self):
+        def uid(**params):
+            return _params_uid("K", params)
+        # below 0.1, 12 significant digits: SI-scale values stay apart (#4) ...
+        assert len({uid(time=t) for t in (*SI_TIMES, 0.0)}) == 4
+        assert uid(charge=1.602176634e-19) != uid(charge=1.602176635e-19)
+        assert uid(x=0.05) != uid(x=0.05 + 1e-13)
+        # ... and noise past the 12th significant digit is not a new entity
+        assert uid(time=SI_TIMES[0]) == uid(time=SI_TIMES[0] * (1 + 1e-14))
+        assert uid(x=0.05) == uid(x=0.05 + 1e-14)
+        # from 0.1 up, 12 decimal places: large values keep more than 12 significant
+        # digits (review of #15) ...
+        assert len({uid(start_epoch=t) for t in EPOCHS}) == 3
+        assert uid(T=300.0) != uid(T=300.0 + 1e-11)
+        # ... and noise past the 12th decimal place is not a new entity
+        assert uid(T=300.0) == uid(T=300.0 + 1e-13)
+        assert uid(x=0.1 + 0.2) == uid(x=0.3)
+        # values with few digits hash exactly as they did before the change (b268731)
+        assert uid(T=300.0, run=1) == "2c4f3c84c370721c"
+        assert uid(T=2.5666, label="x") == "75c8ab85fd63385c"
+
+    def test_from_one_tenth_up_a_float_hashes_as_before(self):
+        # for |v| >= 0.1 the uid is b268731's round(v, 12) one, so no entity there is re-keyed
+        spread = [s * m * 10.0 ** e for e in range(-1, 25) for s in (1, -1)
+                  for m in (1.0, 1.2345678901234567, 2.5666000843048096, 9.87654321098765)]
+        spread += [0.30000000000000004, 300.0 + 1e-11, *EPOCHS, 2.0 ** 53 + 1, 1e300]
+        for v in spread:
+            assert abs(v) >= 0.1
+            assert _params_uid("K", {"v": v}) == uid_b268731("K", {"v": v}), v
+
+    @pytest.mark.parametrize("v, before", [
+        (0.0, "a02a0ed3ce898350"), (-0.0, "f0ce25eb9bfa02e4"), (math.nan, "4195f82f3070bfe8"),
+        (math.inf, "6495de52e625a37b"), (-math.inf, "a18546143a0efd8e"),
+    ])
+    def test_zero_and_non_finite_floats_hash_as_before(self, v, before):
+        # the literals are b268731's uids; -0.0 stays apart from 0.0, as it was
+        assert _params_uid("K", {"x": v}) == uid_b268731("K", {"x": v}) == before
+
+
+SI_TIMES = [8.390153e-14, 1.007e-13, 1.316102e-13]
+SI_DT = 3.290256e-16
+EPOCHS = [1726560000.000, 1726560000.001, 1726560000.002]
+
+
+def uid_b268731(key, params):
+    """The uid as b268731 (before #4) computed it: every float rounded to 12 decimal places."""
+    canonical = {k: round(v, 12) if isinstance(v, float) else v for k, v in sorted(params.items())}
+    return sha16(json.dumps({"ns": key, "params": canonical}, sort_keys=True, default=str))
+
+
+def si_dataset(tmp_path, identity):
+    """One file per timestep, parameters in seconds (0-dim datasets at the root)."""
+    d = tmp_path / "si"
+    d.mkdir()
+    for i, t in enumerate(SI_TIMES):
+        with h5py.File(d / f"step_{i}.h5", "w") as f:
+            f.create_dataset("time", data=t).attrs["unitSI"] = 1.0
+            f.create_dataset("dt", data=SI_DT)
+            f.create_dataset("signal", data=np.full((2, 3), i, dtype="float32"))
+    return {"label": "SI Test", "metadata": dict(META),
+            "source": {"files": {"directory": str(d), "pattern": "*.h5", "identity": identity}},
+            "artifacts": [{"type": "signal", "dataset": "/signal"}]}
 
 
 def _files_cfg_for(tmp_path):
