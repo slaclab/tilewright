@@ -115,10 +115,61 @@ class TestFiles:
                 f["spectrum"].attrs["long_name"] = h5py.Empty("S1")
         ent, art = run(tmp_path, cfg)
         assert len(ent) == 3 and ent["spare"].isna().all()
-        # labels and array metadata carry only str, int and float: an empty one is left out
+        # an empty attribute has no value to label with: it is left out
         assert "temperature_comment" not in ent.columns
         assert (ent["temperature_units"] == "K").all()
         assert "long_name" not in art.columns
+
+    def test_array_attributes_are_kept_as_lists(self, tmp_path, capsys):
+        # bin edges, georeference tags and axis names reach labels and array metadata (#31)
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["temperature"].attrs["calib_points"] = np.array([0.5, 1.5])
+                spectrum = f["spectrum"]
+                spectrum.attrs["bounds"] = np.array([0.5, 1.5])
+                spectrum.attrs["flags"] = np.array([True, False])
+                spectrum.attrs["names"] = np.array([b"left", b"right"])
+                spectrum.attrs["valid"] = True
+                spectrum.dims[0].label, spectrum.dims[1].label = "energy", "q"
+                # a dimension scale writes CLASS, NAME and REFERENCE_LIST, left out as before
+                f["energy"].make_scale("energy")
+                spectrum.dims[0].attach_scale(f["energy"])
+        ent, art = run(tmp_path, cfg)
+        assert all(list(v) == [0.5, 1.5] for v in ent["temperature_calib_points"])
+        row = art[art["type"] == "spectrum"].iloc[0]
+        assert list(row["bounds"]) == [0.5, 1.5] and list(row["flags"]) == [True, False]
+        assert list(row["names"]) == ["left", "right"] and row["valid"] == True  # noqa: E712
+        assert list(row["DIMENSION_LABELS"]) == ["energy", "q"]
+        assert not {"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST"} & set(art.columns)
+        assert "note" not in capsys.readouterr().out
+
+    def test_what_cannot_be_a_label_is_named_once(self, tmp_path, capsys):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["spectrum"].attrs["ref"] = f["energy"].ref
+                f["spectrum"].attrs["table"] = np.arange(65.0)
+        _, art = run(tmp_path, cfg)
+        assert not {"ref", "table"} & set(art.columns)
+        out = capsys.readouterr().out
+        assert out.count("/spectrum@ref is not carried") == 1 and "HDF5 reference" in out
+        assert out.count("/spectrum@table is not carried") == 1 and "65 values" in out
+
+    def test_an_attribute_a_list_on_one_type_is_a_list_on_every_type(self, tmp_path):
+        # Arrow wants one type per column: a 1-D array's single axis name becomes a scalar
+        # under _to_python, a 2-D array's two a list (#31)
+        cfg = files_dataset(tmp_path)
+        cfg["shared"] = []
+        cfg["artifacts"].append({"type": "energy", "dataset": "/energy"})
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["spectrum"].dims[0].label, f["spectrum"].dims[1].label = "energy", "q"
+                f["energy"].dims[0].label = "energy"
+        _, art = run(tmp_path, cfg)
+        labels = art.set_index("type")["DIMENSION_LABELS"]
+        assert list(labels["spectrum"].iloc[0]) == ["energy", "q"]
+        assert list(labels["energy"].iloc[0]) == ["energy"]
 
     def test_shared_axis_row_has_no_uid(self, tmp_path):
         _, art = run(tmp_path, files_dataset(tmp_path))

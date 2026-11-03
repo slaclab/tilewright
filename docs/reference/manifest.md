@@ -36,7 +36,7 @@ One row per entity artifact, plus one row per shared axis.
 | `file_size`, `file_mtime` | no | Size and modification time of the source file when scanned |
 | `shape` | **yes** | JSON-encoded shape **as registered**: for `batch`, the leading axis is already dropped |
 | `dtype` | **yes** | numpy dtype string, e.g. `float32` |
-| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, ...); become the artifact node's metadata |
+| *(any others)* | no | The array's own HDF5 attributes (`units`, `long_name`, `DIMENSION_LABELS`, ...); become the artifact node's metadata. An array attribute of up to 64 values is a list, and an attribute that is a list on one artifact type is a list on every type; HDF5's and netCDF's dimension bookkeeping (`CLASS`, `NAME`, `REFERENCE_LIST`, `DIMENSION_LIST`, `_Netcdf4Coordinates`, `_Netcdf4Dimid`) is left out |
 
 ## Schema metadata
 

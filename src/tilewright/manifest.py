@@ -178,6 +178,14 @@ def generate_manifests(yaml_path, output_dir=None, append=False):
         ent_df = pd.concat([old_ent, ent_df], ignore_index=True)
         art_df = pd.concat([old_art, art_df], ignore_index=True)
         print(f"  merged: {len(old_ent)} existing + {len(ent_rows)} new entities")
+    # One artifacts file holds every type, so an attribute can be a list on one and a
+    # scalar on another (DIMENSION_LABELS of a 1-D and of a 2-D array; #31). Arrow wants
+    # one type per column: a column holding a list anywhere holds one in every row.
+    for col in art_df.columns:
+        listy = art_df[col].map(lambda v: isinstance(v, (list, np.ndarray)))
+        if listy.any():
+            art_df[col] = [v if is_list or pd.isna(v) else [v]
+                           for v, is_list in zip(art_df[col], listy)]
 
     meta = {
         b"generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().encode(),
@@ -281,14 +289,20 @@ def _check_collisions(ent_rows, key, source):
 # reading parameters and attributes
 # ---------------------------------------------------------------------------
 
-# HDF5's own bookkeeping attributes (dimension-scale machinery). Never carried along.
+# HDF5's and netCDF-4's own bookkeeping attributes (dimension-scale machinery), which
+# mean nothing outside the file. Never carried along. DIMENSION_LABELS is not one of
+# them: it holds the axis names.
 _HDF5_INTERNAL_ATTRS = frozenset(
-    {"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST", "DIMENSION_LABELS"}
+    {"CLASS", "NAME", "REFERENCE_LIST", "DIMENSION_LIST",
+     "_Netcdf4Coordinates", "_Netcdf4Dimid"}
 )
 # Artifact-manifest columns the broker writes; a dataset attribute of the same name would
 # overwrite the column, so it is dropped with one warning per (path, attribute).
 _ARTIFACT_RESERVED = ARTIFACT_STANDARD_COLS | {"file_size", "file_mtime"}
 _reserved_warned = set()
+# An array attribute longer than this is data, not a label: it is left out with a note.
+_LABEL_MAX_ITEMS = 64
+_label_noted = set()
 
 
 def _to_python(val):
@@ -312,26 +326,54 @@ def _attrs(obj, label_of=None, skip=()):
     ``""``: bare names, for an artifact's own node metadata (manifest column names are
     dropped with a warning). Labels are stored beside a value, never hashed into the uid.
     An empty attribute (``h5py.Empty``) is None: kept as a null parameter, and left out of
-    labels, which carry only str, int and float. Names in ``skip`` (``params.exclude``)
-    are never read.
+    labels. A label is a str, int, float or bool, or a list of them up to
+    ``_LABEL_MAX_ITEMS`` long (bin edges, georeference tags, axis names; #31); anything
+    else is left out with one note per (path, attribute). Names in ``skip``
+    (``params.exclude``) are never read.
     """
     out = OrderedDict()
     for name in sorted(obj.attrs.keys()):
         if name in skip:
             continue
-        val = _to_python(obj.attrs[name])
+        raw = obj.attrs[name]
+        val = _to_python(raw)
         if label_of is None:
             out[name] = val
-        elif name in _HDF5_INTERNAL_ATTRS:
+        elif name in _HDF5_INTERNAL_ATTRS or val is None:
             continue
         elif label_of == "" and name in _ARTIFACT_RESERVED:
             if (obj.name, name) not in _reserved_warned:
                 _reserved_warned.add((obj.name, name))
                 print(f"  WARNING: {obj.name}@{name} is not carried as array metadata: "
                       f"'{name}' is a manifest column. Rename the attribute if you need it.")
-        elif isinstance(val, (str, int, float)) and not isinstance(val, bool):
-            out[f"{label_of}_{name}" if label_of else name] = val
+        else:
+            val, problem = _as_label(raw, val)
+            if problem is None:
+                out[f"{label_of}_{name}" if label_of else name] = val
+            elif (obj.name, name) not in _label_noted:
+                _label_noted.add((obj.name, name))
+                print(f"  note: {obj.name}@{name} is not carried as metadata: {problem}")
     return out
+
+
+def _as_label(raw, val):
+    """``(value, problem)`` for one attribute as a label: ``val`` (its ``_to_python``
+    form) when it can be one, else None and why not. An array attribute becomes a list;
+    an object or region reference points inside one file, and no catalog can follow it."""
+    if isinstance(val, (str, int, float)):  # a bool is an int
+        return val, None
+    if isinstance(raw, (h5py.Reference, h5py.RegionReference)) or (
+            isinstance(raw, np.ndarray) and h5py.check_dtype(ref=raw.dtype) is not None):
+        return None, "an HDF5 reference cannot be stored"
+    if not isinstance(raw, np.ndarray):
+        return None, f"a {type(val).__name__} cannot be stored"
+    if raw.size > _LABEL_MAX_ITEMS:
+        return None, f"{raw.size} values is data, not a label (the limit is {_LABEL_MAX_ITEMS})"
+    if raw.dtype.kind == "S":
+        return np.char.decode(raw, "utf-8", errors="replace").tolist(), None
+    if raw.dtype.kind in "biuf" or h5py.check_string_dtype(raw.dtype) is not None:
+        return val, None
+    return None, f"a {raw.dtype} array cannot be stored"
 
 
 def _read_params(container, spec: ParamsSpec, batch_size=None):

@@ -37,6 +37,7 @@ Every contract problem is reported at once, one line each, then exit `1`.
 | `shared axis '<t>' (...) differs between a.h5 and b.h5` | The array is not actually shared; it varies per entity | It is an artifact, not an axis. Move it to `artifacts` |
 | `pyarrow.lib.ArrowInvalid` while writing the manifest | A parameter changes type across files: scalar in one, string or array in another | Dump two files and diff their parameters; fix the inconsistent file |
 | `WARNING: /path@attr is not carried as array metadata` | A dataset attribute is named like a manifest column: `type`, `shape`, `dtype`, `file`, `dataset`, `index`, `uid` | Harmless; the attribute is dropped, not the array. Rename it in the file if you need it carried |
+| `note: /path@attr is not carried as metadata: ...` | An attribute of an array or a parameter field cannot be a label: an HDF5 object or region reference, an array of more than 64 values, or a type with no JSON form (compound, complex) | Harmless; only that attribute is left out. A longer array is data: declare it as an artifact if it is a dataset, or copy what matters into `metadata` |
 | Entity or artifact counts differ from what you expected | The glob matched extra or fewer files; a batch leading axis is not what you assumed (it is read from `artifacts[0]`); `entity_group` is wrong | Count the files, dump one file, fix, regenerate. Formulas below |
 
 ### Expected counts
