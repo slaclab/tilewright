@@ -29,7 +29,7 @@ uv run --with 'mkdocs-material>=9,<10' mkdocs serve
 
 1. Edit the models in `contract.py`. Every field carries a `description`; write it for
    the person authoring a YAML.
-2. `uv run scripts/build_yaml_reference.py` regenerates `docs/reference/dataset-yaml.md`.
+2. `uv run --python 3.12 scripts/build_yaml_reference.py` regenerates `docs/reference/dataset-yaml.md`.
    Commit both; the docs workflow fails if they disagree.
 3. `tests/test_contract.py::test_concept_budget` pins the top-level keys and the source
    tags. Adding a key or a tag means editing that test in the same PR, and writing an ADR

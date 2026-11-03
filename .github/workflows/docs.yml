@@ -38,8 +38,10 @@ jobs:
 
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
 
+      # Pinned: Python 3.13+ strips docstring indentation at compile time, so the same
+      # models render a differently indented reference. The committed one is 3.12's.
       - name: The YAML reference must match the contract models
-        run: uv run scripts/build_yaml_reference.py --check
+        run: uv run --python 3.12 scripts/build_yaml_reference.py --check
 
       - name: Build the site
         run: uv run --no-project --with 'mkdocs-material>=9,<10' mkdocs build --strict
