@@ -5,7 +5,10 @@ trip into a DatasetConfig. The concept budget at the bottom pins the contract's 
 that growth fails a test, not a review.
 """
 
+from pathlib import Path
+
 import pytest
+from ruamel.yaml import YAML
 
 from tilewright.contract import (
     SOURCE_TAGS, TOP_LEVEL_KEYS, ContractError, DatasetConfig, Identity, load_dataset,
@@ -14,6 +17,7 @@ from tilewright.contract import (
 from tilewright.vocabulary import FACETS, check, load_vocabulary, resolve_aliases
 
 META = {"method": ["RIXS"], "data_type": "simulation", "material": "NiPS3"}
+EXAMPLES = Path(__file__).parent.parent / "examples" / "datasets"
 
 
 def files_cfg(**over):
@@ -198,6 +202,19 @@ class TestKeyAndFingerprint:
         raw["source"]["files"]["directory"] = "/data/other"
         b, _ = load_dataset(raw)
         assert source_fingerprint(a) != source_fingerprint(b)
+
+    # Computed on b268731. A contract change must not re-fingerprint an existing YAML: a
+    # changed value here means registered datasets would be refused.
+    GOLDEN = {"batch": "2577590f34841be2", "files": "5dd61ef0e916076d",
+              "files_nexus": "05ba87a48b5c5ce7", "groups": "983ce13fccafbc8e",
+              "table": "fb36ed8c86a417f5"}
+
+    def test_fingerprint_of_every_example_is_pinned(self):
+        found = {}
+        for path in sorted(EXAMPLES.glob("*.yml")):
+            cfg, _ = load_dataset(YAML().load(path.read_text()))
+            found[path.stem] = source_fingerprint(cfg)
+        assert found == self.GOLDEN
 
     def test_fingerprint_uses_the_server_view(self):
         raw = files_cfg()

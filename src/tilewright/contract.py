@@ -264,7 +264,10 @@ class TableSource(_SourceBase):
     )
     id: str = Field(
         min_length=1,
-        description="Column whose value identifies a row; it is the entity's identity.",
+        description="Column whose value identifies a row; it is the entity's identity and "
+        "must be unique across rows. When no column is, add one to the table (system_id "
+        "and tilt joined, say). Changing it re-keys every entity: delete the registered "
+        "dataset, then register again.",
     )
     locator: dict[str, str] = Field(
         default_factory=dict,
