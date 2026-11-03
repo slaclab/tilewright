@@ -180,7 +180,8 @@ def register_main():
         art_df = pd.read_parquet(art_path)
         artifact_rows[dataset_key] = int(art_df["uid"].notna().sum())
         fingerprint = source_fingerprint(cfg)
-        stamped = (pq.read_schema(ent_path).metadata or {}).get(b"fingerprint", b"").decode()
+        schema_md = pq.read_schema(ent_path).metadata or {}
+        stamped = schema_md.get(b"fingerprint", b"").decode()
         if stamped and stamped != fingerprint:
             print(f"\nERROR: the manifests in {ent_path.parent} were generated from a "
                   f"different source block than {config_path} now has. Run\n"
@@ -203,6 +204,10 @@ def register_main():
             ent_df = ent_df.head(args.max_entities)
 
         dataset_metadata = _build_dataset_metadata(cfg)
+        # Which TileWright wrote the manifest (#80); older manifests carry neither key.
+        for k in (b"generator_version", b"generator_commit"):
+            if schema_md.get(k):
+                dataset_metadata[k.decode()] = schema_md[k].decode()
 
         kwargs = {}
         if max_workers is not None:

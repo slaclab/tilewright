@@ -228,3 +228,39 @@ def test_register_sends_float_and_nested_yaml_metadata_as_plain_json(tmp_path, m
     assert dataset_md["beam"] == {"energy_eV": 931.5, "polarization": "sigma"}
     assert type(dataset_md["beam"]) is dict and type(dataset_md["beam"]["energy_eV"]) is float
     assert len(sent) == 3  # the dataset container and both entities were created
+
+
+def test_manifest_and_register_record_which_tilewright_wrote_the_manifest(tmp_path,
+                                                                         monkeypatch, capsys):
+    """#80: the version alone says little before there are releases, so the commit is
+    recorded too. The tests run from a checkout, so it is a commit hash here."""
+    import re
+    from importlib.metadata import version
+
+    import pyarrow.parquet as pq
+
+    from tilewright.cli import _find_manifests
+
+    yaml_path = _keyed_float_dataset(tmp_path)
+    for path in _find_manifests(yaml_path, "FLOAT_META"):
+        md = pq.read_schema(path).metadata
+        assert md[b"generator_version"].decode() == version("tilewright")
+        assert re.fullmatch(r"[0-9a-f]{40}(\+dirty)?", md[b"generator_commit"].decode())
+    client, sent = _serializing_client()
+    _run_register(monkeypatch, yaml_path, client)
+    assert sent[0]["generator_version"] == version("tilewright")
+    assert sent[0]["generator_commit"] == md[b"generator_commit"].decode()
+
+
+def test_generator_commit_is_empty_outside_a_tilewright_checkout(tmp_path, monkeypatch):
+    """A PyPI install in a virtualenv inside some other repository must not record that
+    repository's commit."""
+    import subprocess
+
+    import tilewright.manifest as manifest
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    package = tmp_path / ".venv" / "site-packages" / "tilewright"
+    package.mkdir(parents=True)
+    monkeypatch.setattr(manifest, "__file__", str(package / "manifest.py"))
+    assert manifest._generator_commit() == ""

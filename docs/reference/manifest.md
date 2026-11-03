@@ -41,8 +41,10 @@ One row per entity artifact, plus one row per shared axis.
 ## Schema metadata
 
 Both files carry the same keys in their Parquet schema metadata: `generated_at`,
-`generator`, `key`, `source`, `identity`, `fingerprint`, `config_hash`, `entity_count`,
-`artifact_count`, `shared_count`. `register` compares `fingerprint` with the YAML's before
+`generator`, `generator_version`, `generator_commit`, `key`, `source`, `identity`,
+`fingerprint`, `config_hash`, `entity_count`, `artifact_count`, `shared_count`.
+`generator_commit` is the git commit TileWright ran from, suffixed `+dirty` when its
+source had uncommitted changes, and empty for an install that is not a checkout. `register` compares `fingerprint` with the YAML's before
 it connects, so a manifest generated from a source block the YAML no longer has is refused.
 
 ## Snapshot semantics
@@ -69,4 +71,5 @@ Registration stamps locator keys onto each entity's metadata, one set per artifa
 They make provenance searchable and are what `tilewright.client.locate` reads
 ([How to read a registered catalog](../using-the-catalog.md#read-the-files-directly)).
 The dataset container is stamped with `storage`, `fingerprint`, `registered_at`, `label`,
-and one `shared_dataset_<type>` per shared axis.
+the manifest's `generator_version` and `generator_commit` (when it carries them), and one
+`shared_dataset_<type>` per shared axis.
