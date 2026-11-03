@@ -24,6 +24,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy as np
 import pandas as pd
 import pyarrow as pa
