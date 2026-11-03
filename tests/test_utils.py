@@ -110,4 +110,31 @@ class TestToJsonSafe:
     def test_none_becomes_none(self):
         assert to_json_safe(None) is None
 
+    def test_round_trip_yaml_values_become_plain_types(self):
+        """ruamel's round-trip scalars (ScalarFloat, ...) become builtins, recursively."""
+        import orjson
+        from ruamel.yaml import YAML
+
+        loaded = YAML().load(
+            "f: 1.5\nhex: 0x1F\nflag: &a true\nq: 'x'\nwhen: 2024-01-02\n"
+            "nested: {g: [2.5, {h: 3.5}], t: null}\n")
+        out = to_json_safe(loaded)
+        assert out == {"f": 1.5, "hex": 31, "flag": True, "q": "x", "when": "2024-01-02",
+                       "nested": {"g": [2.5, {"h": 3.5}], "t": None}}
+
+        def types(v):
+            if isinstance(v, dict):
+                return [type(v)] + [t for x in v.values() for t in types(x)]
+            if isinstance(v, list):
+                return [type(v)] + [t for x in v for t in types(x)]
+            return [type(v)]
+
+        assert set(types(out)) <= {dict, list, str, int, float, bool, type(None)}
+        assert orjson.loads(orjson.dumps(out)) == out
+
+    def test_tuples_and_arrays_recurse(self):
+        out = to_json_safe((np.float32(1.5), np.array([np.int64(2)]), {"k": np.bool_(True)}))
+        assert out == [1.5, [2], {"k": True}]
+        assert type(out[0]) is float and type(out[1][0]) is int and out[2]["k"] is True
+
 

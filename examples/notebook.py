@@ -320,6 +320,7 @@ def _(mo):
 @app.cell
 def _(artifact_key, entity, mo, os):
     import h5py
+    import hdf5plugin as _hdf5plugin  # noqa: F401  LZ4, Bitshuffle, ... filters
     from urllib.parse import urlparse
 
     # An externally-registered artifact carries a DataSource, and that
