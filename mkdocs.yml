@@ -2,7 +2,7 @@ site_name: TileWright
 site_description: >-
   Register multi-modal scientific HDF5 datasets into a Tiled catalog, and read
   them back from anywhere.
-site_url: https://slaclab.github.io/TileWright/
+site_url: https://slaclab.github.io/tilewright/
 repo_url: https://github.com/slaclab/TileWright
 repo_name: slaclab/TileWright
 edit_uri: edit/main/docs/

@@ -27,7 +27,7 @@ tilewright = "tilewright.cli:main"
 
 [project.urls]
 Repository = "https://github.com/slaclab/TileWright"
-Documentation = "https://slaclab.github.io/TileWright/"
+Documentation = "https://slaclab.github.io/tilewright/"
 
 [build-system]
 requires = ["hatchling"]
