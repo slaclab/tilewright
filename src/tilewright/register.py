@@ -45,6 +45,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import h5py
+import hdf5plugin  # noqa: F401  registers the filters h5py lacks (LZ4, Bitshuffle, ...)
 import numpy as np
 import pandas as pd
 from dask.array.core import normalize_chunks
@@ -477,6 +478,9 @@ def register_dataset_http(client, ent_df, art_df, base_dir, label,
     art_fail_count = 0
     stale_count = 0
 
+    # Values loaded from a YAML are ruamel subclasses (ScalarFloat, ...), which the
+    # Tiled client cannot serialize; everything below sends plain JSON types.
+    dataset_metadata = to_json_safe(dataset_metadata)
     storage = STORAGE_UPLOADED if upload else STORAGE_EXTERNAL
     parent_client = dataset_container(client, dataset_key, dataset_metadata, storage,
                                       fingerprint, update=update, adopt=adopt)
