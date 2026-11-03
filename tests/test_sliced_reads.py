@@ -3,7 +3,7 @@
 The tests count the elements each h5py read returns, so a whole-row read fails them even
 when the values match.
 
-Run with: uv run --extra test pytest tests/test_read_paths.py -v
+Run with: uv run --extra test pytest tests/test_sliced_reads.py -v
 """
 
 from types import SimpleNamespace
