@@ -106,6 +106,15 @@ class TestFiles:
         _, art = run(tmp_path, cfg, name="ds2")
         assert (art["type"] == "extra").sum() == 1
 
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert {"temperature", "run"} <= set(ent.columns)
+        assert not any(c.startswith(("frames", "spectrum", "energy")) for c in ent.columns)
+
     def test_no_files_match(self, tmp_path):
         cfg = files_dataset(tmp_path)
         cfg["source"]["files"]["pattern"] = "*.nxs"
@@ -219,6 +228,14 @@ class TestGroups:
         cfg["artifacts"] = [{"type": "spectrum", "dataset": "sample_0/spectrum"}]
         ent, art = run(tmp_path, cfg)
         assert list(ent["source_group"]) == ["samples"]
+
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert "tenDq" in ent.columns and not any(c.startswith("frames") for c in ent.columns)
 
     def test_missing_artifact_names_the_group(self, tmp_path):
         cfg = groups_dataset(tmp_path)

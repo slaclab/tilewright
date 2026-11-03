@@ -209,9 +209,10 @@ class FilesSource(_SourceBase):
     )
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
-        description="Where the parameters live in each file; default: 0-dim datasets at "
-        "the root. 'null' declares that entities have no parameters (identity becomes "
-        "provenance).",
+        description="Where the parameters live in each file; default: the root. Only "
+        "scalar datasets are parameters (see 'from'); any other member, a (6,) array say, "
+        "is skipped without a message. 'null' declares that entities have no parameters "
+        "(identity becomes provenance).",
     )
 
 
@@ -247,7 +248,9 @@ class GroupsSource(_SourceBase):
     params: ParamsSpec | None = Field(
         default_factory=ParamsSpec,
         description="Where the parameters live, relative to each entity group; default: "
-        "the entity group's own 0-dim datasets. 'null' declares none.",
+        "the entity group itself. Only scalar datasets are parameters (see 'from'); any "
+        "other member, a (6,) array say, is skipped without a message. 'null' declares "
+        "none.",
     )
 
 
