@@ -1,6 +1,7 @@
 """``tilewright manifest`` against synthetic HDF5: every source tag, parameter reading,
 labels, shared axes, identity, collisions, key stamping and where the output lands."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from tilewright.contract import ContractError
 from tilewright.manifest import generate_manifests, main, manifest_dir
 
 META = {"method": ["INS"], "data_type": "experimental", "material": "NiPS3"}
+
+
+def sha16(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def write_yaml(path, cfg):
@@ -101,6 +106,15 @@ class TestFiles:
         _, art = run(tmp_path, cfg, name="ds2")
         assert (art["type"] == "extra").sum() == 1
 
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = files_dataset(tmp_path)
+        for i in range(3):
+            with h5py.File(tmp_path / "runs" / f"run_{i}.h5", "a") as f:
+                f["frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert {"temperature", "run"} <= set(ent.columns)
+        assert not any(c.startswith(("frames", "spectrum", "energy")) for c in ent.columns)
+
     def test_no_files_match(self, tmp_path):
         cfg = files_dataset(tmp_path)
         cfg["source"]["files"]["pattern"] = "*.nxs"
@@ -152,6 +166,25 @@ class TestBatch:
         with pytest.raises(KeyError, match="shared axis 'nope'"):
             run(tmp_path, cfg)
 
+    def test_params_null_gives_provenance_uids(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        cfg["source"]["batch"]["params"] = None
+        ent, art = run(tmp_path, cfg)
+        assert list(ent.columns) == ["uid"]
+        assert set(ent["uid"]) == {sha16(f"BATCH_TEST:batch_{b}/sim.h5:{i}")
+                                   for b in range(2) for i in range(3)}
+        assert len(art[art["uid"].notna()]) == 6
+
+    def test_only_1d_members_of_length_n_are_parameters(self, tmp_path):
+        cfg = batch_dataset(tmp_path)
+        for b in range(2):
+            with h5py.File(tmp_path / "sim" / f"batch_{b}" / "sim.h5", "a") as f:
+                f["params/column"] = np.zeros((3, 1))
+                f["params/bounds"] = np.zeros((3, 2))
+                f["params/axis"] = np.zeros(4)
+        ent, _ = run(tmp_path, cfg)
+        assert set(ent.columns) == {"uid", "alpha", "beta", "seed"}
+
     def test_artifact_row_mismatch(self, tmp_path):
         cfg = batch_dataset(tmp_path)
         with h5py.File(tmp_path / "sim" / "batch_0" / "sim.h5", "a") as f:
@@ -195,6 +228,14 @@ class TestGroups:
         cfg["artifacts"] = [{"type": "spectrum", "dataset": "sample_0/spectrum"}]
         ent, art = run(tmp_path, cfg)
         assert list(ent["source_group"]) == ["samples"]
+
+    def test_only_scalar_members_are_parameters(self, tmp_path):
+        cfg = groups_dataset(tmp_path)
+        with h5py.File(tmp_path / "grouped" / "samples.h5", "a") as f:
+            for i in range(3):
+                f[f"samples/sample_{i}/params/frames"] = np.zeros(6)
+        ent, _ = run(tmp_path, cfg)
+        assert "tenDq" in ent.columns and not any(c.startswith("frames") for c in ent.columns)
 
     def test_missing_artifact_names_the_group(self, tmp_path):
         cfg = groups_dataset(tmp_path)
