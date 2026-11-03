@@ -23,7 +23,7 @@ entity's parameters as queryable metadata and its arrays served lazily. One YAML
 where the entities come from (`files`, `batch`, `groups` or `table`), what arrays they
 carry, and the facets a reader searches by. Nothing about your science is hardcoded.
 
-**Documentation:** <https://slaclab.github.io/TileWright/>
+**Documentation:** <https://slaclab.github.io/tilewright/>
 
 - [Install](docs/install.md) (Python ≥ 3.11, `uv run tilewright --help`)
 - [Publish a dataset](docs/ONBOARDING.md), with an agent or by hand
